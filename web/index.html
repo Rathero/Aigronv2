@@ -682,7 +682,7 @@ async function renderBattle(){
     </div>
     <button class="btn mag" data-act="prepBattle" ${team.length<1?'disabled':''}>PREPARAR COMBATE — ⚡1</button>
     <div class="panel mt8"><b style="font-size:14px">Estrategia</b>
-      <div class="dim" style="font-size:13px;margin-top:6px">Antes del combate eliges <b>capitán</b> y <b>estancia</b>. En combate: toca una habilidad y luego un <b>enemigo</b> para apuntar (mira ⬆/⬇ de tipo); <b>🛡 guardia</b> protege a tu equipo un turno; con energía de sobra, <b>sobrecarga</b> (⚡⚡) pega ×1.5. ¡El <i>timing</i> y el objetivo deciden!</div></div>`;
+      <div class="dim" style="font-size:13px;margin-top:6px">Antes del combate eliges <b>capitán</b> y <b>estancia</b>. En combate: toca una habilidad y luego un <b>enemigo</b> para apuntar (mira ⬆/⬇ de tipo); <b>🛡️ guardia</b> protege a tu equipo un turno; con energía de sobra, <b>sobrecarga</b> (⚡⚡) pega ×1.5. ¡El <i>timing</i> y el objetivo deciden!</div></div>`;
   renderCanvases($("#s-battle"));
   $("#s-battle").querySelectorAll(".card").forEach(c=>c.onclick=()=>openDetail(c.dataset.iid));
 }
@@ -844,7 +844,7 @@ function renderPlanner(){
     const ready=proj>=ab.cost, canOc=proj>=ab.cost+2;
     const pl=CB.plan[u.uid]||{action:'basic'};
     const tgtName=pl.target?((CB.B.find(x=>x.uid===pl.target)||{}).name||'auto'):'auto';
-    const lbl = pl.action==='guard'?'🛡 Guardia'
+    const lbl = pl.action==='guard'?'🛡️ Guardia'
       : pl.action==='ability'?`✨ ${ab.name}${pl.overcharge?' ⚡⚡':''} → ${tgtName}`
       : `⚔️ Atacar → ${tgtName}`;
     return `<div class="plan-unit ${CB.selecting===u.uid?'sel':''}">
@@ -856,7 +856,7 @@ function renderPlanner(){
       <div class="pu-acts">
         <button class="pa ${pl.action==='attack'?'on':''}" data-act="planSet" data-arg="${u.uid}:attack" title="Atacar">⚔️</button>
         <button class="pa ${pl.action==='ability'?'on':''} ${ready?'':'dis'}" data-act="planSet" data-arg="${u.uid}:ability" title="${ab.name}">✨</button>
-        <button class="pa ${pl.action==='guard'?'on':''}" data-act="planSet" data-arg="${u.uid}:guard" title="Guardia">🛡</button>
+        <button class="pa ${pl.action==='guard'?'on':''}" data-act="planSet" data-arg="${u.uid}:guard" title="Guardia">🛡️</button>
         ${canOc&&pl.action==='ability'?`<button class="pa oc ${pl.overcharge?'on':''}" data-act="planOc" data-arg="${u.uid}" title="Sobrecarga ×1.5">⚡⚡</button>`:''}
       </div>
     </div>`;
@@ -934,11 +934,11 @@ function resolveTick(){
   } else intent=E.aiIntent(CB.rng,u,foes,mine);
   const action=E.performAction(CB.rng,u,intent,mine,foes);
   const who=u.team==='A'?'var(--cyan)':'var(--magenta)';
-  if(action.guard) setBanner(`<span style="color:${who}">${u.name}</span> se protege 🛡`);
+  if(action.guard) setBanner(`<span style="color:${who}">${u.name}</span> se protege 🛡️`);
   else if(action.ability) setBanner(`<span style="color:${who}">${u.name}</span> usa <b style="color:var(--gold)">${action.ability}</b>${action.overcharge?' ⚡⚡×1.5':''}`);
   else setBanner(`<span style="color:${who}">${u.name}</span> ataca`);
   action.hits.forEach(h=>{const t=h.tgt; if(!t.el)return; t.el.classList.remove("hit");void t.el.offsetWidth;t.el.classList.add("hit");
-    floatNum(t,(h.guarded?"🛡":"")+(h.crit?"¡":"")+h.dmg+(h.crit?"!":""),h.crit?"var(--gold)":h.guarded?"var(--cyan)":h.typeM>1?"var(--magenta)":"#fff");});
+    floatNum(t,(h.guarded?"🛡️":"")+(h.crit?"¡":"")+h.dmg+(h.crit?"!":""),h.crit?"var(--gold)":h.guarded?"var(--cyan)":h.typeM>1?"var(--magenta)":"#fff");});
   refreshArena();
   if(!CB.A.some(x=>x.hp>0)||!CB.B.some(x=>x.hp>0)) finishBattle();
 }
@@ -948,7 +948,7 @@ function showCombatTip(){
     <div class="center" style="font-family:var(--pixel);font-size:12px;color:var(--cyan);margin-bottom:10px">CÓMO LUCHAR</div>
     <div style="font-size:13px;line-height:1.6">
       • Combate por <b>rondas</b>. En cada ronda tienes <b>10s</b> para <b>planificar</b> a tus 3 aigrons (o pulsa LISTO).<br>
-      • Por cada uno elige: <b>⚔️ Atacar</b>, <b>✨ Habilidad</b> (si tiene energía) o <b>🛡 Guardia</b>.<br>
+      • Por cada uno elige: <b>⚔️ Atacar</b>, <b>✨ Habilidad</b> (si tiene energía) o <b>🛡️ Guardia</b>.<br>
       • Con ⚔️ o ✨ puedes <b>tocar un enemigo</b> para focalizarlo (mira <span style="color:var(--green)">⬆</span> fuerte / <span style="color:var(--red)">⬇</span> débil por tipo), o se elige solo.<br>
       • <b>⚡</b> = energía (sube 1/ronda). <b>⚡⚡ Sobrecarga</b>: gasta +2⚡ para pegar ×1.5.<br>
       • Pulsa <b>LISTO</b> y la ronda se resuelve animada (actúa antes quien tiene más velocidad).
