@@ -19,9 +19,9 @@ const E = require("../src/config");
       `UPDATE creature_templates SET
          base_hp=$1, base_spd=$2,
          base_atk_p=$3, base_atk_s=$4, base_def_p=$5, base_def_s=$6,
-         base_atk=$3, base_def=$5, lore=$7, type=$8, type2=$9
-       WHERE template_id=$10`,
-      [s.hp, s.spd, s.atkP, s.atkS, s.defP, s.defS, t.lore, t.type, (t.types && t.types[1]) || null, row.template_id]
+         base_atk=$3, base_def=$5, lore=$7, type=$8, type2=$9, ability_id=$10
+       WHERE template_id=$11`,
+      [s.hp, s.spd, s.atkP, s.atkS, s.defP, s.defS, t.lore, t.type, (t.types && t.types[1]) || null, t.ability, row.template_id]
     );
     n++;
   }

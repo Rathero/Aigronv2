@@ -86,18 +86,38 @@
     MARCA_FATAL: { name: "Marca", cost: 2, kind: "mark", amt: 0.3, turns: 3 },
     REGENERAR: { name: "Regenerar", cost: 3, kind: "healTeam", amt: 0.15 },
     SACRIFICIO: { name: "Sacrificio", cost: 4, kind: "dmg", mult: 3.5, selfHp: 0.2 },
+    // --- Habilidades nuevas (reusan efectos del motor) ---
+    TAJO: { name: "Tajo", cost: 3, kind: "dmg", mult: 2.5 },
+    LLAMARADA: { name: "Llamarada", cost: 3, kind: "dmg", mult: 1.9, crit: true },
+    AVALANCHA: { name: "Avalancha", cost: 3, kind: "aoe", mult: 1.2 },
+    CURA_MENOR: { name: "Cura", cost: 2, kind: "heal", amt: 0.18, self: true },
+    ALIENTO: { name: "Aliento", cost: 4, kind: "healTeam", amt: 0.2 },
+    CORAZA: { name: "Coraza", cost: 2, kind: "buffDef", amt: 0.45, turns: 3, self: true },
+    VENENO: { name: "Veneno", cost: 2, kind: "mark", amt: 0.25, turns: 4 },
+    CEGUERA: { name: "Ceguera", cost: 2, kind: "critDown", amt: 0.5, turns: 3 },
   };
+  // 3-4 habilidades por tipo; genTemplate elige una al azar del pool.
   const ABILITY_BY_TYPE = {
-    VOLCAN: ["ERUPCION_LENTA", "FRENESI_BESTIA"], NIEBLA: ["NIEBLA_DENSA", "MARCA_FATAL"],
-    CRISTAL: ["MURO_CRISTAL", "ESCUDO_EQUIPO"], RELOJ: ["ROBO_DE_TIEMPO", "MARCA_FATAL"],
-    VACIO: ["COLAPSO_VACIO", "SACRIFICIO"], BESTIA: ["FRENESI_BESTIA", "SACRIFICIO"],
-    PLANTA: ["RAICES", "REGENERAR"], TORMENTA: ["RAYO", "COLAPSO_VACIO"],
-    METAL: ["MURO_CRISTAL", "ERUPCION_LENTA"], HUESO: ["SACRIFICIO", "MARCA_FATAL"],
-    SOMBRA: ["MARCA_FATAL", "COLAPSO_VACIO"], LUMEN: ["RAYO", "ESCUDO_EQUIPO"],
-    HIELO: ["MURO_CRISTAL", "NIEBLA_DENSA"], MAREA: ["REGENERAR", "COLAPSO_VACIO"],
-    ARENA: ["FRENESI_BESTIA", "MURO_CRISTAL"], TOXICO: ["MARCA_FATAL", "SACRIFICIO"],
-    ECO: ["ROBO_DE_TIEMPO", "RAYO"], RUNA: ["ESCUDO_EQUIPO", "REGENERAR"],
-    PLUMA: ["ROBO_DE_TIEMPO", "RAICES"], HONGO: ["RAICES", "REGENERAR"],
+    VOLCAN: ["ERUPCION_LENTA", "LLAMARADA", "TAJO", "FRENESI_BESTIA"],
+    NIEBLA: ["NIEBLA_DENSA", "CEGUERA", "MARCA_FATAL", "VENENO"],
+    CRISTAL: ["MURO_CRISTAL", "ESCUDO_EQUIPO", "CORAZA", "RAYO"],
+    RELOJ: ["ROBO_DE_TIEMPO", "MARCA_FATAL", "NIEBLA_DENSA", "CEGUERA"],
+    VACIO: ["COLAPSO_VACIO", "SACRIFICIO", "MARCA_FATAL", "AVALANCHA"],
+    BESTIA: ["FRENESI_BESTIA", "SACRIFICIO", "TAJO", "ERUPCION_LENTA"],
+    PLANTA: ["RAICES", "REGENERAR", "CURA_MENOR", "VENENO"],
+    TORMENTA: ["RAYO", "COLAPSO_VACIO", "LLAMARADA", "AVALANCHA"],
+    METAL: ["MURO_CRISTAL", "CORAZA", "TAJO", "ERUPCION_LENTA"],
+    HUESO: ["SACRIFICIO", "MARCA_FATAL", "VENENO", "TAJO"],
+    SOMBRA: ["MARCA_FATAL", "COLAPSO_VACIO", "VENENO", "CEGUERA"],
+    LUMEN: ["RAYO", "ESCUDO_EQUIPO", "REGENERAR", "LLAMARADA"],
+    HIELO: ["MURO_CRISTAL", "NIEBLA_DENSA", "CEGUERA", "CORAZA"],
+    MAREA: ["REGENERAR", "COLAPSO_VACIO", "AVALANCHA", "ALIENTO"],
+    ARENA: ["FRENESI_BESTIA", "MURO_CRISTAL", "TAJO", "CORAZA"],
+    TOXICO: ["MARCA_FATAL", "VENENO", "SACRIFICIO", "CEGUERA"],
+    ECO: ["ROBO_DE_TIEMPO", "RAYO", "AVALANCHA", "LLAMARADA"],
+    RUNA: ["ESCUDO_EQUIPO", "REGENERAR", "ALIENTO", "CORAZA"],
+    PLUMA: ["ROBO_DE_TIEMPO", "RAICES", "RAYO", "CURA_MENOR"],
+    HONGO: ["RAICES", "REGENERAR", "CURA_MENOR", "VENENO"],
   };
 
   // --------------------------------- Economía --------------------------------
@@ -180,7 +200,8 @@
     const types = [type];
     if (rng() < 0.4) { const t2 = TYPES[Math.floor(rng() * TYPES.length)]; if (t2 !== type) types.push(t2); }
     const tags = [ANIMAL[Math.floor(rng() * ANIMAL.length)], PHENO[Math.floor(rng() * PHENO.length)]];
-    const ability = ABILITY_BY_TYPE[type][Math.floor(rng() * 2)];
+    const pool = ABILITY_BY_TYPE[type];
+    const ability = pool[Math.floor(rng() * pool.length)];
     const name = genName(rng);
     const rg = RANGES[rarity];
     const base_stats = {
