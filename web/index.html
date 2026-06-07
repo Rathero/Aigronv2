@@ -160,17 +160,35 @@ h2.title small{font-family:var(--ui);font-size:13px;color:var(--ink-dim);font-we
 .pip.on{background:var(--cyan);box-shadow:0 0 4px var(--cyan)}
 .ability-btns{display:flex;gap:6px;margin-top:8px}
 .ab{flex:1;font-size:11px;padding:6px 4px;border:2px solid var(--line);background:#0a0818;color:var(--ink-dim);cursor:pointer;text-align:center}
-.ab.ready{border-color:var(--gold);color:var(--gold);animation:legpulse 1.2s infinite;cursor:pointer}
+.ab.ready{border-color:var(--gold);animation:legpulse 1.2s infinite;cursor:pointer}
 .ab.ready:active{transform:translateY(2px)}
-.ab.armed{border-color:var(--magenta);color:var(--magenta);box-shadow:0 0 8px rgba(255,77,157,.4)}
-.abunit{flex:1;display:flex;gap:3px}
-.abunit .ab{flex:1}
-.gbtn{width:30px;display:flex;align-items:center;justify-content:center;border:2px solid var(--line);background:#0a0818;color:var(--ink-dim);cursor:pointer;font-size:14px}
+.ab.armed{border-color:var(--magenta);box-shadow:0 0 8px rgba(255,77,157,.5)}
+/* botón de habilidad = su criatura (sprite + nombre + energía) */
+.abunit{flex:1;display:flex;gap:3px;min-width:0}
+.abunit .ab{flex:1;display:flex;align-items:center;gap:5px;padding:5px;text-align:left;min-width:0}
+.ab .ab-spr{width:26px;height:26px;flex:0 0 auto}
+.ab .ab-spr canvas,.ab .ab-spr img{width:26px;height:26px;image-rendering:pixelated;display:block}
+.ab .ab-info{min-width:0;flex:1}
+.ab .ab-nm{font-size:11px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ab .ab-en{font-size:11px;color:var(--ink-dim)}
+.ab.ready .ab-en{color:var(--gold)}
+.abunit-side{display:flex;flex-direction:column;gap:3px}
+.gbtn,.ocbtn{width:28px;height:24px;display:flex;align-items:center;justify-content:center;border:2px solid var(--line);background:#0a0818;color:var(--ink-dim);cursor:pointer;font-size:12px}
 .gbtn.on{border-color:var(--cyan);color:var(--cyan);box-shadow:0 0 6px var(--cyan)}
-.fighter .thint{position:absolute;top:-7px;left:50%;transform:translateX(-50%);font-size:13px;font-weight:700;display:none;z-index:4}
-.fighter.targetable{cursor:pointer;outline:2px dashed var(--cyan);outline-offset:-2px}
+.ocbtn{display:none;font-size:10px}
+.ocbtn.avail{display:flex}
+.ocbtn.on{border-color:var(--gold);color:var(--gold);box-shadow:0 0 6px var(--gold)}
+.fighter .thint{position:absolute;top:-9px;left:50%;transform:translateX(-50%);font-size:16px;font-weight:700;display:none;z-index:4;text-shadow:0 0 4px #000}
+.fighter .hpnum{font-size:10px;color:var(--ink-dim);margin-top:1px}
+.fighter.targetable{cursor:pointer;outline:2px dashed var(--cyan);outline-offset:-2px;animation:legpulse 1s infinite}
 .fighter.guarding{outline:2px solid var(--cyan);outline-offset:-2px;box-shadow:0 0 10px rgba(52,245,228,.5)}
-.targhint{font-size:12px;text-align:center;padding:5px;color:var(--cyan);border:2px dashed var(--cyan);background:#0a0818;margin-bottom:6px}
+.fighter.acting{outline:2px solid var(--gold);outline-offset:-2px;transform:translateY(-3px) scale(1.05);z-index:6}
+.targhint{font-size:13px;text-align:center;padding:6px;color:var(--cyan);border:2px dashed var(--cyan);background:#0a0818;margin-bottom:6px;font-weight:700}
+/* banner de acción + controles de velocidad */
+.action-banner{font-size:13px;text-align:center;padding:7px;border:2px solid var(--line);background:#0a0818;margin-bottom:8px;min-height:32px;font-weight:700}
+.combat-ctrl{display:flex;gap:6px;margin-top:8px}
+.cbtn{flex:1;font-family:var(--ui);font-weight:700;font-size:12px;padding:8px 4px;border:2px solid var(--line);background:#0a0818;color:var(--ink);cursor:pointer}
+.cbtn.on{border-color:var(--cyan);color:var(--cyan)}
 .stances{display:flex;gap:6px}
 .stance{flex:1;text-align:center;padding:8px 4px;border:2px solid var(--line);background:#0a0818;cursor:pointer;font-size:12px;line-height:1.3}
 .stance.on{border-color:var(--gold);color:var(--gold)}
@@ -718,8 +736,7 @@ function startBattle(captain,stance){
         turn:0,order:[],oi:0,armed:{},targeting:null,decisions:[],timer:null,
         initA:d.team,initB:d.opponent,ended:false};
     buildArena();
-    const vs=$(".vs"); if(vs){vs.style.opacity=1;setTimeout(()=>{vs.style.opacity=0;},900);}
-    CB.timer=setInterval(tick,640);
+    beginCombatLoop();
   }).catch(err=>{
     if(err.status===402)toast('Sin energía ⚡');
     else if(err.status===400)toast('Equipo vacío');
@@ -731,12 +748,19 @@ function buildArena(){
      <div class="thint"></div>
      ${artTag(tpl(u.tplId),5)}
      <div class="hpbar"><i style="width:100%"></i></div>
+     <div class="hpnum"></div>
      <div class="fname">${u.name}</div>
      <div class="energy-pips">${'<span class="pip"></span>'.repeat(6)}</div></div>`;
-  const abHTML=(u)=>`<div class="abunit">
-     <div class="ab" id="ab-${u.uid}" data-act="tapAbility" data-arg="${u.uid}">${ABILITIES[u.ability].name}<br><span style="font-size:9px">⚡${ABILITIES[u.ability].cost}</span></div>
-     <div class="gbtn" id="g-${u.uid}" data-act="tapGuard" data-arg="${u.uid}" title="Guardia: protege a tu equipo">🛡</div>
-   </div>`;
+  const abHTML=(u)=>{const ab=ABILITIES[u.ability];return `<div class="abunit">
+     <div class="ab" id="ab-${u.uid}" data-act="tapAbility" data-arg="${u.uid}">
+       <div class="ab-spr">${artTag(tpl(u.tplId),4)}</div>
+       <div class="ab-info"><div class="ab-nm">${ab.name}</div><div class="ab-en" id="aben-${u.uid}">⚡0/${ab.cost}</div></div>
+     </div>
+     <div class="abunit-side">
+       <div class="gbtn" id="g-${u.uid}" data-act="tapGuard" data-arg="${u.uid}" title="Guardia: protege al equipo este turno">🛡</div>
+       <div class="ocbtn" id="oc-${u.uid}" data-act="tapOvercharge" data-arg="${u.uid}" title="Sobrecarga: gasta +2⚡ para ×1.5">⚡⚡</div>
+     </div>
+   </div>`;};
   $("#s-battle").innerHTML=`
     <h2 class="title">COMBATE ${CB.pvp?'<small>PvP</small>':'<small>PvE</small>'}</h2>
     <div class="arena">
@@ -745,12 +769,16 @@ function buildArena(){
       <div style="height:14px"></div>
       <div class="side player-side">${CB.A.map(fHTML).join("")}</div>
     </div>
+    <div class="action-banner" id="abanner">¡Empieza el combate! Toca una habilidad cuando esté dorada.</div>
     <div id="targbar"></div>
     <div class="ability-btns">${CB.A.map(abHTML).join("")}</div>
-    <div class="log" id="log"></div>
-    <button class="btn sm ghost mt8" style="width:100%" data-act="flee">HUIR</button>`;
+    <div class="combat-ctrl">
+      <button class="cbtn" id="cb-speed" data-act="cbSpeed">▶▶ 1x</button>
+      <button class="cbtn" id="cb-pause" data-act="cbPause">⏸ Pausa</button>
+      <button class="cbtn" data-act="flee">🏳 Huir</button>
+    </div>`;
   renderCanvases($("#s-battle"));
-  [...CB.A,...CB.B].forEach(u=>{u.el=$(`.fighter[data-uid="${u.uid}"]`);u.hpEl=u.el.querySelector(".hpbar i");u.pipsEl=u.el.querySelectorAll(".pip");});
+  [...CB.A,...CB.B].forEach(u=>{u.el=$(`.fighter[data-uid="${u.uid}"]`);u.hpEl=u.el.querySelector(".hpbar i");u.hpNumEl=u.el.querySelector(".hpnum");u.pipsEl=u.el.querySelectorAll(".pip");});
   refreshArena();
 }
 function logMsg(m){const l=$("#log");if(!l)return;l.innerHTML+=m+"<br>";l.scrollTop=l.scrollHeight;}
@@ -762,44 +790,54 @@ function refreshArena(){
     if(!u.hpEl)return;
     u.hpEl.style.width=(Math.max(0,u.hp)/u.hpMax*100)+"%";
     u.hpEl.style.background=u.hp/u.hpMax<0.3?"var(--red)":u.hp/u.hpMax<0.6?"var(--gold)":"var(--green)";
+    if(u.hpNumEl) u.hpNumEl.textContent = u.hp<=0?"☠️":(Math.max(0,Math.round(u.hp))+"/"+u.hpMax);
     if(u.hp<=0)u.el.classList.add("dead");
     u.el.classList.toggle("guarding", !!u.guarding && u.hp>0);
     u.pipsEl.forEach((p,i)=>p.classList.toggle("on",i<u.energy));
   });
   CB.A.forEach(u=>{
-    const b=$("#ab-"+u.uid), g=$("#g-"+u.uid); if(!b)return;
+    const b=$("#ab-"+u.uid), g=$("#g-"+u.uid), oc=$("#oc-"+u.uid), en=$("#aben-"+u.uid); if(!b)return;
     const ab=ABILITIES[u.ability]; const ready=u.hp>0&&u.energy>=ab.cost;
     const a=CB.armed[u.uid];
-    const armedAb=a&&a.mode==="ability", oc=armedAb&&a.overcharge;
+    const armedAb=a&&a.mode==="ability";
     b.classList.toggle("ready",ready);
     b.classList.toggle("armed",!!armedAb);
-    const ocTag=u.energy>=ab.cost+2?(oc?' ⚡⚡':' <span style="opacity:.6">+SC</span>'):'';
-    b.innerHTML=(armedAb?"▶ ":"")+ab.name+'<br><span style="font-size:9px">⚡'+ab.cost+ocTag+"</span>";
-    if(u.hp<=0)b.style.opacity=.3;
+    if(en) en.innerHTML=(armedAb?"▶ ":"")+"⚡"+Math.min(u.energy,COMBAT_ENERGY_MAX)+"/"+ab.cost;
+    b.style.opacity=u.hp<=0?.3:1;
     if(g){ g.classList.toggle("on", !!(a&&a.mode==="guard")); g.style.opacity=u.hp<=0?.3:1; }
+    if(oc){ const canOc=u.hp>0&&u.energy>=ab.cost+2; oc.classList.toggle("avail",canOc); oc.classList.toggle("on", !!(armedAb&&a.overcharge)); }
   });
-  // hints de tipo sobre los enemigos cuando estás apuntando
+  // hints de tipo (⬆ fuerte / ⬇ débil) sobre los enemigos al apuntar
   const targ=CB.targeting?CB.A.find(x=>x.uid===CB.targeting):null;
   CB.B.forEach(u=>{ const h=u.el&&u.el.querySelector(".thint"); if(!h)return;
-    if(targ&&u.hp>0){ const m=typeMult(targ.type,u.type); h.textContent=m>1?"⬆":m<1?"⬇":"·";
+    if(targ&&u.hp>0){ const m=typeMult(targ.type,u.type); h.textContent=m>1?"⬆":m<1?"⬇":"•";
       h.style.color=m>1?"var(--green)":m<1?"var(--red)":"var(--ink-dim)"; h.style.display="block"; }
     else h.style.display="none";
     if(u.el) u.el.classList.toggle("targetable", !!(CB.targeting&&u.hp>0));
   });
   const tb=$("#targbar");
   if(tb) tb.innerHTML = CB.targeting
-    ? `<div class="targhint">Apunta: toca un enemigo · <span data-act="autoTarget" style="color:var(--cyan);cursor:pointer">objetivo auto</span></div>` : "";
+    ? `<div class="targhint">🎯 Toca un enemigo para focalizar (o se elige solo) · <span data-act="autoTarget" style="color:var(--gold);cursor:pointer">listo</span></div>` : "";
 }
+function setBanner(html){ const b=$("#abanner"); if(b) b.innerHTML=html; }
 function tapAbility(uid){
   if(!CB)return; const u=CB.A.find(x=>x.uid===uid); if(!u||u.hp<=0)return;
-  const ab=ABILITIES[u.ability]; const cur=CB.armed[uid];
-  if(cur&&cur.mode==="ability"){
-    if(u.energy>=ab.cost+2 && !cur.overcharge){ cur.overcharge=true; }      // 2º toque: sobrecarga
-    else { CB.armed[uid]=null; if(CB.targeting===uid)CB.targeting=null; }    // siguiente: desarmar
-  } else {
+  const cur=CB.armed[uid];
+  if(cur&&cur.mode==="ability"){ CB.armed[uid]=null; if(CB.targeting===uid)CB.targeting=null; } // toca de nuevo = desarmar
+  else {
+    // Armada: lanzará en cuanto tenga energía, a OBJETIVO AUTOMÁTICO. Tocar un
+    // enemigo lo focaliza (opcional).
     CB.armed[uid]={mode:"ability",target:null,overcharge:false};
-    CB.targeting=uid;                                                        // entra en modo apuntado
+    CB.targeting=uid;
   }
+  refreshArena();
+}
+function tapOvercharge(uid){
+  if(!CB)return; const u=CB.A.find(x=>x.uid===uid); if(!u||u.hp<=0)return;
+  const ab=ABILITIES[u.ability]; if(u.energy<ab.cost+2)return; // solo si hay energía de sobra
+  let a=CB.armed[uid];
+  if(!a||a.mode!=="ability"){ a=CB.armed[uid]={mode:"ability",target:null,overcharge:false}; CB.targeting=uid; }
+  a.overcharge=!a.overcharge;
   refreshArena();
 }
 function tapGuard(uid){
@@ -814,7 +852,32 @@ function tapEnemy(uid){
   const a=CB.armed[CB.targeting]; if(a&&a.mode==="ability"){ a.target=uid; }
   CB.targeting=null; refreshArena();
 }
-function autoTarget(){ if(!CB||CB.targeting==null)return; const a=CB.armed[CB.targeting]; if(a)a.target=null; CB.targeting=null; refreshArena(); }
+function autoTarget(){ if(!CB||CB.targeting==null)return; CB.targeting=null; refreshArena(); }
+/* --- ritmo del combate: velocidad, pausa y tip de la 1ª vez --- */
+function startTicker(){ if(!CB)return; if(CB.timer)clearInterval(CB.timer); if(CB.paused)return; CB.timer=setInterval(tick, Math.round((CB.baseMs||700)/(CB.speed||1))); }
+function beginCombatLoop(){
+  CB.speed=1; CB.paused=false; CB.baseMs=700;
+  const vs=$(".vs"); if(vs){vs.style.opacity=1;setTimeout(()=>{vs.style.opacity=0;},900);}
+  if(!localStorage.getItem('aigrons_combat_tip')){ localStorage.setItem('aigrons_combat_tip','1'); CB.paused=true; showCombatTip(); }
+  else startTicker();
+}
+function cbSpeed(){ if(!CB)return; CB.speed=CB.speed===1?2:1; const b=$("#cb-speed"); if(b)b.textContent="▶▶ "+CB.speed+"x"; if(!CB.paused)startTicker(); }
+function cbPause(){ if(!CB)return; CB.paused=!CB.paused; const b=$("#cb-pause"); if(b){ b.textContent=CB.paused?"▶ Seguir":"⏸ Pausa"; b.classList.toggle("on",CB.paused);} if(CB.paused){ if(CB.timer){clearInterval(CB.timer);CB.timer=null;} } else startTicker(); }
+function showCombatTip(){
+  openOverlay(`<div>
+    <div class="center" style="font-family:var(--pixel);font-size:12px;color:var(--cyan);margin-bottom:10px">CÓMO LUCHAR</div>
+    <div style="font-size:13px;line-height:1.6">
+      • Combate <b>automático</b> 3v3: actúa antes quien tiene más velocidad.<br>
+      • Barra verde = <b>HP</b>. Los puntitos ⚡ debajo = <b>energía</b> de combate (sube 1/turno).<br>
+      • Cada aigrón tuyo tiene su <b>botón</b> (con su mini-sprite). Se pone <b style="color:var(--gold)">dorado</b> cuando puede lanzar su habilidad.<br>
+      • Tócalo para <b>armarlo</b> → lanzará en su turno a objetivo automático. Toca un <b>enemigo</b> para focalizar (mira <span style="color:var(--green)">⬆</span> fuerte / <span style="color:var(--red)">⬇</span> débil).<br>
+      • <b>🛡 Guardia</b>: protege a tu equipo un turno. <b>⚡⚡ Sobrecarga</b>: gasta +2⚡ para pegar ×1.5.<br>
+      • Abajo: <b>velocidad</b> (1x/2x) y <b>pausa</b> para pensar.
+    </div>
+    <button class="btn mt8" style="width:100%" data-act="combatTipOk">¡ENTENDIDO!</button>
+  </div>`);
+}
+function combatTipOk(){ closeOverlay(); if(CB){ CB.paused=false; const b=$("#cb-pause"); if(b){b.textContent="⏸ Pausa";b.classList.remove("on");} startTicker(); } }
 function tick(){
   if(!CB||CB.ended)return;
   if(!CB.A.some(u=>u.hp>0)||!CB.B.some(u=>u.hp>0)){ finishBattle(); return; }
@@ -826,6 +889,8 @@ function tick(){
   let u=null;
   while(CB.oi<CB.order.length){ const c=CB.order[CB.oi++]; if(c.hp>0){u=c;break;} }
   if(!u) return; // turno agotado; el siguiente tick abre turno nuevo
+  [...CB.A,...CB.B].forEach(x=>x.el&&x.el.classList.remove("acting"));
+  if(u.el) u.el.classList.add("acting"); // resalta quién actúa
   E.decBuffs(u);
   u.energy=Math.min(COMBAT_ENERGY_MAX,u.energy+1);
   const mine=u.team==='A'?CB.A:CB.B, foes=u.team==='A'?CB.B:CB.A;
@@ -841,8 +906,10 @@ function tick(){
     if(intent.type==='guard'){ CB.decisions.push({turn:CB.turn,uid:u.uid,action:'guard'}); CB.armed[u.uid]=null; }
     else if(intent.type==='ability'&&action.ability){ CB.decisions.push({turn:CB.turn,uid:u.uid,action:'ability',target:intent.target,overcharge:action.overcharge}); CB.armed[u.uid]=null; if(CB.targeting===u.uid)CB.targeting=null; }
   }
-  if(action.guard) logMsg(`<span style="color:var(--cyan)">${u.name} se pone en 🛡 GUARDIA</span>`);
-  else if(action.ability) logMsg(`<span style="color:var(--gold)">${u.name} usa ${action.ability}${action.overcharge?' ⚡⚡':''}</span>`);
+  const who=u.team==='A'?'var(--cyan)':'var(--magenta)';
+  if(action.guard) setBanner(`<span style="color:${who}">${u.name}</span> se protege 🛡`);
+  else if(action.ability) setBanner(`<span style="color:${who}">${u.name}</span> usa <b style="color:var(--gold)">${action.ability}</b>${action.overcharge?' ⚡⚡×1.5':''}`);
+  else setBanner(`<span style="color:${who}">${u.name}</span> ataca`);
   action.hits.forEach(h=>{const t=h.tgt; if(!t.el)return; t.el.classList.remove("hit");void t.el.offsetWidth;t.el.classList.add("hit");
     floatNum(t,(h.guarded?"🛡":"")+(h.crit?"¡":"")+h.dmg+(h.crit?"!":""),h.crit?"var(--gold)":h.guarded?"var(--cyan)":h.typeM>1?"var(--magenta)":"#fff");});
   refreshArena();
@@ -977,8 +1044,7 @@ function dgFight(){
   $("#s-battle").classList.add("active");
   document.querySelectorAll(".nav button").forEach(x=>x.classList.toggle("on",x.dataset.screen==='dungeon'));
   buildArena();
-  const vs=$(".vs"); if(vs){vs.style.opacity=1;setTimeout(()=>{vs.style.opacity=0;},900);}
-  CB.timer=setInterval(tick,640);
+  beginCombatLoop();
 }
 function showDungeonResult(r){
   const win=r.win; let extra='';
@@ -1073,7 +1139,9 @@ const ACTIONS={
   tapAbility:(a)=>tapAbility(a),
   tapGuard:(a)=>tapGuard(a),
   tapEnemy:(a)=>tapEnemy(a),
+  tapOvercharge:(a)=>tapOvercharge(a),
   autoTarget:()=>autoTarget(),
+  cbSpeed:()=>cbSpeed(), cbPause:()=>cbPause(), combatTipOk:()=>combatTipOk(),
   flee:()=>flee(),
   continueBattle:()=>{closeOverlay();renderBattle();},
   setRank:(a)=>setRank(a),
