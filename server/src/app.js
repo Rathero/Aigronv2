@@ -577,7 +577,8 @@ app.use((err, req, res, next) => {
 const PORT = process.env.PORT || 3000;
 let server;
 if (require.main === module) {
-  server = app.listen(PORT, () => console.log(`AIGRONS API en http://localhost:${PORT}  (frontend servido en /)`));
+  // Escuchar en 0.0.0.0 (requisito de Railway/PaaS para que el proxy llegue a la app).
+  server = app.listen(PORT, "0.0.0.0", () => console.log(`AIGRONS API escuchando en 0.0.0.0:${PORT} (frontend en /)`));
   startCron(generateDailyBatch, DAILY_N);
 
   // Apagado ordenado: deja de aceptar, cierra el pool.
