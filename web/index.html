@@ -189,6 +189,22 @@ h2.title small{font-family:var(--ui);font-size:13px;color:var(--ink-dim);font-we
 .combat-ctrl{display:flex;gap:6px;margin-top:8px}
 .cbtn{flex:1;font-family:var(--ui);font-weight:700;font-size:12px;padding:8px 4px;border:2px solid var(--line);background:#0a0818;color:var(--ink);cursor:pointer}
 .cbtn.on{border-color:var(--cyan);color:var(--cyan)}
+/* planificador por rondas */
+.plan-head{display:flex;align-items:center;gap:8px;margin-bottom:6px;font-size:13px}
+.plan-timer{flex:1;height:8px;background:#0a0818;border:1px solid var(--line);overflow:hidden}
+.plan-timer i{display:block;height:100%;background:var(--gold);transition:width .12s linear}
+.plan-unit{display:flex;align-items:center;gap:8px;border:2px solid var(--line);background:var(--panel);padding:6px;margin-bottom:6px}
+.plan-unit.sel{border-color:var(--cyan);box-shadow:0 0 8px rgba(52,245,228,.4)}
+.plan-unit .pu-spr{width:30px;height:30px;flex:0 0 auto}
+.plan-unit .pu-spr canvas,.plan-unit .pu-spr img{width:30px;height:30px;image-rendering:pixelated;display:block}
+.plan-unit .pu-body{flex:1;min-width:0}
+.plan-unit .pu-nm{font-size:12px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.plan-unit .pu-lbl{font-size:11px;color:var(--ink-dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.plan-unit .pu-acts{display:flex;gap:3px;flex:0 0 auto}
+.pa{width:30px;height:30px;display:flex;align-items:center;justify-content:center;border:2px solid var(--line);background:#0a0818;cursor:pointer;font-size:13px}
+.pa.on{border-color:var(--cyan);box-shadow:0 0 6px var(--cyan)}
+.pa.oc.on{border-color:var(--gold);box-shadow:0 0 6px var(--gold)}
+.pa.dis{opacity:.3;pointer-events:none}
 .stances{display:flex;gap:6px}
 .stance{flex:1;text-align:center;padding:8px 4px;border:2px solid var(--line);background:#0a0818;cursor:pointer;font-size:12px;line-height:1.3}
 .stance.on{border-color:var(--gold);color:var(--gold)}
@@ -733,10 +749,10 @@ function startBattle(captain,stance){
     const A=d.team.map((s,i)=>mkUnit(s,'A',i));
     const B=d.opponent.map((s,i)=>mkUnit(s,'B',i));
     CB={A,B,seed:d.seed|0,battleId:d.battleId,pvp:d.pvp,rng:mulberry32(d.seed>>>0),
-        turn:0,order:[],oi:0,armed:{},targeting:null,decisions:[],timer:null,
+        turn:0,order:[],oi:0,plan:{},planTurn:0,selecting:null,phase:'plan',speed:1,decisions:[],timer:null,planTimer:null,
         initA:d.team,initB:d.opponent,ended:false};
     buildArena();
-    beginCombatLoop();
+    startCombat();
   }).catch(err=>{
     if(err.status===402)toast('Sin energía ⚡');
     else if(err.status===400)toast('Equipo vacío');
@@ -744,23 +760,13 @@ function startBattle(captain,stance){
   });
 }
 function buildArena(){
-  const fHTML=(u)=>`<div class="fighter ${u.team==='B'?'enemy':''}" data-uid="${u.uid}" ${u.team==='B'?`data-act="tapEnemy" data-arg="${u.uid}"`:''}>
+  const fHTML=(u)=>`<div class="fighter ${u.team==='B'?'enemy':''}" data-uid="${u.uid}" ${u.team==='B'?`data-act="planEnemy" data-arg="${u.uid}"`:''}>
      <div class="thint"></div>
      ${artTag(tpl(u.tplId),5)}
      <div class="hpbar"><i style="width:100%"></i></div>
      <div class="hpnum"></div>
      <div class="fname">${u.name}</div>
      <div class="energy-pips">${'<span class="pip"></span>'.repeat(6)}</div></div>`;
-  const abHTML=(u)=>{const ab=ABILITIES[u.ability];return `<div class="abunit">
-     <div class="ab" id="ab-${u.uid}" data-act="tapAbility" data-arg="${u.uid}">
-       <div class="ab-spr">${artTag(tpl(u.tplId),4)}</div>
-       <div class="ab-info"><div class="ab-nm">${ab.name}</div><div class="ab-en" id="aben-${u.uid}">⚡0/${ab.cost}</div></div>
-     </div>
-     <div class="abunit-side">
-       <div class="gbtn" id="g-${u.uid}" data-act="tapGuard" data-arg="${u.uid}" title="Guardia: protege al equipo este turno">🛡</div>
-       <div class="ocbtn" id="oc-${u.uid}" data-act="tapOvercharge" data-arg="${u.uid}" title="Sobrecarga: gasta +2⚡ para ×1.5">⚡⚡</div>
-     </div>
-   </div>`;};
   $("#s-battle").innerHTML=`
     <h2 class="title">COMBATE ${CB.pvp?'<small>PvP</small>':'<small>PvE</small>'}</h2>
     <div class="arena">
@@ -769,12 +775,10 @@ function buildArena(){
       <div style="height:14px"></div>
       <div class="side player-side">${CB.A.map(fHTML).join("")}</div>
     </div>
-    <div class="action-banner" id="abanner">¡Empieza el combate! Toca una habilidad cuando esté dorada.</div>
-    <div id="targbar"></div>
-    <div class="ability-btns">${CB.A.map(abHTML).join("")}</div>
+    <div class="action-banner" id="abanner">¡Empieza el combate!</div>
+    <div id="planner"></div>
     <div class="combat-ctrl">
       <button class="cbtn" id="cb-speed" data-act="cbSpeed">▶▶ 1x</button>
-      <button class="cbtn" id="cb-pause" data-act="cbPause">⏸ Pausa</button>
       <button class="cbtn" data-act="flee">🏳 Huir</button>
     </div>`;
   renderCanvases($("#s-battle"));
@@ -786,6 +790,7 @@ function floatNum(u,txt,color){const s=document.createElement("span");s.classNam
   s.style.color=color;s.style.left="50%";s.style.top="0";s.style.transform="translateX(-50%)";u.el.appendChild(s);setTimeout(()=>s.remove(),1000);}
 const sumHp=arr=>arr.reduce((s,u)=>s+Math.max(0,u.hp),0);
 function refreshArena(){
+  if(!CB)return;
   [...CB.A,...CB.B].forEach(u=>{
     if(!u.hpEl)return;
     u.hpEl.style.width=(Math.max(0,u.hp)/u.hpMax*100)+"%";
@@ -795,117 +800,139 @@ function refreshArena(){
     u.el.classList.toggle("guarding", !!u.guarding && u.hp>0);
     u.pipsEl.forEach((p,i)=>p.classList.toggle("on",i<u.energy));
   });
-  CB.A.forEach(u=>{
-    const b=$("#ab-"+u.uid), g=$("#g-"+u.uid), oc=$("#oc-"+u.uid), en=$("#aben-"+u.uid); if(!b)return;
-    const ab=ABILITIES[u.ability]; const ready=u.hp>0&&u.energy>=ab.cost;
-    const a=CB.armed[u.uid];
-    const armedAb=a&&a.mode==="ability";
-    b.classList.toggle("ready",ready);
-    b.classList.toggle("armed",!!armedAb);
-    if(en) en.innerHTML=(armedAb?"▶ ":"")+"⚡"+Math.min(u.energy,COMBAT_ENERGY_MAX)+"/"+ab.cost;
-    b.style.opacity=u.hp<=0?.3:1;
-    if(g){ g.classList.toggle("on", !!(a&&a.mode==="guard")); g.style.opacity=u.hp<=0?.3:1; }
-    if(oc){ const canOc=u.hp>0&&u.energy>=ab.cost+2; oc.classList.toggle("avail",canOc); oc.classList.toggle("on", !!(armedAb&&a.overcharge)); }
-  });
-  // hints de tipo (⬆ fuerte / ⬇ débil) sobre los enemigos al apuntar
-  const targ=CB.targeting?CB.A.find(x=>x.uid===CB.targeting):null;
+  // hints de tipo (⬆ fuerte / ⬇ débil) en enemigos al elegir objetivo en la planificación
+  const sel=CB.selecting?CB.A.find(x=>x.uid===CB.selecting):null;
   CB.B.forEach(u=>{ const h=u.el&&u.el.querySelector(".thint"); if(!h)return;
-    if(targ&&u.hp>0){ const m=typeMult(targ.type,u.type); h.textContent=m>1?"⬆":m<1?"⬇":"•";
+    if(sel&&u.hp>0){ const m=typeMult(sel.type,u.type); h.textContent=m>1?"⬆":m<1?"⬇":"•";
       h.style.color=m>1?"var(--green)":m<1?"var(--red)":"var(--ink-dim)"; h.style.display="block"; }
     else h.style.display="none";
-    if(u.el) u.el.classList.toggle("targetable", !!(CB.targeting&&u.hp>0));
+    if(u.el) u.el.classList.toggle("targetable", !!(CB.selecting&&u.hp>0));
   });
-  const tb=$("#targbar");
-  if(tb) tb.innerHTML = CB.targeting
-    ? `<div class="targhint">🎯 Toca un enemigo para focalizar (o se elige solo) · <span data-act="autoTarget" style="color:var(--gold);cursor:pointer">listo</span></div>` : "";
 }
 function setBanner(html){ const b=$("#abanner"); if(b) b.innerHTML=html; }
-function tapAbility(uid){
-  if(!CB)return; const u=CB.A.find(x=>x.uid===uid); if(!u||u.hp<=0)return;
-  const cur=CB.armed[uid];
-  if(cur&&cur.mode==="ability"){ CB.armed[uid]=null; if(CB.targeting===uid)CB.targeting=null; } // toca de nuevo = desarmar
-  else {
-    // Armada: lanzará en cuanto tenga energía, a OBJETIVO AUTOMÁTICO. Tocar un
-    // enemigo lo focaliza (opcional).
-    CB.armed[uid]={mode:"ability",target:null,overcharge:false};
-    CB.targeting=uid;
-  }
+/* ===== COMBATE POR RONDAS: planificas (10s) y luego se resuelve ===== */
+function startCombat(){
+  CB.speed=1;
+  const vs=$(".vs"); if(vs){vs.style.opacity=1;setTimeout(()=>{vs.style.opacity=0;},800);}
+  if(!localStorage.getItem('aigrons_combat_tip')){ localStorage.setItem('aigrons_combat_tip','1'); showCombatTip(); return; }
+  planTurn();
+}
+// Fase de PLANIFICACIÓN: eliges acción de tus 3 aigrons para la ronda.
+function planTurn(){
+  if(!CB||CB.ended)return;
+  if(CB.timer){clearInterval(CB.timer);CB.timer=null;}
+  CB.phase='plan'; CB.planTurn=CB.turn+1; CB.selecting=null;
+  CB.plan={}; CB.A.forEach(u=>{ if(u.hp>0) CB.plan[u.uid]={action:'basic',target:null,overcharge:false}; });
+  [...CB.A,...CB.B].forEach(x=>x.el&&x.el.classList.remove("acting"));
+  renderPlanner();
+  CB.planEndsAt=Date.now()+10000;
+  if(CB.planTimer)clearInterval(CB.planTimer);
+  CB.planTimer=setInterval(planTimerTick,100);
+}
+function planTimerTick(){
+  if(!CB||CB.phase!=='plan'){ if(CB&&CB.planTimer){clearInterval(CB.planTimer);CB.planTimer=null;} return; }
+  const left=CB.planEndsAt-Date.now();
+  const bar=$("#plan-bar"); if(bar) bar.style.width=Math.max(0,Math.min(100,left/10000*100))+"%";
+  if(left<=0) confirmPlan();
+}
+function renderPlanner(){
+  const p=$("#planner"); if(!p)return;
+  setBanner(`Ronda ${CB.planTurn} · planifica tus aigrons`);
+  const rows=CB.A.filter(u=>u.hp>0).map(u=>{
+    const ab=ABILITIES[u.ability];
+    const proj=Math.min(COMBAT_ENERGY_MAX,u.energy+1);
+    const ready=proj>=ab.cost, canOc=proj>=ab.cost+2;
+    const pl=CB.plan[u.uid]||{action:'basic'};
+    const tgtName=pl.target?((CB.B.find(x=>x.uid===pl.target)||{}).name||'auto'):'auto';
+    const lbl = pl.action==='guard'?'🛡 Guardia'
+      : pl.action==='ability'?`✨ ${ab.name}${pl.overcharge?' ⚡⚡':''} → ${tgtName}`
+      : `⚔️ Atacar → ${tgtName}`;
+    return `<div class="plan-unit ${CB.selecting===u.uid?'sel':''}">
+      <div class="pu-spr">${artTag(tpl(u.tplId),4)}</div>
+      <div class="pu-body">
+        <div class="pu-nm">${u.name} <span class="dim" style="font-size:10px">⚡${proj}/${ab.cost}</span></div>
+        <div class="pu-lbl">${lbl}</div>
+      </div>
+      <div class="pu-acts">
+        <button class="pa ${pl.action==='attack'?'on':''}" data-act="planSet" data-arg="${u.uid}:attack" title="Atacar">⚔️</button>
+        <button class="pa ${pl.action==='ability'?'on':''} ${ready?'':'dis'}" data-act="planSet" data-arg="${u.uid}:ability" title="${ab.name}">✨</button>
+        <button class="pa ${pl.action==='guard'?'on':''}" data-act="planSet" data-arg="${u.uid}:guard" title="Guardia">🛡</button>
+        ${canOc&&pl.action==='ability'?`<button class="pa oc ${pl.overcharge?'on':''}" data-act="planOc" data-arg="${u.uid}" title="Sobrecarga ×1.5">⚡⚡</button>`:''}
+      </div>
+    </div>`;
+  }).join("");
+  p.innerHTML=`<div class="plan-head"><b>RONDA ${CB.planTurn}</b><div class="plan-timer"><i id="plan-bar" style="width:100%"></i></div></div>
+    ${rows}
+    ${CB.selecting?`<div class="targhint">🎯 Toca un enemigo para <b>${(CB.A.find(x=>x.uid===CB.selecting)||{}).name}</b> · <span data-act="planAuto" style="color:var(--gold);cursor:pointer">auto</span></div>`:'<div class="dim tc" style="font-size:11px;margin:4px 0">Elige acción de cada aigrón. ⚔️/✨ puedes tocar un enemigo para focalizar.</div>'}
+    <button class="btn mag mt8" style="width:100%" data-act="confirmPlan">LISTO ▶</button>`;
+  renderCanvases(p);
   refreshArena();
 }
-function tapOvercharge(uid){
-  if(!CB)return; const u=CB.A.find(x=>x.uid===uid); if(!u||u.hp<=0)return;
-  const ab=ABILITIES[u.ability]; if(u.energy<ab.cost+2)return; // solo si hay energía de sobra
-  let a=CB.armed[uid];
-  if(!a||a.mode!=="ability"){ a=CB.armed[uid]={mode:"ability",target:null,overcharge:false}; CB.targeting=uid; }
-  a.overcharge=!a.overcharge;
-  refreshArena();
+function planSet(arg){
+  if(!CB||CB.phase!=='plan')return;
+  const i=arg.indexOf(':'); const uid=arg.slice(0,i), action=arg.slice(i+1);
+  const u=CB.A.find(x=>x.uid===uid); if(!u||u.hp<=0)return;
+  const ab=ABILITIES[u.ability], proj=Math.min(COMBAT_ENERGY_MAX,u.energy+1);
+  if(action==='ability'&&proj<ab.cost){ toast('Sin energía aún para '+ab.name); return; }
+  const pl=CB.plan[uid]; pl.action=action;
+  if(action==='guard'){ pl.target=null; pl.overcharge=false; CB.selecting=null; }
+  else { CB.selecting=uid; } // atacar/habilidad -> opcional elegir objetivo
+  renderPlanner();
 }
-function tapGuard(uid){
-  if(!CB)return; const u=CB.A.find(x=>x.uid===uid); if(!u||u.hp<=0)return;
-  const cur=CB.armed[uid];
-  if(cur&&cur.mode==="guard"){ CB.armed[uid]=null; }
-  else { CB.armed[uid]={mode:"guard"}; if(CB.targeting===uid)CB.targeting=null; }
-  refreshArena();
+function planOc(uid){
+  if(!CB||CB.phase!=='plan')return; const u=CB.A.find(x=>x.uid===uid); if(!u)return;
+  const ab=ABILITIES[u.ability]; const pl=CB.plan[uid];
+  if(pl.action!=='ability'||Math.min(COMBAT_ENERGY_MAX,u.energy+1)<ab.cost+2)return;
+  pl.overcharge=!pl.overcharge; renderPlanner();
 }
-function tapEnemy(uid){
-  if(!CB||CB.targeting==null)return;
-  const a=CB.armed[CB.targeting]; if(a&&a.mode==="ability"){ a.target=uid; }
-  CB.targeting=null; refreshArena();
+function planEnemy(uid){
+  if(!CB||CB.phase!=='plan'||!CB.selecting)return;
+  const pl=CB.plan[CB.selecting]; if(pl&&(pl.action==='attack'||pl.action==='ability')) pl.target=uid;
+  CB.selecting=null; renderPlanner();
 }
-function autoTarget(){ if(!CB||CB.targeting==null)return; CB.targeting=null; refreshArena(); }
-/* --- ritmo del combate: velocidad, pausa y tip de la 1ª vez --- */
-function startTicker(){ if(!CB)return; if(CB.timer)clearInterval(CB.timer); if(CB.paused)return; CB.timer=setInterval(tick, Math.round((CB.baseMs||700)/(CB.speed||1))); }
-function beginCombatLoop(){
-  CB.speed=1; CB.paused=false; CB.baseMs=700;
-  const vs=$(".vs"); if(vs){vs.style.opacity=1;setTimeout(()=>{vs.style.opacity=0;},900);}
-  if(!localStorage.getItem('aigrons_combat_tip')){ localStorage.setItem('aigrons_combat_tip','1'); CB.paused=true; showCombatTip(); }
-  else startTicker();
+function planAuto(){ if(!CB||!CB.selecting)return; const pl=CB.plan[CB.selecting]; if(pl)pl.target=null; CB.selecting=null; renderPlanner(); }
+function confirmPlan(){
+  if(!CB||CB.phase!=='plan')return;
+  if(CB.planTimer){clearInterval(CB.planTimer);CB.planTimer=null;}
+  Object.keys(CB.plan).forEach(uid=>{ const pl=CB.plan[uid];
+    if(pl.action==='guard') CB.decisions.push({turn:CB.planTurn,uid,action:'guard'});
+    else if(pl.action==='ability') CB.decisions.push({turn:CB.planTurn,uid,action:'ability',target:pl.target||undefined,overcharge:!!pl.overcharge});
+    else if(pl.action==='attack'&&pl.target) CB.decisions.push({turn:CB.planTurn,uid,action:'attack',target:pl.target});
+  });
+  CB.phase='resolve'; CB.selecting=null;
+  const p=$("#planner"); if(p) p.innerHTML='';
+  resolveTurn();
 }
-function cbSpeed(){ if(!CB)return; CB.speed=CB.speed===1?2:1; const b=$("#cb-speed"); if(b)b.textContent="▶▶ "+CB.speed+"x"; if(!CB.paused)startTicker(); }
-function cbPause(){ if(!CB)return; CB.paused=!CB.paused; const b=$("#cb-pause"); if(b){ b.textContent=CB.paused?"▶ Seguir":"⏸ Pausa"; b.classList.toggle("on",CB.paused);} if(CB.paused){ if(CB.timer){clearInterval(CB.timer);CB.timer=null;} } else startTicker(); }
-function showCombatTip(){
-  openOverlay(`<div>
-    <div class="center" style="font-family:var(--pixel);font-size:12px;color:var(--cyan);margin-bottom:10px">CÓMO LUCHAR</div>
-    <div style="font-size:13px;line-height:1.6">
-      • Combate <b>automático</b> 3v3: actúa antes quien tiene más velocidad.<br>
-      • Barra verde = <b>HP</b>. Los puntitos ⚡ debajo = <b>energía</b> de combate (sube 1/turno).<br>
-      • Cada aigrón tuyo tiene su <b>botón</b> (con su mini-sprite). Se pone <b style="color:var(--gold)">dorado</b> cuando puede lanzar su habilidad.<br>
-      • Tócalo para <b>armarlo</b> → lanzará en su turno a objetivo automático. Toca un <b>enemigo</b> para focalizar (mira <span style="color:var(--green)">⬆</span> fuerte / <span style="color:var(--red)">⬇</span> débil).<br>
-      • <b>🛡 Guardia</b>: protege a tu equipo un turno. <b>⚡⚡ Sobrecarga</b>: gasta +2⚡ para pegar ×1.5.<br>
-      • Abajo: <b>velocidad</b> (1x/2x) y <b>pausa</b> para pensar.
-    </div>
-    <button class="btn mt8" style="width:100%" data-act="combatTipOk">¡ENTENDIDO!</button>
-  </div>`);
-}
-function combatTipOk(){ closeOverlay(); if(CB){ CB.paused=false; const b=$("#cb-pause"); if(b){b.textContent="⏸ Pausa";b.classList.remove("on");} startTicker(); } }
-function tick(){
+// Fase de RESOLUCIÓN: anima la ronda (todos actúan por velocidad), luego vuelve a planificar.
+function resolveTurn(){ if(CB.timer)clearInterval(CB.timer); CB.timer=setInterval(resolveTick, Math.round(560/(CB.speed||1))); }
+function resolveTick(){
   if(!CB||CB.ended)return;
   if(!CB.A.some(u=>u.hp>0)||!CB.B.some(u=>u.hp>0)){ finishBattle(); return; }
   if(CB.oi>=CB.order.length){
-    CB.turn++;
-    if(CB.turn>TURNS_MAX){ finishBattle(); return; }
-    CB.order=E.turnOrder(CB.A,CB.B); CB.oi=0;
+    if(CB.turn>=CB.planTurn){ // la ronda planificada terminó -> a planificar de nuevo
+      if(CB.timer){clearInterval(CB.timer);CB.timer=null;}
+      if(CB.turn>=TURNS_MAX){ finishBattle(); return; }
+      planTurn(); return;
+    }
+    CB.turn++; CB.order=E.turnOrder(CB.A,CB.B); CB.oi=0;
   }
   let u=null;
   while(CB.oi<CB.order.length){ const c=CB.order[CB.oi++]; if(c.hp>0){u=c;break;} }
-  if(!u) return; // turno agotado; el siguiente tick abre turno nuevo
+  if(!u) return;
   [...CB.A,...CB.B].forEach(x=>x.el&&x.el.classList.remove("acting"));
-  if(u.el) u.el.classList.add("acting"); // resalta quién actúa
+  if(u.el) u.el.classList.add("acting");
   E.decBuffs(u);
   u.energy=Math.min(COMBAT_ENERGY_MAX,u.energy+1);
   const mine=u.team==='A'?CB.A:CB.B, foes=u.team==='A'?CB.B:CB.A;
   let intent;
   if(u.team==='A'){
-    const a=CB.armed[u.uid];
-    if(a&&a.mode==='guard') intent={type:'guard'};
-    else if(a&&a.mode==='ability'&&u.energy>=ABILITIES[u.ability].cost) intent={type:'ability',target:a.target,overcharge:!!a.overcharge};
+    const pl=CB.plan[u.uid];
+    if(pl&&pl.action==='guard') intent={type:'guard'};
+    else if(pl&&pl.action==='ability'&&u.energy>=ABILITIES[u.ability].cost) intent={type:'ability',target:pl.target,overcharge:!!pl.overcharge};
+    else if(pl&&pl.action==='attack') intent={type:'basic',target:pl.target};
     else intent={type:'basic'};
   } else intent=E.aiIntent(CB.rng,u,foes,mine);
   const action=E.performAction(CB.rng,u,intent,mine,foes);
-  if(u.team==='A'){
-    if(intent.type==='guard'){ CB.decisions.push({turn:CB.turn,uid:u.uid,action:'guard'}); CB.armed[u.uid]=null; }
-    else if(intent.type==='ability'&&action.ability){ CB.decisions.push({turn:CB.turn,uid:u.uid,action:'ability',target:intent.target,overcharge:action.overcharge}); CB.armed[u.uid]=null; if(CB.targeting===u.uid)CB.targeting=null; }
-  }
   const who=u.team==='A'?'var(--cyan)':'var(--magenta)';
   if(action.guard) setBanner(`<span style="color:${who}">${u.name}</span> se protege 🛡`);
   else if(action.ability) setBanner(`<span style="color:${who}">${u.name}</span> usa <b style="color:var(--gold)">${action.ability}</b>${action.overcharge?' ⚡⚡×1.5':''}`);
@@ -915,9 +942,25 @@ function tick(){
   refreshArena();
   if(!CB.A.some(x=>x.hp>0)||!CB.B.some(x=>x.hp>0)) finishBattle();
 }
+function cbSpeed(){ if(!CB)return; CB.speed=CB.speed===1?2:1; const b=$("#cb-speed"); if(b)b.textContent="▶▶ "+CB.speed+"x"; if(CB.phase==='resolve'&&CB.timer)resolveTurn(); }
+function showCombatTip(){
+  openOverlay(`<div>
+    <div class="center" style="font-family:var(--pixel);font-size:12px;color:var(--cyan);margin-bottom:10px">CÓMO LUCHAR</div>
+    <div style="font-size:13px;line-height:1.6">
+      • Combate por <b>rondas</b>. En cada ronda tienes <b>10s</b> para <b>planificar</b> a tus 3 aigrons (o pulsa LISTO).<br>
+      • Por cada uno elige: <b>⚔️ Atacar</b>, <b>✨ Habilidad</b> (si tiene energía) o <b>🛡 Guardia</b>.<br>
+      • Con ⚔️ o ✨ puedes <b>tocar un enemigo</b> para focalizarlo (mira <span style="color:var(--green)">⬆</span> fuerte / <span style="color:var(--red)">⬇</span> débil por tipo), o se elige solo.<br>
+      • <b>⚡</b> = energía (sube 1/ronda). <b>⚡⚡ Sobrecarga</b>: gasta +2⚡ para pegar ×1.5.<br>
+      • Pulsa <b>LISTO</b> y la ronda se resuelve animada (actúa antes quien tiene más velocidad).
+    </div>
+    <button class="btn mt8" style="width:100%" data-act="combatTipOk">¡ENTENDIDO!</button>
+  </div>`);
+}
+function combatTipOk(){ closeOverlay(); planTurn(); }
 function finishBattle(){
   if(!CB||CB.ended)return; CB.ended=true;
   if(CB.timer){clearInterval(CB.timer);CB.timer=null;}
+  if(CB.planTimer){clearInterval(CB.planTimer);CB.planTimer=null;}
   // Self-check (dev): recomputar con el motor y comparar con la animación.
   try{
     const A2=CB.initA.map((s,i)=>E.unitFromStats(s,'A',i));
@@ -954,7 +997,7 @@ function showResult(r){
      <button class="btn mt8" data-act="continueBattle">CONTINUAR</button>
    </div>`);
 }
-function flee(){if(CB&&CB.timer)clearInterval(CB.timer);CB=null;renderBattle();}
+function flee(){if(CB){if(CB.timer)clearInterval(CB.timer);if(CB.planTimer)clearInterval(CB.planTimer);}CB=null;renderBattle();}
 
 /* ====================== MAZMORRA (roguelike) ====================== */
 let D=null;
@@ -1038,13 +1081,13 @@ function dgFight(){
   const A=b.team.map((s,i)=>E.unitFromStats(s,'A',i)); E.applyRelics(A,b.relics); A.forEach((u,i)=>u.hp=Math.min(u.hpMax,b.team[i].hp));
   const B=b.enemy.map((s,i)=>E.unitFromStats(s,'B',i));
   CB={A,B,seed:b.battleSeed|0,mode:'dungeon',pvp:false,rng:mulberry32(b.battleSeed>>>0),
-      turn:0,order:[],oi:0,armed:{},targeting:null,decisions:[],timer:null,
+      turn:0,order:[],oi:0,plan:{},planTurn:0,selecting:null,phase:'plan',speed:1,decisions:[],timer:null,planTimer:null,
       initA:b.team,initB:b.enemy,relics:b.relics,ended:false};
   document.querySelectorAll(".screen").forEach(s=>s.classList.remove("active"));
   $("#s-battle").classList.add("active");
   document.querySelectorAll(".nav button").forEach(x=>x.classList.toggle("on",x.dataset.screen==='dungeon'));
   buildArena();
-  beginCombatLoop();
+  startCombat();
 }
 function showDungeonResult(r){
   const win=r.win; let extra='';
@@ -1136,12 +1179,12 @@ const ACTIONS={
   prepBattle:()=>prepBattle(),
   goBattle:()=>goBattle(),
   saveTeam:()=>saveTeam(),
-  tapAbility:(a)=>tapAbility(a),
-  tapGuard:(a)=>tapGuard(a),
-  tapEnemy:(a)=>tapEnemy(a),
-  tapOvercharge:(a)=>tapOvercharge(a),
-  autoTarget:()=>autoTarget(),
-  cbSpeed:()=>cbSpeed(), cbPause:()=>cbPause(), combatTipOk:()=>combatTipOk(),
+  planSet:(a)=>planSet(a),
+  planOc:(a)=>planOc(a),
+  planEnemy:(a)=>planEnemy(a),
+  planAuto:()=>planAuto(),
+  confirmPlan:()=>confirmPlan(),
+  cbSpeed:()=>cbSpeed(), combatTipOk:()=>combatTipOk(),
   flee:()=>flee(),
   continueBattle:()=>{closeOverlay();renderBattle();},
   setRank:(a)=>setRank(a),

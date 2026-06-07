@@ -164,7 +164,7 @@ async function resolveCombat(userId, decisions) {
   const safe = (Array.isArray(decisions) ? decisions : [])
     .filter((d) => d && Number.isInteger(d.turn) && typeof d.uid === "string" && d.uid[0] === "A")
     .slice(0, 600)
-    .map((d) => ({ turn: d.turn, uid: d.uid, action: d.action === "guard" ? "guard" : "ability", target: typeof d.target === "string" ? d.target : undefined, overcharge: !!d.overcharge }));
+    .map((d) => ({ turn: d.turn, uid: d.uid, action: d.action === "guard" ? "guard" : d.action === "attack" ? "attack" : "ability", target: typeof d.target === "string" ? d.target : undefined, overcharge: !!d.overcharge }));
 
   const A = buildPlayerUnits(s);
   const B = s.pending.enemy.map((e, i) => E.unitFromStats(e, "B", i));

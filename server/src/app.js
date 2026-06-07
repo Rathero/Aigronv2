@@ -411,7 +411,7 @@ app.post("/battle/resolve", authMiddleware, wrap(async (req, res) => {
     .map((d) => ({
       turn: d.turn,
       uid: d.uid,
-      action: d.action === "guard" ? "guard" : "ability",
+      action: d.action === "guard" ? "guard" : d.action === "attack" ? "attack" : "ability",
       target: typeof d.target === "string" ? d.target : undefined,
       overcharge: !!d.overcharge,
     }));

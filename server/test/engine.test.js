@@ -167,6 +167,18 @@ test("combate determinista con decisiones ricas (objetivo+guardia+sobrecarga)", 
   assert.deepEqual({ w: r1.winner, t: r1.turns, a: r1.hpA, b: r1.hpB }, { w: r2.winner, t: r2.turns, a: r2.hpA, b: r2.hpB });
 });
 
+test("ataque básico focalizado (acción 'attack') pega al objetivo elegido", () => {
+  const att = E.buildUnit(dmgTpl, 5, "A", 0);
+  const foes = [E.buildUnit(tgtTpl, 5, "B", 0), E.buildUnit(tgtTpl, 5, "B", 1), E.buildUnit(tgtTpl, 5, "B", 2)];
+  const a = E.performAction(() => 0.99, att, { type: "basic", target: "B1" }, [att], foes);
+  assert.equal(a.hits[0].tgt.uid, "B1", "el básico focalizado golpea a B1");
+  // determinismo de resolveBattle con decisiones 'attack'
+  const dec = [{ turn: 1, uid: "A0", action: "attack", target: "B2" }, { turn: 2, uid: "A1", action: "attack", target: "B0" }];
+  const r1 = E.resolveBattle(freshTeams(7, 6).A, freshTeams(7, 6).B, 7, dec);
+  const r2 = E.resolveBattle(freshTeams(7, 6).A, freshTeams(7, 6).B, 7, dec);
+  assert.deepEqual({ w: r1.winner, t: r1.turns, b: r1.hpB }, { w: r2.winner, t: r2.turns, b: r2.hpB });
+});
+
 // ------------------------------ roguelike ----------------------------------
 test("applyRelics hornea stats y rellena mods", () => {
   const team = () => [E.buildUnit(dmgTpl, 5, "A", 0), E.buildUnit(tgtTpl, 5, "A", 1)];

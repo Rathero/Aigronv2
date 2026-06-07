@@ -391,6 +391,7 @@
           const d = dmap.get(turn + ":" + u.uid);
           if (!d) intent = { type: "basic" };
           else if (d.action === "guard") intent = { type: "guard" };
+          else if (d.action === "attack") intent = { type: "basic", target: d.target }; // básico focalizado
           else intent = { type: "ability", target: d.target, overcharge: !!d.overcharge };
         } else {
           intent = aiIntent(rng, u, foes, mine);
