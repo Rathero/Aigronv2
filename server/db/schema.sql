@@ -50,6 +50,7 @@ ALTER TABLE creature_templates ADD COLUMN IF NOT EXISTS base_atk_p INT;
 ALTER TABLE creature_templates ADD COLUMN IF NOT EXISTS base_atk_s INT;
 ALTER TABLE creature_templates ADD COLUMN IF NOT EXISTS base_def_p INT;
 ALTER TABLE creature_templates ADD COLUMN IF NOT EXISTS base_def_s INT;
+ALTER TABLE creature_templates ADD COLUMN IF NOT EXISTS type2 TEXT;  -- segundo tipo (opcional)
 
 CREATE TABLE IF NOT EXISTS creature_instances (
   instance_id    UUID PRIMARY KEY DEFAULT gen_random_uuid(),

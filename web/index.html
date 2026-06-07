@@ -356,7 +356,19 @@ const PAL = {
   VACIO:["#1b0a33","#5b1f96","#a45cff","#ff8af0"],
   BESTIA:["#3a2412","#7a4a23","#c79a5e","#ffe6b0"],
   PLANTA:["#0d3d1a","#2c8f3a","#79e06a","#e6ffba"],
-  TORMENTA:["#0a2150","#2552c9","#5fa8ff","#ffe45e"]
+  TORMENTA:["#0a2150","#2552c9","#5fa8ff","#ffe45e"],
+  METAL:["#2a2e35","#6b7280","#aeb6c2","#e8edf5"],
+  HUESO:["#3a352a","#8a7e63","#cabfa0","#f3ead0"],
+  SOMBRA:["#0a0a14","#2a1f3d","#5a3f7a","#9a6fd0"],
+  LUMEN:["#5a4a10","#c9a82a","#ffe57a","#fffbe0"],
+  HIELO:["#0a3a4d","#2a9fc9","#9fe8ff","#ffffff"],
+  MAREA:["#06283d","#1f6fb6","#4fb0ff","#bfe9ff"],
+  ARENA:["#5a4520","#b08a3a","#e6c879","#fff0c0"],
+  TOXICO:["#243d0a","#6fa01f","#b6ff3e","#eaff9a"],
+  ECO:["#0a2a33","#1f7a96","#5cc4ff","#9af0ff"],
+  RUNA:["#0a2a2a","#1f7a7a","#5cc9c9","#9affff"],
+  PLUMA:["#3a2a40","#8a6fae","#c7aee0","#f0e6ff"],
+  HONGO:["#3a1a2a","#8a3f5a","#c76f8e","#ffb0c0"]
 };
 
 /* ---------------- Generador de sprite pixel-art (determinista) ---------------- */
@@ -440,6 +452,10 @@ function artTag(t,px){
   if(t&&t.image_url) return `<img class="aigimg" src="${t.image_url}" alt="${t.name||''}">`;
   return `<canvas data-aig="${t.id}" data-px="${px}"></canvas>`;
 }
+/* tipos de una plantilla (1 o 2) */
+function tplTypes(t){ return (t&&t.types&&t.types.length)?t.types:[t&&t.type].filter(Boolean); }
+function typesLabel(t){ return tplTypes(t).join(" / "); }
+function typePills(t){ return tplTypes(t).map(ty=>`<span class="type-pill">${ty}</span>`).join(" "); }
 
 /* ---------------- Capa de API ---------------- */
 const API_BASE = (location.protocol==='file:') ? (localStorage.getItem('aigrons_api')||'http://localhost:3000') : '';
@@ -518,7 +534,7 @@ function abilityDesc(id){const a=ABILITIES[id];return `${a.name} · ⚡${a.cost}
 function cardHTML(inst,extra){const t=inst.template;return `<div class="card r-${t.rarity}" data-iid="${inst.instance_id}">
   <div class="lv">L${inst.level}</div>${inst.favorite?'<div class="fav">★</div>':''}${extra||""}
   ${artTag(t,6)}
-  <div class="nm">${t.name}</div><div class="ty rar-txt ${t.rarity}">${t.type}</div></div>`;}
+  <div class="nm">${t.name}</div><div class="ty rar-txt ${t.rarity}">${typesLabel(t)}</div></div>`;}
 function tplCardHTML(t){return `<div class="card r-${t.rarity}">
   ${artTag(t,5)}
   <div class="nm">${t.name}</div><div class="ty rar-txt ${t.rarity}">${t.rarity}</div></div>`;}
@@ -598,7 +614,7 @@ async function doClaim(){
         <div style="font-family:var(--pixel);font-size:11px;color:var(--cyan);margin-bottom:8px">¡HA NACIDO!</div>
         ${artTag(t,11)}
         <div style="font-size:20px;font-weight:700;margin-top:6px">${t.name}</div>
-        <div class="mb8"><span class="type-pill">${t.type}</span> <span class="rar-txt ${t.rarity}" style="font-weight:700">${t.rarity}</span></div>
+        <div class="mb8">${typePills(t)} <span class="rar-txt ${t.rarity}" style="font-weight:700">${t.rarity}</span></div>
         <div class="dim" style="font-size:13px;margin-bottom:10px">"${t.lore}"</div>
         <div style="text-align:left;max-width:220px;margin:0 auto 12px">${statBars(t.base_stats)}</div>
         <button class="btn" data-act="toCollection">A LA COLECCIÓN</button>
@@ -634,7 +650,7 @@ function openDetail(iid){
   openOverlay(`<div class="center">
     ${artTag(t,9)}
     <div style="font-size:20px;font-weight:700;margin-top:4px">${t.name} <span class="dim" style="font-size:13px">Nv.${inst.level}</span></div>
-    <div class="mb8"><span class="type-pill">${t.type}</span> <span class="rar-txt ${t.rarity}" style="font-weight:700">${t.rarity}</span>
+    <div class="mb8">${typePills(t)} <span class="rar-txt ${t.rarity}" style="font-weight:700">${t.rarity}</span>
       <span class="dim" style="font-size:11px"> · ${ENGINE.isPhysical(t.type)?'⚔️ Físico':'✨ Especial'}</span></div>
     <div class="dim" style="font-size:11px;margin-bottom:8px">${ENGINE.isPhysical(t.type)?'Ataca con su <b>ATK Físico</b> contra la <b>DEF Física</b> del rival.':'Ataca con su <b>ATK Especial</b> contra la <b>DEF Especial</b> del rival.'}</div>
     <div class="dim" style="font-size:13px;margin-bottom:8px">"${t.lore}"</div>
@@ -691,7 +707,7 @@ async function doFusion(a,b){
        <div style="font-family:var(--pixel);font-size:11px;color:var(--magenta);margin-bottom:8px">¡FUSIÓN!</div>
        ${artTag(t,11)}
        <div style="font-size:19px;font-weight:700;margin-top:6px">${t.name}</div>
-       <div class="mb8"><span class="rar-txt ${t.rarity}" style="font-weight:700">${t.rarity} · ${t.type}</span></div>
+       <div class="mb8"><span class="rar-txt ${t.rarity}" style="font-weight:700">${t.rarity} · ${typesLabel(t)}</span></div>
        <div style="text-align:left;max-width:220px;margin:0 auto 12px">${statBars(t.base_stats)}</div>
        <button class="btn" data-act="toCollection">¡GENIAL!</button></div></div>`);
   }catch(e){ const er=e.data&&e.data.error; toast(er==='insufficient'?'Te faltan monedas':er==='in_team'?'Hay uno en tu equipo':er==='locked'?'Hay uno protegido':'No se pudo fusionar'); }
@@ -833,7 +849,7 @@ function refreshArena(){
   // hints de tipo (⬆ fuerte / ⬇ débil) en enemigos al elegir objetivo en la planificación
   const sel=CB.selecting?CB.A.find(x=>x.uid===CB.selecting):null;
   CB.B.forEach(u=>{ const h=u.el&&u.el.querySelector(".thint"); if(!h)return;
-    if(sel&&u.hp>0){ const m=typeMult(sel.type,u.type); h.textContent=m>1?"⬆":m<1?"⬇":"•";
+    if(sel&&u.hp>0){ const m=ENGINE.typeEff(sel.type,ENGINE.typesOf(u)); h.textContent=m>1?"⬆":m<1?"⬇":"•";
       h.style.color=m>1?"var(--green)":m<1?"var(--red)":"var(--ink-dim)"; h.style.display="block"; }
     else h.style.display="none";
     if(u.el) u.el.classList.toggle("targetable", !!(CB.selecting&&u.hp>0));
@@ -1178,7 +1194,7 @@ async function shopRoll(){
     openOverlay(`<div class="center reveal" style="position:relative">${rays}<div style="position:relative;z-index:2">
        ${artTag(t,10)}
        <div style="font-size:19px;font-weight:700;margin-top:6px">${t.name}</div>
-       <div class="mb8"><span class="rar-txt ${t.rarity}" style="font-weight:700">${t.rarity} · ${t.type}</span></div>
+       <div class="mb8"><span class="rar-txt ${t.rarity}" style="font-weight:700">${t.rarity} · ${typesLabel(t)}</span></div>
        <button class="btn" data-act="toCollection">¡GENIAL!</button></div></div>`);
   }catch(e){ const er=e.data&&e.data.error; toast(er==='daily_cap'?'Límite diario (10)':er==='insufficient'?'Te faltan monedas':'No se pudo'); }
 }

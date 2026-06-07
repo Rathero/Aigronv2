@@ -14,4 +14,9 @@ function tplBaseStats(r) {
   };
 }
 
-module.exports = { tplBaseStats };
+// Tipos de una plantilla como array [primario, (secundario)].
+function tplTypes(r) {
+  return r.type2 ? [r.type, r.type2] : [r.type];
+}
+
+module.exports = { tplBaseStats, tplTypes };

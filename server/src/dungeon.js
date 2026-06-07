@@ -18,7 +18,7 @@ const COMBAT_KINDS = ["COMBATE", "ELITE", "JEFE"];
 // --------------------------------- helpers ----------------------------------
 function memberFromUnit(u) {
   return {
-    tplId: u.tplId, name: u.name, type: u.type, ability: u.ability, level: u.level,
+    tplId: u.tplId, name: u.name, type: u.type, types: u.types, ability: u.ability, level: u.level,
     base: { hpMax: u.hpMax, atkP: u.atkP, atkS: u.atkS, defP: u.defP, defS: u.defS, spd: u.spd },
     hp: u.hpMax, dead: false,
   };
@@ -35,7 +35,7 @@ function healTeam(state, frac) {
   });
 }
 function memberStats(m) {
-  return { tplId: m.tplId, name: m.name, type: m.type, ability: m.ability, level: m.level,
+  return { tplId: m.tplId, name: m.name, type: m.type, types: m.types, ability: m.ability, level: m.level,
     hpMax: m.base.hpMax, atkP: m.base.atkP, atkS: m.base.atkS, defP: m.base.defP, defS: m.base.defS, spd: m.base.spd, hp: m.hp };
 }
 // Construye el equipo A de combate desde el estado (reliquias aplicadas, HP arrastrado).
@@ -51,7 +51,7 @@ function buildPlayerUnits(state) {
   return A;
 }
 function publicEnemyStats(u) {
-  return { tplId: u.tplId, name: u.name, type: u.type, ability: u.ability, level: u.level,
+  return { tplId: u.tplId, name: u.name, type: u.type, types: u.types, ability: u.ability, level: u.level,
     hpMax: u.hpMax, atkP: u.atkP, atkS: u.atkS, defP: u.defP, defS: u.defS, spd: u.spd };
 }
 function battleSeedFor(seed, node) { return E.hashStr("dgnbattle:" + seed + ":" + node) >>> 1; }

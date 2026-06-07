@@ -20,7 +20,7 @@ const { generateDailyBatch } = require("./jobs/generateDailyBatch");
 const { startCron } = require("./cron");
 const { fuse } = require("./fusion");
 const dungeon = require("./dungeon");
-const { tplBaseStats } = require("./util");
+const { tplBaseStats, tplTypes } = require("./util");
 
 const app = express();
 app.set("trust proxy", 1); // detrás de proxy/CDN: IP real para rate limiting
@@ -71,11 +71,11 @@ async function todayTemplates() {
   const date = C.todayStr();
   await ensureDailyBatch(date);
   const r = await db.query(
-    "SELECT template_id,name,type,rarity,ability_id,base_hp,base_atk,base_def,base_spd,base_atk_p,base_atk_s,base_def_p,base_def_s,art_seed,lore,image_url,image_thumb_url FROM creature_templates WHERE batch_date=$1 AND is_fusion=false ORDER BY template_id",
+    "SELECT template_id,name,type,type2,rarity,ability_id,base_hp,base_atk,base_def,base_spd,base_atk_p,base_atk_s,base_def_p,base_def_s,art_seed,lore,image_url,image_thumb_url FROM creature_templates WHERE batch_date=$1 AND is_fusion=false ORDER BY template_id",
     [date]
   );
   return r.rows.map((x) => ({
-    id: x.template_id, name: x.name, type: x.type, rarity: x.rarity, ability: x.ability_id,
+    id: x.template_id, name: x.name, type: x.type, types: tplTypes(x), rarity: x.rarity, ability: x.ability_id,
     art_seed: x.art_seed, lore: x.lore, image_url: x.image_url, image_thumb_url: x.image_thumb_url,
     base_stats: tplBaseStats(x),
   }));
@@ -148,7 +148,7 @@ async function buildTeamUnits(userId) {
   }
   if (!slots.length) return [];
   const inst = await db.query(
-    `SELECT ci.instance_id, ci.level, t.template_id, t.name, t.type, t.ability_id,
+    `SELECT ci.instance_id, ci.level, t.template_id, t.name, t.type, t.type2, t.ability_id,
             t.base_hp, t.base_atk, t.base_def, t.base_spd, t.base_atk_p, t.base_atk_s, t.base_def_p, t.base_def_s
        FROM creature_instances ci JOIN creature_templates t ON t.template_id = ci.template_id
       WHERE ci.instance_id = ANY($1::uuid[])`,
@@ -157,7 +157,7 @@ async function buildTeamUnits(userId) {
   const byId = {}; inst.rows.forEach((r) => (byId[r.instance_id] = r));
   return slots.map((iid, i) => {
     const r = byId[iid]; if (!r) return null;
-    const tplLike = { id: r.template_id, name: r.name, type: r.type, ability: r.ability_id, base_stats: tplBaseStats(r) };
+    const tplLike = { id: r.template_id, name: r.name, type: r.type, types: tplTypes(r), ability: r.ability_id, base_stats: tplBaseStats(r) };
     const u = combat.buildUnit(tplLike, r.level, "A", i);
     u.instanceId = iid; // para mapear el capitán elegido a su uid de combate
     return u;
@@ -165,7 +165,7 @@ async function buildTeamUnits(userId) {
 }
 const teamAvgLevel = (units) => units.length ? Math.round(units.reduce((a, u) => a + (u.level || 1), 0) / units.length) : 3;
 function publicUnit(u) {
-  return { uid: u.uid, tplId: u.tplId, name: u.name, type: u.type, ability: u.ability, level: u.level,
+  return { uid: u.uid, tplId: u.tplId, name: u.name, type: u.type, types: u.types, ability: u.ability, level: u.level,
     hpMax: u.hpMax, atkP: u.atkP, atkS: u.atkS, defP: u.defP, defS: u.defS, spd: u.spd, startEnergy: u.startEnergy || 0 };
 }
 
@@ -256,7 +256,7 @@ app.post("/missions/claim", authMiddleware, wrap(async (req, res) => {
 app.get("/collection", authMiddleware, wrap(async (req, res) => {
   const r = await db.query(
     `SELECT ci.instance_id, ci.level, ci.xp, ci.favorite, ci.locked, ci.obtained_at,
-            t.template_id, t.name, t.type, t.rarity, t.ability_id, t.lore, t.art_seed,
+            t.template_id, t.name, t.type, t.type2, t.rarity, t.ability_id, t.lore, t.art_seed,
             t.base_hp, t.base_atk, t.base_def, t.base_spd, t.base_atk_p, t.base_atk_s, t.base_def_p, t.base_def_s,
             t.image_url, t.image_thumb_url
        FROM creature_instances ci JOIN creature_templates t ON t.template_id=ci.template_id
@@ -268,7 +268,7 @@ app.get("/collection", authMiddleware, wrap(async (req, res) => {
     return {
       instance_id: x.instance_id, level: x.level, favorite: x.favorite, locked: x.locked,
       template: {
-        id: x.template_id, name: x.name, type: x.type, rarity: x.rarity, ability: x.ability_id,
+        id: x.template_id, name: x.name, type: x.type, types: tplTypes(x), rarity: x.rarity, ability: x.ability_id,
         lore: x.lore, art_seed: x.art_seed, image_url: x.image_url, image_thumb_url: x.image_thumb_url,
         base_stats: b,
         stats: { hp: C.scaled(b.hp, x.level), atkP: C.scaled(b.atkP, x.level), atkS: C.scaled(b.atkS, x.level),
@@ -343,7 +343,7 @@ async function opponentFromSnapshot(snapshot) {
   // snapshot: [{template_id, level}]
   const ids = snapshot.map((s) => s.template_id);
   const r = await db.query(
-    "SELECT template_id, name, type, ability_id, base_hp, base_atk, base_def, base_spd, base_atk_p, base_atk_s, base_def_p, base_def_s FROM creature_templates WHERE template_id = ANY($1)",
+    "SELECT template_id, name, type, type2, ability_id, base_hp, base_atk, base_def, base_spd, base_atk_p, base_atk_s, base_def_p, base_def_s FROM creature_templates WHERE template_id = ANY($1)",
     [ids]
   );
   const byId = {}; r.rows.forEach((x) => (byId[x.template_id] = x));
@@ -351,7 +351,7 @@ async function opponentFromSnapshot(snapshot) {
   snapshot.forEach((s, i) => {
     const t = byId[s.template_id];
     if (!t) return;
-    const tplLike = { id: t.template_id, name: t.name, type: t.type, ability: t.ability_id, base_stats: tplBaseStats(t) };
+    const tplLike = { id: t.template_id, name: t.name, type: t.type, types: tplTypes(t), ability: t.ability_id, base_stats: tplBaseStats(t) };
     out.push(combat.buildUnit(tplLike, s.level, "B", out.length));
   });
   return out;

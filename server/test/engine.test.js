@@ -94,10 +94,35 @@ test("umbrales de liga", () => {
   assert.equal(E.computeLeague(700), "DIAMANTE");
 });
 
-test("tabla de efectividad de tipos", () => {
-  assert.equal(E.typeMult("VOLCAN", "PLANTA"), 1.5);
-  assert.equal(E.typeMult("PLANTA", "VOLCAN"), 0.75);
-  assert.equal(E.typeMult("VOLCAN", "RELOJ"), 1.0);
+test("20 tipos en anillo: cada uno fuerte vs los 2 siguientes, débil vs los 2 anteriores", () => {
+  assert.equal(E.TYPES.length, 20, "20 tipos");
+  E.TYPES.forEach((t, i) => {
+    const next1 = E.TYPES[(i + 1) % 20], next2 = E.TYPES[(i + 2) % 20];
+    const prev1 = E.TYPES[(i + 19) % 20], prev2 = E.TYPES[(i + 18) % 20];
+    assert.equal(E.typeMult(t, next1), 1.5);
+    assert.equal(E.typeMult(t, next2), 1.5);
+    assert.equal(E.typeMult(t, prev1), 0.75);
+    assert.equal(E.typeMult(t, prev2), 0.75);
+  });
+});
+
+test("efectividad dual (typeEff): producto contra ambos tipos del defensor", () => {
+  const a = E.TYPES[0]; // fuerte vs TYPES[1] y TYPES[2]
+  assert.equal(E.typeEff(a, [E.TYPES[1]]), 1.5);
+  assert.equal(E.typeEff(a, [E.TYPES[1], E.TYPES[2]]), 1.5 * 1.5); // doblemente débil
+  assert.equal(E.typeEff(a, [E.TYPES[1], E.TYPES[18]]), 1.5 * 0.75); // fuerte vs uno, débil vs otro
+  assert.equal(E.typeEff(a, [E.TYPES[5]]), 1.0); // neutro
+});
+
+test("generación: las criaturas tienen 1 o 2 tipos y aparecen ambos casos", () => {
+  let singles = 0, duals = 0;
+  for (let i = 0; i < 500; i++) {
+    const t = E.genTemplate("typ_" + i);
+    assert.ok(t.types.length === 1 || t.types.length === 2, "1 o 2 tipos");
+    assert.ok(E.TYPES.includes(t.types[0]));
+    if (t.types.length === 2) { assert.notEqual(t.types[0], t.types[1], "tipos distintos"); duals++; } else singles++;
+  }
+  assert.ok(singles > 0 && duals > 0, `mezcla de simples (${singles}) y dobles (${duals})`);
 });
 
 // --------------------------- mecánicas estratégicas -------------------------

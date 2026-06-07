@@ -15,7 +15,7 @@ const path = require("path");
 const E = require("../../web/engine.js");
 const db = require("./db");
 const { getImageProvider, buildImagePrompt } = require("./ai/imageProvider");
-const { tplBaseStats } = require("./util");
+const { tplBaseStats, tplTypes } = require("./util");
 
 // Carga el arte local de un padre (web/art) como imagen de referencia para la
 // fusión visual. Devuelve {mimeType,data(base64)} o null si no es local/falla.
@@ -56,7 +56,13 @@ async function getOrCreateFusionTemplate(tA, tB) {
 
   const majorRarity = RANK[tA.rarity] >= RANK[tB.rarity] ? tA.rarity : tB.rarity;
   const rarity = resultRarity(rng, majorRarity);
+  // Tipo(s): primario 50/50 de cada padre; 45% un segundo tipo de la unión de ambos.
   const type = rng() < 0.5 ? tA.type : tB.type;
+  const types = [type];
+  if (rng() < 0.45) {
+    const pool = [...new Set([...tplTypes(tA), ...tplTypes(tB)])].filter((t) => t !== type);
+    if (pool.length) types.push(pool[Math.floor(rng() * pool.length)]);
+  }
   const ability =
     tA.rarity === tB.rarity ? (rng() < 0.5 ? tA.ability_id : tB.ability_id)
       : RANK[tA.rarity] > RANK[tB.rarity] ? tA.ability_id : tB.ability_id;
@@ -107,12 +113,12 @@ async function getOrCreateFusionTemplate(tA, tB) {
 
   await db.query(
     `INSERT INTO creature_templates
-       (template_id, batch_date, name, species_tags, type, rarity,
+       (template_id, batch_date, name, species_tags, type, type2, rarity,
         base_hp, base_atk, base_def, base_spd, base_atk_p, base_atk_s, base_def_p, base_def_s,
         ability_id, lore, image_url, image_thumb_url, art_seed, quality_score, is_fusion)
-     VALUES ($1, CURRENT_DATE, $2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,true)
+     VALUES ($1, CURRENT_DATE, $2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,true)
      ON CONFLICT (template_id) DO NOTHING`,
-    [templateId, name, tags, type, rarity,
+    [templateId, name, tags, type, types[1] || null, rarity,
      base.hp, base.atkP, base.defP, base.spd, base.atkP, base.atkS, base.defP, base.defS,
      ability, lore, art && art.image_url, art && art.image_thumb_url, seed, art ? art.quality_score : 1.0]
   );
@@ -175,9 +181,9 @@ async function fuse(userId, aId, bId) {
       instance: {
         instance_id: ins.rows[0].instance_id, level: ins.rows[0].level,
         template: {
-          id: tpl.template_id, name: tpl.name, type: tpl.type, rarity: tpl.rarity, ability: tpl.ability_id,
+          id: tpl.template_id, name: tpl.name, type: tpl.type, types: tplTypes(tpl), rarity: tpl.rarity, ability: tpl.ability_id,
           lore: tpl.lore, art_seed: tpl.art_seed, image_url: tpl.image_url,
-          base_stats: { hp: tpl.base_hp, atk: tpl.base_atk, def: tpl.base_def, spd: tpl.base_spd },
+          base_stats: tplBaseStats(tpl),
         },
       },
     };

@@ -67,13 +67,13 @@ async function generateDailyBatch(date, n) {
 
     const r = await db.query(
       `INSERT INTO creature_templates
-         (template_id, batch_date, name, species_tags, type, rarity,
+         (template_id, batch_date, name, species_tags, type, type2, rarity,
           base_hp, base_atk, base_def, base_spd, base_atk_p, base_atk_s, base_def_p, base_def_s,
           ability_id, lore, image_url, image_thumb_url, art_seed, quality_score)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)
        ON CONFLICT (template_id) DO NOTHING`,
       [
-        t.id, date, t.name, t.tags, t.type, t.rarity,
+        t.id, date, t.name, t.tags, t.type, (t.types && t.types[1]) || null, t.rarity,
         s.hp, s.atkP, s.defP, s.spd,  // base_atk/base_def (legacy) = físico, para compatibilidad
         s.atkP, s.atkS, s.defP, s.defS,
         t.ability, t.lore,

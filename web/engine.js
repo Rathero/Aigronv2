@@ -23,18 +23,31 @@
   "use strict";
 
   // --------------------------- Tipos y efectividad ---------------------------
-  const TYPES = ["VOLCAN", "NIEBLA", "CRISTAL", "RELOJ", "VACIO", "BESTIA", "PLANTA", "TORMENTA"];
+  // 20 tipos. Las criaturas pueden tener 1 o 2 (ver genTemplate).
+  const TYPES = [
+    "VOLCAN", "NIEBLA", "CRISTAL", "RELOJ", "VACIO", "BESTIA", "PLANTA", "TORMENTA",
+    "METAL", "HUESO", "SOMBRA", "LUMEN", "HIELO", "MAREA", "ARENA", "TOXICO",
+    "ECO", "RUNA", "PLUMA", "HONGO",
+  ];
 
-  const STRONG = {
-    VOLCAN: ["PLANTA", "CRISTAL"], NIEBLA: ["VOLCAN", "TORMENTA"], CRISTAL: ["TORMENTA", "RELOJ"],
-    RELOJ: ["BESTIA", "VACIO"], VACIO: ["NIEBLA", "CRISTAL"], BESTIA: ["CRISTAL", "PLANTA"],
-    PLANTA: ["RELOJ", "TORMENTA"], TORMENTA: ["VACIO", "VOLCAN"],
-  };
+  // Efectividad en ANILLO: cada tipo es fuerte (×1.5) contra los 2 siguientes y
+  // débil (×0.75) contra los 2 anteriores. Balanceado: nadie domina.
+  const STRONG = {};
+  TYPES.forEach((t, i) => { STRONG[t] = [TYPES[(i + 1) % TYPES.length], TYPES[(i + 2) % TYPES.length]]; });
+
   function typeMult(att, def) {
     if (STRONG[att] && STRONG[att].includes(def)) return 1.5;
     if (STRONG[def] && STRONG[def].includes(att)) return 0.75;
     return 1.0;
   }
+  // Efectividad del tipo del atacante contra un defensor de 1 o 2 tipos: producto
+  // de la efectividad contra cada tipo del defensor (estilo Pokémon dual).
+  function typeEff(attType, defTypes) {
+    const arr = Array.isArray(defTypes) ? defTypes : [defTypes];
+    return arr.reduce((m, dt) => m * typeMult(attType, dt), 1);
+  }
+  // Tipos de una unidad/plantilla como array [primario, (secundario)].
+  function typesOf(x) { return x.types && x.types.length ? x.types : [x.type]; }
 
   const RARITIES = ["COMUN", "RARA", "EPICA", "LEGENDARIA"];
   const RARITY_PROB = [0.6, 0.25, 0.12, 0.03];
@@ -42,8 +55,12 @@
   // Clase de cada tipo: decide si sus golpes son FÍSICOS (atkP vs defP) o
   // ESPECIALES (atkS vs defS). 4 físicos / 4 especiales.
   const TYPE_CLASS = {
-    VOLCAN: "P", BESTIA: "P", PLANTA: "P", CRISTAL: "P",
-    NIEBLA: "S", RELOJ: "S", VACIO: "S", TORMENTA: "S",
+    // Físicos (10)
+    VOLCAN: "P", BESTIA: "P", PLANTA: "P", CRISTAL: "P", METAL: "P",
+    HUESO: "P", HIELO: "P", ARENA: "P", PLUMA: "P", HONGO: "P",
+    // Especiales (10)
+    NIEBLA: "S", RELOJ: "S", VACIO: "S", TORMENTA: "S", SOMBRA: "S",
+    LUMEN: "S", MAREA: "S", TOXICO: "S", ECO: "S", RUNA: "S",
   };
   const isPhysical = (type) => TYPE_CLASS[type] !== "S";
 
@@ -75,6 +92,12 @@
     CRISTAL: ["MURO_CRISTAL", "ESCUDO_EQUIPO"], RELOJ: ["ROBO_DE_TIEMPO", "MARCA_FATAL"],
     VACIO: ["COLAPSO_VACIO", "SACRIFICIO"], BESTIA: ["FRENESI_BESTIA", "SACRIFICIO"],
     PLANTA: ["RAICES", "REGENERAR"], TORMENTA: ["RAYO", "COLAPSO_VACIO"],
+    METAL: ["MURO_CRISTAL", "ERUPCION_LENTA"], HUESO: ["SACRIFICIO", "MARCA_FATAL"],
+    SOMBRA: ["MARCA_FATAL", "COLAPSO_VACIO"], LUMEN: ["RAYO", "ESCUDO_EQUIPO"],
+    HIELO: ["MURO_CRISTAL", "NIEBLA_DENSA"], MAREA: ["REGENERAR", "COLAPSO_VACIO"],
+    ARENA: ["FRENESI_BESTIA", "MURO_CRISTAL"], TOXICO: ["MARCA_FATAL", "SACRIFICIO"],
+    ECO: ["ROBO_DE_TIEMPO", "RAYO"], RUNA: ["ESCUDO_EQUIPO", "REGENERAR"],
+    PLUMA: ["ROBO_DE_TIEMPO", "RAICES"], HONGO: ["RAICES", "REGENERAR"],
   };
 
   // --------------------------------- Economía --------------------------------
@@ -153,6 +176,9 @@
     }
 
     const type = TYPES[Math.floor(rng() * TYPES.length)];
+    // 40% de probabilidad de un SEGUNDO tipo (distinto del primero).
+    const types = [type];
+    if (rng() < 0.4) { const t2 = TYPES[Math.floor(rng() * TYPES.length)]; if (t2 !== type) types.push(t2); }
     const tags = [ANIMAL[Math.floor(rng() * ANIMAL.length)], PHENO[Math.floor(rng() * PHENO.length)]];
     const ability = ABILITY_BY_TYPE[type][Math.floor(rng() * 2)];
     const name = genName(rng);
@@ -165,7 +191,7 @@
     };
     const lore = genLore(rng, tags);
 
-    return { id, type, rarity, name, tags, base_stats, ability, lore, art_seed: hashStr(id) };
+    return { id, type, types, rarity, name, tags, base_stats, ability, lore, art_seed: hashStr(id) };
   }
 
   // Lote de un día: ids "<fecha>_NNNN", deterministas.
@@ -184,6 +210,7 @@
       tplId: tpl.id,
       name: tpl.name,
       type: tpl.type,
+      types: tpl.types && tpl.types.length ? tpl.types.slice() : [tpl.type],
       ability: tpl.ability,
       level: level,
       hpMax: scaled(s.hp, level), hp: scaled(s.hp, level),
@@ -201,7 +228,7 @@
   function unitFromStats(s, team, idx) {
     return {
       uid: team + idx,
-      tplId: s.tplId, name: s.name, type: s.type, ability: s.ability,
+      tplId: s.tplId, name: s.name, type: s.type, types: s.types && s.types.length ? s.types.slice() : [s.type], ability: s.ability,
       level: s.level || 1,
       hpMax: s.hpMax, hp: s.hpMax, atkP: s.atkP, atkS: s.atkS, defP: s.defP, defS: s.defS, spd: s.spd,
       energy: s.startEnergy || 0, team,
@@ -270,7 +297,7 @@
     opt = opt || {};
     const am = att.mods || {}, tm = tgt.mods || {};
     const defv = effDef(att, tgt) * (1 - (opt.ignoreDef || 0));
-    const typeM = typeMult(att.type, tgt.type);
+    const typeM = typeEff(att.type, typesOf(tgt)); // tipo primario del atacante vs ambos tipos del defensor
     // Reliquia: +crítico (CRISTAL_AFILADO). mods por defecto 0 => combate normal intacto.
     const critP = clamp(0.05 + (att.spd - tgt.spd) / 1000 - (tgt.critDownTurns > 0 ? tgt.critDownAmt : 0) + (am.critBonus || 0), 0.02, 0.5);
     const crit = opt.crit || rng() < critP;
@@ -556,7 +583,7 @@
     TYPE_CLASS, isPhysical, RELICS, DUNGEON_DEPTH,
     ENERGY_MAX, ENERGY_REGEN_MS, COMBAT_ENERGY_MAX, TURNS_MAX, RELEASE_DUST, LEVEL_MAX,
     // funciones puras
-    typeMult, levelCost, computeLeague, mulberry32, hashStr,
+    typeMult, typeEff, typesOf, levelCost, computeLeague, mulberry32, hashStr,
     genName, genLore, pickRange, scaled, todayStr, genTemplate, dailyBatch,
     // combate
     buildUnit, unitFromStats, applyCaptainStance, STANCES, pickTarget, resolveTarget,
