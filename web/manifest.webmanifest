@@ -1,0 +1,14 @@
+{
+  "name": "AIGRONS",
+  "short_name": "AIGRONS",
+  "description": "Colecciona criaturas únicas generadas a diario, combate y compite.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0a0818",
+  "theme_color": "#0d0b1a",
+  "icons": [
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}

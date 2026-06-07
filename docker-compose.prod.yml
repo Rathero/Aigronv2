@@ -1,0 +1,53 @@
+# =============================================================================
+# docker-compose.prod.yml — Stack de producción (API + PostgreSQL).
+# Uso:
+#   JWT_SECRET=... docker compose -f docker-compose.prod.yml up -d --build
+# La API migra el esquema al arrancar y queda en http://localhost:3000
+# (sirve el frontend en /). Configura las variables de entorno reales abajo.
+# =============================================================================
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: aigrons
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-aigrons}
+      POSTGRES_DB: aigrons
+    volumes:
+      - aigrons_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aigrons -d aigrons"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgres://aigrons:${POSTGRES_PASSWORD:-aigrons}@db:5432/aigrons
+      PORT: 3000
+      JWT_SECRET: ${JWT_SECRET:?define JWT_SECRET}
+      CORS_ORIGIN: ${CORS_ORIGIN:-*}
+      ALLOW_DEV_AUTH: ${ALLOW_DEV_AUTH:-false}
+      DAILY_BATCH_SIZE: ${DAILY_BATCH_SIZE:-150}
+      CRON_GENERATE: ${CRON_GENERATE:-0 3 * * *}
+      CRON_TZ: ${CRON_TZ:-UTC}
+      AI_IMAGE_PROVIDER: ${AI_IMAGE_PROVIDER:-procedural}
+      GEN_DELAY_MS: ${GEN_DELAY_MS:-2500}
+      AI_VISION_FILTER: ${AI_VISION_FILTER:-off}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+    ports:
+      - "${PORT:-3000}:3000"
+    volumes:
+      - aigrons_art:/app/web/art   # persiste el arte generado entre despliegues
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  aigrons_pgdata:
+  aigrons_art:

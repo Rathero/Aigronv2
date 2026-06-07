@@ -1,0 +1,20 @@
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: aigrons
+      POSTGRES_PASSWORD: aigrons
+      POSTGRES_DB: aigrons
+    ports:
+      - "5432:5432"
+    volumes:
+      - aigrons_pgdata:/var/lib/postgresql/data
+
+  # Redis es opcional en el MVP (útil para rate-limiting/colas más adelante).
+  redis:
+    image: redis:7
+    ports:
+      - "6379:6379"
+
+volumes:
+  aigrons_pgdata:

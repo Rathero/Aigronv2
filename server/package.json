@@ -1,0 +1,31 @@
+{
+  "name": "aigrons-server",
+  "version": "1.0.0",
+  "description": "Backend de AIGRONS — juego coleccionable de criaturas pixel-art generadas por lotes.",
+  "main": "src/app.js",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node src/app.js",
+    "dev": "node --watch src/app.js",
+    "migrate": "node scripts/migrate.js",
+    "generate": "node scripts/generate-today.js",
+    "test": "node --test",
+    "db:up": "docker compose up -d",
+    "db:down": "docker compose down"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "express-rate-limit": "^7.4.0",
+    "helmet": "^7.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "node-cron": "^3.0.3",
+    "pg": "^8.12.0"
+  },
+  "optionalDependencies": {
+    "openai": "^4.56.0"
+  }
+}

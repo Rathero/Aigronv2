@@ -1,0 +1,12 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "aigrons",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["server/src/app.js"],
+      "port": 3000,
+      "autoPort": true
+    }
+  ]
+}
