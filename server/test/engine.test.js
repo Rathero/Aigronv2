@@ -70,10 +70,9 @@ test("stats generados dentro de rango por rareza", () => {
     const t = E.genTemplate("rng_" + i);
     const rg = E.RANGES[t.rarity];
     const s = t.base_stats;
-    assert.ok(s.hp >= rg.hp[0] && s.hp <= rg.hp[1], `hp ${s.hp} ${t.rarity}`);
-    assert.ok(s.atk >= rg.atk[0] && s.atk <= rg.atk[1], `atk ${s.atk} ${t.rarity}`);
-    assert.ok(s.def >= rg.def[0] && s.def <= rg.def[1], `def ${s.def} ${t.rarity}`);
-    assert.ok(s.spd >= rg.spd[0] && s.spd <= rg.spd[1], `spd ${s.spd} ${t.rarity}`);
+    ["hp", "atkP", "atkS", "defP", "defS", "spd"].forEach((k) => {
+      assert.ok(s[k] >= rg[k][0] && s[k] <= rg[k][1], `${k} ${s[k]} ${t.rarity}`);
+    });
     assert.ok(E.RARITIES.includes(t.rarity));
     assert.ok(E.TYPES.includes(t.type));
     assert.ok(E.ABILITIES[t.ability], `ability ${t.ability}`);
@@ -102,8 +101,9 @@ test("tabla de efectividad de tipos", () => {
 });
 
 // --------------------------- mecánicas estratégicas -------------------------
-const dmgTpl = { id: "t_dmg", name: "Tpl", type: "VOLCAN", ability: "ERUPCION_LENTA", base_stats: { hp: 1000, atk: 150, def: 80, spd: 100 } };
-const tgtTpl = { id: "t_tgt", name: "Obj", type: "VOLCAN", ability: "RAICES", base_stats: { hp: 1000, atk: 100, def: 80, spd: 90 } };
+// VOLCAN = tipo físico -> sus golpes usan atkP vs defP.
+const dmgTpl = { id: "t_dmg", name: "Tpl", type: "VOLCAN", ability: "ERUPCION_LENTA", base_stats: { hp: 1000, atkP: 150, atkS: 150, defP: 80, defS: 80, spd: 100 } };
+const tgtTpl = { id: "t_tgt", name: "Obj", type: "VOLCAN", ability: "RAICES", base_stats: { hp: 1000, atkP: 100, atkS: 100, defP: 80, defS: 80, spd: 90 } };
 
 test("guardia reduce el daño recibido (~60%)", () => {
   const noCrit = () => 0.999; // nunca crítico
@@ -139,21 +139,21 @@ test("sobrecarga aumenta el efecto de la habilidad (×1.5)", () => {
 
 test("capitán + estancia hornean modificadores deterministas", () => {
   const mkTeam = () => [E.buildUnit(dmgTpl, 5, "A", 0), E.buildUnit(tgtTpl, 5, "A", 1), E.buildUnit(tgtTpl, 5, "A", 2)];
-  const baseAtk = E.buildUnit(dmgTpl, 5, "A", 0).atk;
+  const baseAtk = E.buildUnit(dmgTpl, 5, "A", 0).atkP;
 
   const agg = mkTeam(); E.applyCaptainStance(agg, "A0", "AGRESIVA");
-  assert.ok(agg[0].atk > baseAtk, "capitán+agresiva sube ATK del capitán");
+  assert.ok(agg[0].atkP > baseAtk, "capitán+agresiva sube ATK del capitán");
   assert.equal(agg[0].startEnergy, 0);
 
   const def = mkTeam(); E.applyCaptainStance(def, "A1", "DEFENSIVA");
   assert.equal(def[0].startEnergy, 1, "defensiva arranca con energía");
   assert.equal(def[0].energy, 1);
-  assert.ok(def[1].atk > E.buildUnit(tgtTpl, 5, "A", 1).atk * 0.9, "capitán recibe bono personal");
+  assert.ok(def[1].atkP > E.buildUnit(tgtTpl, 5, "A", 1).atkP * 0.9, "capitán recibe bono personal");
 
   // Determinista: dos aplicaciones idénticas dan lo mismo.
   const x = mkTeam(); E.applyCaptainStance(x, "A0", "AGRESIVA");
   const y = mkTeam(); E.applyCaptainStance(y, "A0", "AGRESIVA");
-  assert.deepEqual(x.map((u) => [u.atk, u.def, u.hpMax, u.spd]), y.map((u) => [u.atk, u.def, u.hpMax, u.spd]));
+  assert.deepEqual(x.map((u) => [u.atkP, u.atkS, u.defP, u.defS, u.hpMax, u.spd]), y.map((u) => [u.atkP, u.atkS, u.defP, u.defS, u.hpMax, u.spd]));
 });
 
 test("combate determinista con decisiones ricas (objetivo+guardia+sobrecarga)", () => {
@@ -186,7 +186,7 @@ test("applyRelics hornea stats y rellena mods", () => {
   const t = team();
   E.applyRelics(t, ["CORAZON_TITAN", "TOTEM_FURIA", "BATERIA", "COLMILLO_VAMPIRICO", "CRISTAL_AFILADO"]);
   assert.ok(t[0].hpMax > base.hpMax, "CORAZON sube HP");
-  assert.ok(t[0].atk > base.atk, "FURIA sube ATK");
+  assert.ok(t[0].atkP > base.atkP, "FURIA sube ATK");
   assert.equal(t[0].startEnergy, 1, "BATERIA da +1 energía");
   assert.equal(t[0].energy, 1);
   assert.ok(t[0].mods.lifesteal > 0, "VAMPIRISMO setea lifesteal");

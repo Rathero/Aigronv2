@@ -39,11 +39,20 @@
   const RARITIES = ["COMUN", "RARA", "EPICA", "LEGENDARIA"];
   const RARITY_PROB = [0.6, 0.25, 0.12, 0.03];
 
+  // Clase de cada tipo: decide si sus golpes son FÍSICOS (atkP vs defP) o
+  // ESPECIALES (atkS vs defS). 4 físicos / 4 especiales.
+  const TYPE_CLASS = {
+    VOLCAN: "P", BESTIA: "P", PLANTA: "P", CRISTAL: "P",
+    NIEBLA: "S", RELOJ: "S", VACIO: "S", TORMENTA: "S",
+  };
+  const isPhysical = (type) => TYPE_CLASS[type] !== "S";
+
+  // 6 stats: HP, ATK Físico, ATK Especial, DEF Física, DEF Especial, SPD.
   const RANGES = {
-    COMUN: { hp: [600, 800], atk: [80, 110], def: [40, 60], spd: [70, 90] },
-    RARA: { hp: [750, 950], atk: [100, 135], def: [55, 80], spd: [80, 100] },
-    EPICA: { hp: [900, 1150], atk: [125, 160], def: [70, 100], spd: [90, 115] },
-    LEGENDARIA: { hp: [1100, 1400], atk: [150, 200], def: [90, 130], spd: [100, 130] },
+    COMUN: { hp: [600, 800], atkP: [80, 110], atkS: [80, 110], defP: [40, 60], defS: [40, 60], spd: [70, 90] },
+    RARA: { hp: [750, 950], atkP: [100, 135], atkS: [100, 135], defP: [55, 80], defS: [55, 80], spd: [80, 100] },
+    EPICA: { hp: [900, 1150], atkP: [125, 160], atkS: [125, 160], defP: [70, 100], defS: [70, 100], spd: [90, 115] },
+    LEGENDARIA: { hp: [1100, 1400], atkP: [150, 200], atkS: [150, 200], defP: [90, 130], defS: [90, 130], spd: [100, 130] },
   };
 
   // --------------------------------- Habilidades -----------------------------
@@ -132,7 +141,7 @@
 
   // -------------------- Generación determinista de plantilla -----------------
   // El orden de llamadas a rng() es un INVARIANTE (ver README §3.1):
-  // rareza -> tipo -> tags(2) -> habilidad -> nombre(3) -> hp/atk/def/spd(4) -> lore(1).
+  // rareza -> tipo -> tags(2) -> habilidad -> nombre(3) -> hp/atkP/atkS/defP/defS/spd(6) -> lore(1).
   function genTemplate(id) {
     const rng = mulberry32(hashStr(id));
 
@@ -149,8 +158,10 @@
     const name = genName(rng);
     const rg = RANGES[rarity];
     const base_stats = {
-      hp: pickRange(rng, rg.hp), atk: pickRange(rng, rg.atk),
-      def: pickRange(rng, rg.def), spd: pickRange(rng, rg.spd),
+      hp: pickRange(rng, rg.hp),
+      atkP: pickRange(rng, rg.atkP), atkS: pickRange(rng, rg.atkS),
+      defP: pickRange(rng, rg.defP), defS: pickRange(rng, rg.defS),
+      spd: pickRange(rng, rg.spd),
     };
     const lore = genLore(rng, tags);
 
@@ -176,7 +187,9 @@
       ability: tpl.ability,
       level: level,
       hpMax: scaled(s.hp, level), hp: scaled(s.hp, level),
-      atk: scaled(s.atk, level), def: scaled(s.def, level), spd: scaled(s.spd, level),
+      atkP: scaled(s.atkP, level), atkS: scaled(s.atkS, level),
+      defP: scaled(s.defP, level), defS: scaled(s.defS, level),
+      spd: scaled(s.spd, level),
       energy: 0, team,
       atkMul: 1, defMul: 1, atkTurns: 0, defTurns: 0,
       critDownTurns: 0, critDownAmt: 0, markTurns: 0, markAmt: 0,
@@ -190,7 +203,7 @@
       uid: team + idx,
       tplId: s.tplId, name: s.name, type: s.type, ability: s.ability,
       level: s.level || 1,
-      hpMax: s.hpMax, hp: s.hpMax, atk: s.atk, def: s.def, spd: s.spd,
+      hpMax: s.hpMax, hp: s.hpMax, atkP: s.atkP, atkS: s.atkS, defP: s.defP, defS: s.defS, spd: s.spd,
       energy: s.startEnergy || 0, team,
       atkMul: 1, defMul: 1, atkTurns: 0, defTurns: 0,
       critDownTurns: 0, critDownAmt: 0, markTurns: 0, markAmt: 0,
@@ -219,8 +232,9 @@
     units.forEach((u) => {
       const isCap = u.uid === captainUid;
       const capSelf = isCap ? CAPTAIN_SELF : 1;
-      u.atk = Math.round(u.atk * st.atk * lead.atk * capSelf);
-      u.def = Math.round(u.def * st.def * lead.def * capSelf);
+      const am = st.atk * lead.atk * capSelf, dm = st.def * lead.def * capSelf;
+      u.atkP = Math.round(u.atkP * am); u.atkS = Math.round(u.atkS * am);
+      u.defP = Math.round(u.defP * dm); u.defS = Math.round(u.defS * dm);
       if (isCap) { u.hpMax = Math.round(u.hpMax * CAPTAIN_SELF); u.hp = u.hpMax; u.spd = Math.round(u.spd * CAPTAIN_SELF); }
       u.startEnergy = (u.startEnergy || 0) + st.startEnergy;
       u.energy = u.startEnergy;
@@ -228,8 +242,9 @@
     return units;
   }
 
-  const effAtk = (u) => u.atk * u.atkMul;
-  const effDef = (u) => u.def * u.defMul;
+  // ATK/DEF efectivos según la CLASE del atacante: físico usa atkP/defP, especial atkS/defS.
+  const effAtk = (u) => (isPhysical(u.type) ? u.atkP : u.atkS) * u.atkMul;
+  const effDef = (att, tgt) => (isPhysical(att.type) ? tgt.defP : tgt.defS) * tgt.defMul;
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
   const alive = (arr) => arr.filter((u) => u.hp > 0);
   function pickTarget(foes) {
@@ -254,7 +269,7 @@
   function dealDamage(rng, att, tgt, mult, opt) {
     opt = opt || {};
     const am = att.mods || {}, tm = tgt.mods || {};
-    const defv = effDef(tgt) * (1 - (opt.ignoreDef || 0));
+    const defv = effDef(att, tgt) * (1 - (opt.ignoreDef || 0));
     const typeM = typeMult(att.type, tgt.type);
     // Reliquia: +crítico (CRISTAL_AFILADO). mods por defecto 0 => combate normal intacto.
     const critP = clamp(0.05 + (att.spd - tgt.spd) / 1000 - (tgt.critDownTurns > 0 ? tgt.critDownAmt : 0) + (am.critBonus || 0), 0.02, 0.5);
@@ -462,8 +477,8 @@
     }
     units.forEach((u) => {
       u.hpMax = Math.round(u.hpMax * hpMult);
-      u.atk = Math.round(u.atk * atkMult);
-      u.def = Math.round(u.def * defMult);
+      u.atkP = Math.round(u.atkP * atkMult); u.atkS = Math.round(u.atkS * atkMult);
+      u.defP = Math.round(u.defP * defMult); u.defS = Math.round(u.defS * defMult);
       u.startEnergy = (u.startEnergy || 0) + startEnergy;
       u.energy = u.startEnergy;
       u.mods = Object.assign({}, mods);
@@ -538,7 +553,7 @@
   return {
     // constantes
     TYPES, STRONG, RARITIES, RARITY_PROB, RANGES, ABILITIES, ABILITY_BY_TYPE,
-    RELICS, DUNGEON_DEPTH,
+    TYPE_CLASS, isPhysical, RELICS, DUNGEON_DEPTH,
     ENERGY_MAX, ENERGY_REGEN_MS, COMBAT_ENERGY_MAX, TURNS_MAX, RELEASE_DUST, LEVEL_MAX,
     // funciones puras
     typeMult, levelCost, computeLeague, mulberry32, hashStr,

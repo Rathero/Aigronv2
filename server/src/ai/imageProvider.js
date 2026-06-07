@@ -237,7 +237,12 @@ function getImageProvider() {
 function clampStats(stats, rarity) {
   const rg = E.RANGES[rarity];
   const c = (v, r) => Math.max(r[0], Math.min(r[1], Math.round(v)));
-  return { hp: c(stats.hp, rg.hp), atk: c(stats.atk, rg.atk), def: c(stats.def, rg.def), spd: c(stats.spd, rg.spd) };
+  return {
+    hp: c(stats.hp, rg.hp),
+    atkP: c(stats.atkP, rg.atkP), atkS: c(stats.atkS, rg.atkS),
+    defP: c(stats.defP, rg.defP), defS: c(stats.defS, rg.defS),
+    spd: c(stats.spd, rg.spd),
+  };
 }
 
 module.exports = { getImageProvider, buildImagePrompt, accepted, clampStats };

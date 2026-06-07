@@ -15,6 +15,7 @@ const path = require("path");
 const E = require("../../web/engine.js");
 const db = require("./db");
 const { getImageProvider, buildImagePrompt } = require("./ai/imageProvider");
+const { tplBaseStats } = require("./util");
 
 // Carga el arte local de un padre (web/art) como imagen de referencia para la
 // fusión visual. Devuelve {mimeType,data(base64)} o null si no es local/falla.
@@ -61,14 +62,15 @@ async function getOrCreateFusionTemplate(tA, tB) {
       : RANK[tA.rarity] > RANK[tB.rarity] ? tA.ability_id : tB.ability_id;
 
   const rg = E.RANGES[rarity];
-  const blend = (ka, kb, range) => {
-    const avg = (tA[ka] + tB[kb]) / 2;
+  const sA = tplBaseStats(tA), sB = tplBaseStats(tB);
+  const blend = (k, range) => {
+    const avg = (sA[k] + sB[k]) / 2;
     const jitter = avg * (0.9 + rng() * 0.2);
     return Math.max(range[0], Math.min(range[1], Math.round(jitter)));
   };
   const base = {
-    hp: blend("base_hp", "base_hp", rg.hp), atk: blend("base_atk", "base_atk", rg.atk),
-    def: blend("base_def", "base_def", rg.def), spd: blend("base_spd", "base_spd", rg.spd),
+    hp: blend("hp", rg.hp), atkP: blend("atkP", rg.atkP), atkS: blend("atkS", rg.atkS),
+    defP: blend("defP", rg.defP), defS: blend("defS", rg.defS), spd: blend("spd", rg.spd),
   };
 
   const tagsA = tA.species_tags || [tA.type.toLowerCase(), "x"];
@@ -106,12 +108,13 @@ async function getOrCreateFusionTemplate(tA, tB) {
   await db.query(
     `INSERT INTO creature_templates
        (template_id, batch_date, name, species_tags, type, rarity,
-        base_hp, base_atk, base_def, base_spd, ability_id, lore,
-        image_url, image_thumb_url, art_seed, quality_score, is_fusion)
-     VALUES ($1, CURRENT_DATE, $2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,true)
+        base_hp, base_atk, base_def, base_spd, base_atk_p, base_atk_s, base_def_p, base_def_s,
+        ability_id, lore, image_url, image_thumb_url, art_seed, quality_score, is_fusion)
+     VALUES ($1, CURRENT_DATE, $2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,true)
      ON CONFLICT (template_id) DO NOTHING`,
-    [templateId, name, tags, type, rarity, base.hp, base.atk, base.def, base.spd, ability, lore,
-     art && art.image_url, art && art.image_thumb_url, seed, art ? art.quality_score : 1.0]
+    [templateId, name, tags, type, rarity,
+     base.hp, base.atkP, base.defP, base.spd, base.atkP, base.atkS, base.defP, base.defS,
+     ability, lore, art && art.image_url, art && art.image_thumb_url, seed, art ? art.quality_score : 1.0]
   );
   await db.query(
     "INSERT INTO fusion_cache (pair_key, template_id) VALUES ($1,$2) ON CONFLICT (pair_key) DO NOTHING",

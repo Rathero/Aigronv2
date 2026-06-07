@@ -19,7 +19,7 @@ const COMBAT_KINDS = ["COMBATE", "ELITE", "JEFE"];
 function memberFromUnit(u) {
   return {
     tplId: u.tplId, name: u.name, type: u.type, ability: u.ability, level: u.level,
-    base: { hpMax: u.hpMax, atk: u.atk, def: u.def, spd: u.spd },
+    base: { hpMax: u.hpMax, atkP: u.atkP, atkS: u.atkS, defP: u.defP, defS: u.defS, spd: u.spd },
     hp: u.hpMax, dead: false,
   };
 }
@@ -36,7 +36,7 @@ function healTeam(state, frac) {
 }
 function memberStats(m) {
   return { tplId: m.tplId, name: m.name, type: m.type, ability: m.ability, level: m.level,
-    hpMax: m.base.hpMax, atk: m.base.atk, def: m.base.def, spd: m.base.spd, hp: m.hp };
+    hpMax: m.base.hpMax, atkP: m.base.atkP, atkS: m.base.atkS, defP: m.base.defP, defS: m.base.defS, spd: m.base.spd, hp: m.hp };
 }
 // Construye el equipo A de combate desde el estado (reliquias aplicadas, HP arrastrado).
 function buildPlayerUnits(state) {
@@ -52,7 +52,7 @@ function buildPlayerUnits(state) {
 }
 function publicEnemyStats(u) {
   return { tplId: u.tplId, name: u.name, type: u.type, ability: u.ability, level: u.level,
-    hpMax: u.hpMax, atk: u.atk, def: u.def, spd: u.spd };
+    hpMax: u.hpMax, atkP: u.atkP, atkS: u.atkS, defP: u.defP, defS: u.defS, spd: u.spd };
 }
 function battleSeedFor(seed, node) { return E.hashStr("dgnbattle:" + seed + ":" + node) >>> 1; }
 const SHOP_RELIC_COST = 60, SHOP_HEAL_COST = 40, SHOP_HEAL_FRAC = 0.5;

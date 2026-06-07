@@ -34,6 +34,7 @@ CREATE TABLE IF NOT EXISTS creature_templates (
   type            TEXT NOT NULL,
   rarity          TEXT NOT NULL,
   base_hp  INT NOT NULL, base_atk INT NOT NULL, base_def INT NOT NULL, base_spd INT NOT NULL,
+  base_atk_p INT, base_atk_s INT, base_def_p INT, base_def_s INT,  -- ATK/DEF físico y especial
   ability_id      TEXT NOT NULL,
   lore            TEXT,
   image_url       TEXT,
@@ -44,6 +45,11 @@ CREATE TABLE IF NOT EXISTS creature_templates (
   created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_templates_batch ON creature_templates(batch_date);
+-- Migración para BD existentes: añade las columnas de stats físico/especial.
+ALTER TABLE creature_templates ADD COLUMN IF NOT EXISTS base_atk_p INT;
+ALTER TABLE creature_templates ADD COLUMN IF NOT EXISTS base_atk_s INT;
+ALTER TABLE creature_templates ADD COLUMN IF NOT EXISTS base_def_p INT;
+ALTER TABLE creature_templates ADD COLUMN IF NOT EXISTS base_def_s INT;
 
 CREATE TABLE IF NOT EXISTS creature_instances (
   instance_id    UUID PRIMARY KEY DEFAULT gen_random_uuid(),

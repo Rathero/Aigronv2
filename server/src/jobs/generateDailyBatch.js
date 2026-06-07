@@ -63,18 +63,19 @@ async function generateDailyBatch(date, n) {
     if (delayMs) await sleep(delayMs);
     if (!art) { rejected++; continue; } // descartada por el filtro de calidad
 
-    const stats = clampStats(t.base_stats, t.rarity);
+    const s = clampStats(t.base_stats, t.rarity);
 
     const r = await db.query(
       `INSERT INTO creature_templates
          (template_id, batch_date, name, species_tags, type, rarity,
-          base_hp, base_atk, base_def, base_spd, ability_id, lore,
-          image_url, image_thumb_url, art_seed, quality_score)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+          base_hp, base_atk, base_def, base_spd, base_atk_p, base_atk_s, base_def_p, base_def_s,
+          ability_id, lore, image_url, image_thumb_url, art_seed, quality_score)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
        ON CONFLICT (template_id) DO NOTHING`,
       [
         t.id, date, t.name, t.tags, t.type, t.rarity,
-        stats.hp, stats.atk, stats.def, stats.spd,
+        s.hp, s.atkP, s.defP, s.spd,  // base_atk/base_def (legacy) = físico, para compatibilidad
+        s.atkP, s.atkS, s.defP, s.defS,
         t.ability, t.lore,
         art.image_url, art.image_thumb_url, t.art_seed, art.quality_score,
       ]

@@ -20,6 +20,7 @@ const { generateDailyBatch } = require("./jobs/generateDailyBatch");
 const { startCron } = require("./cron");
 const { fuse } = require("./fusion");
 const dungeon = require("./dungeon");
+const { tplBaseStats } = require("./util");
 
 const app = express();
 app.set("trust proxy", 1); // detrás de proxy/CDN: IP real para rate limiting
@@ -70,13 +71,13 @@ async function todayTemplates() {
   const date = C.todayStr();
   await ensureDailyBatch(date);
   const r = await db.query(
-    "SELECT template_id,name,type,rarity,ability_id,base_hp,base_atk,base_def,base_spd,art_seed,lore,image_url,image_thumb_url FROM creature_templates WHERE batch_date=$1 AND is_fusion=false ORDER BY template_id",
+    "SELECT template_id,name,type,rarity,ability_id,base_hp,base_atk,base_def,base_spd,base_atk_p,base_atk_s,base_def_p,base_def_s,art_seed,lore,image_url,image_thumb_url FROM creature_templates WHERE batch_date=$1 AND is_fusion=false ORDER BY template_id",
     [date]
   );
   return r.rows.map((x) => ({
     id: x.template_id, name: x.name, type: x.type, rarity: x.rarity, ability: x.ability_id,
     art_seed: x.art_seed, lore: x.lore, image_url: x.image_url, image_thumb_url: x.image_thumb_url,
-    base_stats: { hp: x.base_hp, atk: x.base_atk, def: x.base_def, spd: x.base_spd },
+    base_stats: tplBaseStats(x),
   }));
 }
 async function getUser(id) {
@@ -148,7 +149,7 @@ async function buildTeamUnits(userId) {
   if (!slots.length) return [];
   const inst = await db.query(
     `SELECT ci.instance_id, ci.level, t.template_id, t.name, t.type, t.ability_id,
-            t.base_hp, t.base_atk, t.base_def, t.base_spd
+            t.base_hp, t.base_atk, t.base_def, t.base_spd, t.base_atk_p, t.base_atk_s, t.base_def_p, t.base_def_s
        FROM creature_instances ci JOIN creature_templates t ON t.template_id = ci.template_id
       WHERE ci.instance_id = ANY($1::uuid[])`,
     [slots]
@@ -156,8 +157,7 @@ async function buildTeamUnits(userId) {
   const byId = {}; inst.rows.forEach((r) => (byId[r.instance_id] = r));
   return slots.map((iid, i) => {
     const r = byId[iid]; if (!r) return null;
-    const tplLike = { id: r.template_id, name: r.name, type: r.type, ability: r.ability_id,
-      base_stats: { hp: r.base_hp, atk: r.base_atk, def: r.base_def, spd: r.base_spd } };
+    const tplLike = { id: r.template_id, name: r.name, type: r.type, ability: r.ability_id, base_stats: tplBaseStats(r) };
     const u = combat.buildUnit(tplLike, r.level, "A", i);
     u.instanceId = iid; // para mapear el capitán elegido a su uid de combate
     return u;
@@ -166,7 +166,7 @@ async function buildTeamUnits(userId) {
 const teamAvgLevel = (units) => units.length ? Math.round(units.reduce((a, u) => a + (u.level || 1), 0) / units.length) : 3;
 function publicUnit(u) {
   return { uid: u.uid, tplId: u.tplId, name: u.name, type: u.type, ability: u.ability, level: u.level,
-    hpMax: u.hpMax, atk: u.atk, def: u.def, spd: u.spd, startEnergy: u.startEnergy || 0 };
+    hpMax: u.hpMax, atkP: u.atkP, atkS: u.atkS, defP: u.defP, defS: u.defS, spd: u.spd, startEnergy: u.startEnergy || 0 };
 }
 
 // ---------------------------------- AUTH -------------------------------------
@@ -257,21 +257,25 @@ app.get("/collection", authMiddleware, wrap(async (req, res) => {
   const r = await db.query(
     `SELECT ci.instance_id, ci.level, ci.xp, ci.favorite, ci.locked, ci.obtained_at,
             t.template_id, t.name, t.type, t.rarity, t.ability_id, t.lore, t.art_seed,
-            t.base_hp, t.base_atk, t.base_def, t.base_spd, t.image_url, t.image_thumb_url
+            t.base_hp, t.base_atk, t.base_def, t.base_spd, t.base_atk_p, t.base_atk_s, t.base_def_p, t.base_def_s,
+            t.image_url, t.image_thumb_url
        FROM creature_instances ci JOIN creature_templates t ON t.template_id=ci.template_id
       WHERE ci.user_id=$1 ORDER BY ci.obtained_at DESC`,
     [req.userId]
   );
-  res.json(r.rows.map((x) => ({
-    instance_id: x.instance_id, level: x.level, favorite: x.favorite, locked: x.locked,
-    template: {
-      id: x.template_id, name: x.name, type: x.type, rarity: x.rarity, ability: x.ability_id,
-      lore: x.lore, art_seed: x.art_seed, image_url: x.image_url, image_thumb_url: x.image_thumb_url,
-      base_stats: { hp: x.base_hp, atk: x.base_atk, def: x.base_def, spd: x.base_spd },
-      stats: { hp: C.scaled(x.base_hp, x.level), atk: C.scaled(x.base_atk, x.level),
-               def: C.scaled(x.base_def, x.level), spd: C.scaled(x.base_spd, x.level) },
-    },
-  })));
+  res.json(r.rows.map((x) => {
+    const b = tplBaseStats(x);
+    return {
+      instance_id: x.instance_id, level: x.level, favorite: x.favorite, locked: x.locked,
+      template: {
+        id: x.template_id, name: x.name, type: x.type, rarity: x.rarity, ability: x.ability_id,
+        lore: x.lore, art_seed: x.art_seed, image_url: x.image_url, image_thumb_url: x.image_thumb_url,
+        base_stats: b,
+        stats: { hp: C.scaled(b.hp, x.level), atkP: C.scaled(b.atkP, x.level), atkS: C.scaled(b.atkS, x.level),
+                 defP: C.scaled(b.defP, x.level), defS: C.scaled(b.defS, x.level), spd: C.scaled(b.spd, x.level) },
+      },
+    };
+  }));
 }));
 
 app.post("/creature/:id/level-up", authMiddleware, wrap(async (req, res) => {
@@ -339,7 +343,7 @@ async function opponentFromSnapshot(snapshot) {
   // snapshot: [{template_id, level}]
   const ids = snapshot.map((s) => s.template_id);
   const r = await db.query(
-    "SELECT template_id, name, type, ability_id, base_hp, base_atk, base_def, base_spd FROM creature_templates WHERE template_id = ANY($1)",
+    "SELECT template_id, name, type, ability_id, base_hp, base_atk, base_def, base_spd, base_atk_p, base_atk_s, base_def_p, base_def_s FROM creature_templates WHERE template_id = ANY($1)",
     [ids]
   );
   const byId = {}; r.rows.forEach((x) => (byId[x.template_id] = x));
@@ -347,8 +351,7 @@ async function opponentFromSnapshot(snapshot) {
   snapshot.forEach((s, i) => {
     const t = byId[s.template_id];
     if (!t) return;
-    const tplLike = { id: t.template_id, name: t.name, type: t.type, ability: t.ability_id,
-      base_stats: { hp: t.base_hp, atk: t.base_atk, def: t.base_def, spd: t.base_spd } };
+    const tplLike = { id: t.template_id, name: t.name, type: t.type, ability: t.ability_id, base_stats: tplBaseStats(t) };
     out.push(combat.buildUnit(tplLike, s.level, "B", out.length));
   });
   return out;
