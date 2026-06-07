@@ -199,6 +199,7 @@ h2.title small{font-family:var(--ui);font-size:13px;color:var(--ink-dim);font-we
 .plan-unit .pu-spr canvas,.plan-unit .pu-spr img{width:30px;height:30px;image-rendering:pixelated;display:block}
 .plan-unit .pu-body{flex:1;min-width:0}
 .plan-unit .pu-nm{font-size:12px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.plan-unit .pu-ab{font-size:10px;color:var(--cyan);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;opacity:.85}
 .plan-unit .pu-lbl{font-size:11px;color:var(--ink-dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .plan-unit .pu-acts{display:flex;gap:3px;flex:0 0 auto}
 .pa{width:30px;height:30px;display:flex;align-items:center;justify-content:center;border:2px solid var(--line);background:#0a0818;cursor:pointer;font-size:13px}
@@ -493,13 +494,13 @@ function renderCanvases(root){
   root.querySelectorAll("canvas[data-aig]").forEach(c=>{if(c._done)return;drawAigron(c,tpl(c.dataset.aig),parseInt(c.dataset.px||"8"));c._done=1;});
   root.querySelectorAll("canvas[data-egg]").forEach(c=>{if(c._done)return;drawEgg(c,parseInt(c.dataset.px||"8"));c._done=1;});
 }
-function abilityDesc(id){const a=ABILITIES[id];const m={
+function abilityEffect(id){const a=ABILITIES[id];return {
   dmg:`Daño x${a.mult}`+(a.ignoreDef?` (ignora ${a.ignoreDef*100}% DEF)`:"")+(a.crit?", crítico seguro":"")+(a.selfHp?`, -${a.selfHp*100}% HP propio`:""),
   aoe:`Daño x${a.mult} a TODO el rival`, buffDef:`+${a.amt*100}% DEF ${a.team?"al equipo":"propia"} (${a.turns}t)`,
   buffAtk:`+${a.amt*100}% ATK`+(a.defDown?`, -${a.defDown*100}% DEF`:""), critDown:`-${a.amt*100}% crítico rival (${a.turns}t)`,
   mark:`Rival recibe +${a.amt*100}% daño (${a.turns}t)`, heal:`Cura ${a.amt*100}% HP propio`,
-  healTeam:`Cura ${a.amt*100}% HP a tu equipo`, double:`Ataca dos veces`}[a.kind];
-  return `${a.name} · ⚡${a.cost} — ${m}`;}
+  healTeam:`Cura ${a.amt*100}% HP a tu equipo`, double:`Ataca dos veces`}[a.kind];}
+function abilityDesc(id){const a=ABILITIES[id];return `${a.name} · ⚡${a.cost} — ${abilityEffect(id)}`;}
 function cardHTML(inst,extra){const t=inst.template;return `<div class="card r-${t.rarity}" data-iid="${inst.instance_id}">
   <div class="lv">L${inst.level}</div>${inst.favorite?'<div class="fav">★</div>':''}${extra||""}
   ${artTag(t,6)}
@@ -851,17 +852,19 @@ function renderPlanner(){
       <div class="pu-spr">${artTag(tpl(u.tplId),4)}</div>
       <div class="pu-body">
         <div class="pu-nm">${u.name} <span class="dim" style="font-size:10px">⚡${proj}/${ab.cost}</span></div>
+        <div class="pu-ab">✨ ${ab.name}: ${abilityEffect(u.ability)}</div>
         <div class="pu-lbl">${lbl}</div>
       </div>
       <div class="pu-acts">
-        <button class="pa ${pl.action==='attack'?'on':''}" data-act="planSet" data-arg="${u.uid}:attack" title="Atacar">⚔️</button>
-        <button class="pa ${pl.action==='ability'?'on':''} ${ready?'':'dis'}" data-act="planSet" data-arg="${u.uid}:ability" title="${ab.name}">✨</button>
-        <button class="pa ${pl.action==='guard'?'on':''}" data-act="planSet" data-arg="${u.uid}:guard" title="Guardia">🛡️</button>
+        <button class="pa ${pl.action==='attack'?'on':''}" data-act="planSet" data-arg="${u.uid}:attack" title="Atacar normal">⚔️</button>
+        <button class="pa ${pl.action==='ability'?'on':''} ${ready?'':'dis'}" data-act="planSet" data-arg="${u.uid}:ability" title="${ab.name}: ${abilityEffect(u.ability)}">✨</button>
+        <button class="pa ${pl.action==='guard'?'on':''}" data-act="planSet" data-arg="${u.uid}:guard" title="Guardia: protege al equipo">🛡️</button>
         ${canOc&&pl.action==='ability'?`<button class="pa oc ${pl.overcharge?'on':''}" data-act="planOc" data-arg="${u.uid}" title="Sobrecarga ×1.5">⚡⚡</button>`:''}
       </div>
     </div>`;
   }).join("");
-  p.innerHTML=`<div class="plan-head"><b>RONDA ${CB.planTurn}</b><div class="plan-timer"><i id="plan-bar" style="width:100%"></i></div></div>
+  const leftPct=CB.planEndsAt?Math.max(0,Math.min(100,(CB.planEndsAt-Date.now())/10000*100)):100;
+  p.innerHTML=`<div class="plan-head"><b>RONDA ${CB.planTurn}</b><div class="plan-timer"><i id="plan-bar" style="width:${leftPct}%"></i></div></div>
     ${rows}
     ${CB.selecting?`<div class="targhint">🎯 Toca un enemigo para <b>${(CB.A.find(x=>x.uid===CB.selecting)||{}).name}</b> · <span data-act="planAuto" style="color:var(--gold);cursor:pointer">auto</span></div>`:'<div class="dim tc" style="font-size:11px;margin:4px 0">Elige acción de cada aigrón. ⚔️/✨ puedes tocar un enemigo para focalizar.</div>'}
     <button class="btn mag mt8" style="width:100%" data-act="confirmPlan">LISTO ▶</button>`;
