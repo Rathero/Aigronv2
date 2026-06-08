@@ -945,6 +945,10 @@ function renderPlanner(){
   renderCanvases(p);
   refreshArena();
 }
+// Habilidades de OBJETIVO ÚNICO (piden rival). El resto (equipo/self/AoE) son
+// automáticas y no deben pedir objetivo.
+const TARGETED_KINDS={dmg:1,dot:1,stun:1,drain:1,mark:1,critDown:1,double:1};
+function abilityNeedsTarget(key){ const a=ABILITIES[key]; return !!(a&&TARGETED_KINDS[a.kind]); }
 function planSet(arg){
   if(!CB||CB.phase!=='plan')return;
   const i=arg.indexOf(':'); const uid=arg.slice(0,i), action=arg.slice(i+1);
@@ -953,7 +957,8 @@ function planSet(arg){
   if(action==='ability'&&proj<ab.cost){ toast('Sin energía aún para '+ab.name); return; }
   const pl=CB.plan[uid]; pl.action=action;
   if(action==='guard'){ pl.target=null; pl.overcharge=false; CB.selecting=null; }
-  else { CB.selecting=uid; } // atacar/habilidad -> opcional elegir objetivo
+  else if(action==='ability'&&!abilityNeedsTarget(u.ability)){ pl.target=null; CB.selecting=null; } // equipo/self/AoE: automática
+  else { CB.selecting=uid; } // ataque o habilidad de objetivo único -> elegir rival (opcional)
   renderPlanner();
 }
 function planOc(uid){
