@@ -739,10 +739,9 @@ async function renderBattle(){
         <button class="btn sm ghost" data-act="editTeam">EDITAR</button></div>
       <div class="grid">${team.length?team.map(i=>cardHTML(i)).join(""):'<div class="dim">Elige 3 aigrons</div>'}</div>
     </div>
-    <button class="btn mag" data-act="prepBattle" ${team.length<1?'disabled':''}>PREPARAR COMBATE — ⚡1</button>
-    <button class="btn mt8" data-act="livePvp" ${team.length<1?'disabled':''}>⚔️ PvP EN VIVO — ⚡1</button>
+    <button class="btn mag" data-act="prepBattle" ${team.length<1?'disabled':''}>⚔️ COMBATE PvP EN VIVO — ⚡1</button>
     <div class="panel mt8"><b style="font-size:14px">Estrategia</b>
-      <div class="dim" style="font-size:13px;margin-top:6px">Antes del combate eliges <b>capitán</b> y <b>estancia</b>. En combate: toca una habilidad y luego un <b>enemigo</b> para apuntar (mira ⬆/⬇ de tipo); <b>🛡️ guardia</b> protege a tu equipo un turno; con energía de sobra, <b>sobrecarga</b> (⚡⚡) pega ×1.5. ¡El <i>timing</i> y el objetivo deciden!</div></div>`;
+      <div class="dim" style="font-size:13px;margin-top:6px">Te emparejas con <b>otro jugador en directo</b> de tu nivel. Eliges <b>capitán</b> y <b>estancia</b>, y cada ronda planificas a tus 3 aigrons (10s): toca una habilidad y luego un <b>rival</b> para apuntar (⬆/⬇ de tipo); <b>🛡️ guardia</b> protege; con energía de sobra, <b>sobrecarga</b> (⚡⚡) pega ×1.5. La mazmorra es PvE; el combate es siempre PvP.</div></div>`;
   renderCanvases($("#s-battle"));
   $("#s-battle").querySelectorAll(".card").forEach(c=>c.onclick=()=>openDetail(c.dataset.iid));
 }
@@ -801,12 +800,12 @@ function pvpWsUrl(){
   if(API_BASE) return API_BASE.replace(/^http/,'ws')+'/pvp?token='+tok;
   return (location.protocol==='https:'?'wss':'ws')+'://'+location.host+'/pvp?token='+tok;
 }
-function startLivePvp(){
+function startLivePvp(captain,stance){
   if(!S.user||S.user.energy<1){toast('Sin energía ⚡');return;}
   if(!S.team.length){toast('Equipo vacío');return;}
   if(PVP){return;}
   let ws; try{ ws=new WebSocket(pvpWsUrl()); }catch(e){ toast('PvP no disponible'); return; }
-  PVP={ws,status:'connecting'};
+  PVP={ws,status:'connecting',captain:captain||S.team[0],stance:stance||'NEUTRAL'};
   pvpQueueUI('Conectando…');
   ws.onmessage=(ev)=>{ let m;try{m=JSON.parse(ev.data);}catch(e){return;} pvpOnMessage(m); };
   ws.onclose=()=>{ const wasPlaying=PVP&&(PVP.status==='match'); PVP=null; if(wasPlaying&&CB&&CB.live&&!CB.ended){ toast('Conexión PvP perdida'); CB=null; closeOverlay(); go('battle'); } };
@@ -824,7 +823,7 @@ function pvpQueueUI(msg){
 function pvpStatus(msg){ const e=$('#pvp-status'); if(e)e.textContent=msg; }
 function pvpOnMessage(m){
   if(!PVP)return;
-  if(m.t==='hello'){ PVP.status='queue'; pvpSend({t:'queue',captain:S.team[0],stance:'NEUTRAL'}); pvpStatus('Buscando rival…'); }
+  if(m.t==='hello'){ PVP.status='queue'; pvpSend({t:'queue',captain:PVP.captain,stance:PVP.stance}); pvpStatus('Buscando rival…'); }
   else if(m.t==='queued'){ pvpStatus('Buscando rival…'); }
   else if(m.t==='error'){ toast(m.msg==='no_energy'?'Sin energía ⚡':m.msg==='empty_team'?'Equipo vacío':'PvP no disponible'); pvpCancel(); }
   else if(m.t==='match'){ PVP.status='match'; closeOverlay(); startLiveBattle(m); }
@@ -949,11 +948,11 @@ function renderPrep(team){
       ${st('NEUTRAL','⚖️ Neutral','equilibrada')}
       ${st('DEFENSIVA','🛡️ Defensiva','+15% DEF<br>−8% ATK, +1⚡')}
     </div>
-    <button class="btn mag" data-act="goBattle">¡A COMBATIR! — ⚡1</button>`);
+    <button class="btn mag" data-act="goBattle">⚔️ BUSCAR RIVAL — ⚡1</button>`);
   $("#capgrid").querySelectorAll("[data-cap]").forEach(c=>c.onclick=()=>{prep.captain=c.dataset.cap;renderPrep(team);});
   $("#stancesel").querySelectorAll("[data-stance]").forEach(c=>c.onclick=()=>{prep.stance=c.dataset.stance;renderPrep(team);});
 }
-function goBattle(){ const p=prep; closeOverlay(); startBattle(p.captain,p.stance); }
+function goBattle(){ const p=prep; closeOverlay(); startLivePvp(p.captain,p.stance); }
 
 function startBattle(captain,stance){
   if(S.user.energy<1){toast("Sin energía ⚡ — recarga con el tiempo");return;}
