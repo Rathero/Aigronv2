@@ -248,6 +248,33 @@ test("balance: capitán/estancia dan ventaja acotada y con contrapartida", () =>
   assert.ok(def[1].atkP < base[1].atkP, "defensiva no penaliza ataque");
 });
 
+// ===================== 8b. ARQUETIPOS DE TIPO BALANCEADOS ==================
+// Cada tipo cambia la FORMA de sus stats, pero con el MISMO presupuesto total:
+// hp+atk+defP+defS+spd = 5.00. Así ningún tipo es estrictamente superior.
+test("balance: arquetipos por tipo con presupuesto igual (5.00) y acotados", () => {
+  for (const t of E.TYPES) {
+    const p = E.TYPE_STATS[t];
+    assert.ok(p, `falta perfil de stats para ${t}`);
+    const sum = p.hp + p.atk + p.defP + p.defS + p.spd;
+    assert.ok(Math.abs(sum - 5.0) < 0.001, `${t}: presupuesto ${sum.toFixed(3)} != 5.00`);
+    for (const [k, v] of Object.entries(p)) {
+      assert.ok(v >= 0.7 && v <= 1.35, `${t}.${k}=${v} fuera de [0.7,1.35]`);
+    }
+  }
+});
+
+// El bias se aplica de verdad en la generación y respeta el arquetipo (la forma
+// relativa entre dos tipos opuestos se invierte como se espera).
+test("balance: el bias diferencia tipos en la generación", () => {
+  const rg = E.RANGES.EPICA;
+  const flat = () => ({ hp: 1000, atkP: 140, atkS: 140, defP: 80, defS: 80, spd: 100 });
+  const pluma = E.applyTypeBias(flat(), "PLUMA");   // veloz/frágil
+  const metal = E.applyTypeBias(flat(), "METAL");   // lento/blindado
+  assert.ok(pluma.spd > metal.spd, "PLUMA debería ser más rápido que METAL");
+  assert.ok(metal.defP > pluma.defP, "METAL debería tener más defensa física que PLUMA");
+  assert.ok(metal.hp > pluma.hp, "METAL debería tener más HP que PLUMA");
+});
+
 // ===================== 9. DETERMINISMO CON MECÁNICAS NUEVAS =================
 test("balance: combate determinista (mismas entradas -> mismo resultado)", () => {
   const run = () => {

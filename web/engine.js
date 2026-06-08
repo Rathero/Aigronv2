@@ -72,6 +72,47 @@
     LEGENDARIA: { hp: [1100, 1400], atkP: [150, 200], atkS: [150, 200], defP: [90, 130], defS: [90, 130], spd: [100, 130] },
   };
 
+  // Arquetipo por TIPO: multiplicadores que dan FORMA distinta a cada tipo sin
+  // romper el balance. Presupuesto fijo: hp+atk+defP+defS+spd = 5.00 en TODOS
+  // (suben unos stats a costa de otros). `atk` se aplica al ataque relevante
+  // (atkP en físicos, atkS en especiales) y al otro por coherencia visual.
+  const TYPE_STATS = {
+    // --- Físicos ---
+    VOLCAN:   { hp: 1.05, atk: 1.20, defP: 0.95, defS: 0.85, spd: 0.95 }, // pegador
+    BESTIA:   { hp: 1.20, atk: 1.10, defP: 1.00, defS: 0.90, spd: 0.80 }, // bruiser corpulento
+    PLANTA:   { hp: 1.20, atk: 0.85, defP: 1.05, defS: 1.05, spd: 0.85 }, // tanque de sustain
+    CRISTAL:  { hp: 1.00, atk: 0.85, defP: 1.25, defS: 1.10, spd: 0.80 }, // muro físico
+    METAL:    { hp: 1.10, atk: 0.90, defP: 1.25, defS: 1.00, spd: 0.75 }, // blindaje lento
+    HUESO:    { hp: 0.95, atk: 1.20, defP: 0.95, defS: 0.85, spd: 1.05 }, // atacante frágil
+    HIELO:    { hp: 1.05, atk: 0.90, defP: 1.05, defS: 1.15, spd: 0.85 }, // control resistente
+    ARENA:    { hp: 1.15, atk: 0.90, defP: 1.10, defS: 1.00, spd: 0.85 }, // aguante terroso
+    PLUMA:    { hp: 0.85, atk: 1.05, defP: 0.90, defS: 0.90, spd: 1.30 }, // veloz de cristal
+    HONGO:    { hp: 1.20, atk: 0.85, defP: 1.00, defS: 1.10, spd: 0.85 }, // regenerador
+    // --- Especiales ---
+    NIEBLA:   { hp: 0.90, atk: 1.10, defP: 0.85, defS: 0.95, spd: 1.20 }, // evasivo
+    RELOJ:    { hp: 0.95, atk: 1.05, defP: 0.85, defS: 0.90, spd: 1.25 }, // tempo veloz
+    VACIO:    { hp: 0.90, atk: 1.25, defP: 0.85, defS: 0.95, spd: 1.05 }, // nuker de cristal
+    TORMENTA: { hp: 0.90, atk: 1.20, defP: 0.85, defS: 0.95, spd: 1.10 }, // nuker veloz
+    SOMBRA:   { hp: 0.90, atk: 1.15, defP: 0.90, defS: 0.90, spd: 1.15 }, // asesino
+    LUMEN:    { hp: 1.15, atk: 0.90, defP: 1.00, defS: 1.10, spd: 0.85 }, // soporte resistente
+    MAREA:    { hp: 1.15, atk: 0.95, defP: 1.00, defS: 1.05, spd: 0.85 }, // sustain marino
+    TOXICO:   { hp: 1.10, atk: 1.05, defP: 0.95, defS: 1.00, spd: 0.90 }, // desgaste
+    ECO:      { hp: 0.90, atk: 1.25, defP: 0.85, defS: 0.95, spd: 1.05 }, // nuker resonante
+    RUNA:     { hp: 1.05, atk: 0.85, defP: 1.05, defS: 1.25, spd: 0.80 }, // muro especial
+  };
+  // Aplica el arquetipo del tipo a un bloque de 6 stats (in place) y lo devuelve.
+  function applyTypeBias(base, type) {
+    const p = TYPE_STATS[type];
+    if (!p) return base;
+    base.hp = Math.round(base.hp * p.hp);
+    base.atkP = Math.max(1, Math.round(base.atkP * p.atk));
+    base.atkS = Math.max(1, Math.round(base.atkS * p.atk));
+    base.defP = Math.max(1, Math.round(base.defP * p.defP));
+    base.defS = Math.max(1, Math.round(base.defS * p.defS));
+    base.spd = Math.max(1, Math.round(base.spd * p.spd));
+    return base;
+  }
+
   // --------------------------------- Habilidades -----------------------------
   const ABILITIES = {
     ERUPCION_LENTA: { name: "Erupción", cost: 3, kind: "dmg", mult: 2.2, ignoreDef: 0.5 },
@@ -212,12 +253,12 @@
     const ability = pool[Math.floor(rng() * pool.length)];
     const name = genName(rng);
     const rg = RANGES[rarity];
-    const base_stats = {
+    const base_stats = applyTypeBias({
       hp: pickRange(rng, rg.hp),
       atkP: pickRange(rng, rg.atkP), atkS: pickRange(rng, rg.atkS),
       defP: pickRange(rng, rg.defP), defS: pickRange(rng, rg.defS),
       spd: pickRange(rng, rg.spd),
-    };
+    }, type);
     const lore = genLore(rng, tags);
 
     return { id, type, types, rarity, name, tags, base_stats, ability, lore, art_seed: hashStr(id) };
@@ -638,7 +679,7 @@
   return {
     // constantes
     TYPES, STRONG, RARITIES, RARITY_PROB, RANGES, ABILITIES, ABILITY_BY_TYPE,
-    TYPE_CLASS, isPhysical, RELICS, DUNGEON_DEPTH,
+    TYPE_STATS, applyTypeBias, TYPE_CLASS, isPhysical, RELICS, DUNGEON_DEPTH,
     ENERGY_MAX, ENERGY_REGEN_MS, COMBAT_ENERGY_MAX, TURNS_MAX, RELEASE_DUST, LEVEL_MAX,
     // funciones puras
     typeMult, typeEff, typesOf, levelCost, computeLeague, mulberry32, hashStr,

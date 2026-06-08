@@ -22,7 +22,8 @@ function refTemplate(type) {
   const rng = E.mulberry32(E.hashStr("cmp:" + type));
   const rg = E.RANGES[RARITY];
   const pr = (range) => E.pickRange(rng, range);
-  const base = { hp: pr(rg.hp), atkP: pr(rg.atkP), atkS: pr(rg.atkS), defP: pr(rg.defP), defS: pr(rg.defS), spd: pr(rg.spd) };
+  const base = E.applyTypeBias(
+    { hp: pr(rg.hp), atkP: pr(rg.atkP), atkS: pr(rg.atkS), defP: pr(rg.defP), defS: pr(rg.defS), spd: pr(rg.spd) }, type);
   const pool = E.ABILITY_BY_TYPE[type];
   const ability = pool[Math.floor(rng() * pool.length)];
   const cls = E.isPhysical(type) ? "Físico" : "Especial";
@@ -88,7 +89,7 @@ function refTemplate(type) {
   // 4. Tabla de comparación por consola.
   const sc = (base, lvl) => E.scaled(base, lvl);
   console.log(`\nGeneradas ${count} instancias (${E.TYPES.length} tipos x ${LEVELS.length} niveles). Rareza ${RARITY}.`);
-  console.log("Aviso: stats base dependen de la RAREZA, no del tipo (RANGES). El tipo cambia clase/efectividad/habilidad.\n");
+  console.log("Cada tipo tiene ARQUETIPO de stats (mismo presupuesto, distinta forma) + clase/efectividad/habilidad propias.\n");
   const pad = (s, n) => String(s).padEnd(n);
   console.log(pad("TIPO", 9) + pad("CLASE", 9) + pad("HABILIDAD", 12) + "NIVEL  " + pad("HP", 7) + pad("ATK", 6) + pad("DEF", 6) + "SPD");
   for (const t of tpls) {

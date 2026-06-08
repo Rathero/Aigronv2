@@ -65,13 +65,17 @@ test("paridad de generación: engine.genTemplate === server generator", () => {
   }
 });
 
-test("stats generados dentro de rango por rareza", () => {
+test("stats generados dentro de rango por rareza (con arquetipo de tipo)", () => {
+  const multOf = (p, k) => (k === "atkP" || k === "atkS" ? p.atk : p[k]);
   for (let i = 0; i < 1000; i++) {
     const t = E.genTemplate("rng_" + i);
     const rg = E.RANGES[t.rarity];
+    const p = E.TYPE_STATS[t.type];
     const s = t.base_stats;
     ["hp", "atkP", "atkS", "defP", "defS", "spd"].forEach((k) => {
-      assert.ok(s[k] >= rg[k][0] && s[k] <= rg[k][1], `${k} ${s[k]} ${t.rarity}`);
+      const m = multOf(p, k);
+      const lo = Math.round(rg[k][0] * m) - 1, hi = Math.round(rg[k][1] * m) + 1;
+      assert.ok(s[k] >= lo && s[k] <= hi, `${k} ${s[k]} fuera de [${lo},${hi}] ${t.type}/${t.rarity}`);
     });
     assert.ok(E.RARITIES.includes(t.rarity));
     assert.ok(E.TYPES.includes(t.type));
