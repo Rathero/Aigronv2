@@ -60,8 +60,10 @@ const SHOP_RELIC_COST = 60, SHOP_HEAL_COST = 40, SHOP_HEAL_FRAC = 0.5;
 // Estado público que consume el cliente según la etapa.
 function publicState(row) {
   const s = row.state;
+  const diff = E.dungeonDiff(row.difficulty || "NORMAL");
   const out = {
     date: C.todayStr(new Date(row.daily_date)), seed: row.seed, depth: row.depth, totalDepth: E.DUNGEON_DEPTH,
+    difficulty: row.difficulty || "NORMAL", diffLabel: diff.label, diffLevel: diff.level,
     status: row.status, stage: s.stage, coins: s.coins, relics: s.relics,
     team: s.team.map((m) => ({ tplId: m.tplId, name: m.name, type: m.type, ability: m.ability, level: m.level,
       hp: m.hp, hpMax: Math.round(m.base.hpMax * relicHpMult(s.relics)), dead: m.dead })),
@@ -94,21 +96,21 @@ async function saveRow(row) {
 }
 
 // ---------------------------------- API -------------------------------------
-// Inicia (o reanuda) la run de hoy. teamUnits = unidades del equipo del jugador.
-async function startRun(userId, teamUnits) {
+// Inicia una run NUEVA en la dificultad elegida (runs ILIMITADAS: reemplaza la
+// run activa). teamUnits = unidades del equipo del jugador.
+async function startRun(userId, teamUnits, difficulty) {
   const date = C.todayStr();
-  const existing = await loadRow(userId);
-  if (existing && C.todayStr(new Date(existing.daily_date)) === date) return publicState(existing);
-
   if (!teamUnits || !teamUnits.length) throw new Error("empty_team");
-  const seed = E.hashStr("dungeon_" + date) >>> 1;
+  const diffId = E.DUNGEON_DIFFICULTIES[difficulty] ? difficulty : "NORMAL";
+  // Mapa DIARIO por dificultad: misma mazmorra todo el día para una dificultad.
+  const seed = E.hashStr("dungeon_" + date + "_" + diffId) >>> 1;
   const team = teamUnits.slice(0, 3).map(memberFromUnit);
   const state = { team, relics: [], coins: 0, stage: "choosing", options: E.dungeonNodeOptions(seed, 0), pending: null, draft: null, shop: null, lastResult: null };
   await db.query(
-    `INSERT INTO dungeon_runs (user_id, daily_date, seed, depth, status, state, best_depth)
-     VALUES ($1,$2,$3,0,'active',$4,0)
-     ON CONFLICT (user_id) DO UPDATE SET daily_date=$2, seed=$3, depth=0, status='active', state=$4, best_depth=0, updated_at=now()`,
-    [userId, date, seed, JSON.stringify(state)]
+    `INSERT INTO dungeon_runs (user_id, daily_date, seed, depth, status, state, best_depth, difficulty)
+     VALUES ($1,$2,$3,0,'active',$4,0,$5)
+     ON CONFLICT (user_id) DO UPDATE SET daily_date=$2, seed=$3, depth=0, status='active', state=$4, best_depth=0, difficulty=$5, updated_at=now()`,
+    [userId, date, seed, JSON.stringify(state), diffId]
   );
   return publicState(await loadRow(userId));
 }
@@ -119,8 +121,9 @@ async function getRun(userId) {
   return publicState(row);
 }
 
-// Elige una de las opciones de nodo. templates = lote de hoy; baseLevel = nivel medio.
-async function chooseNode(userId, choiceIdx, templates, baseLevel) {
+// Elige una de las opciones de nodo. templates = lote de hoy. El nivel enemigo lo
+// fija la DIFICULTAD de la run (no el nivel del jugador).
+async function chooseNode(userId, choiceIdx, templates) {
   const row = await loadRow(userId);
   if (!row || row.status !== "active") throw new Error("no_active_run");
   const s = row.state;
@@ -129,6 +132,7 @@ async function chooseNode(userId, choiceIdx, templates, baseLevel) {
   if (!node) throw new Error("bad_choice");
 
   if (COMBAT_KINDS.includes(node.type)) {
+    const baseLevel = E.dungeonDiff(row.difficulty || "NORMAL").level;
     const enemy = E.dungeonEnemyTeam(row.seed, row.depth, node.type, templates, baseLevel);
     s.pending = { kind: node.type, enemy: enemy.map(publicEnemyStats), battleSeed: battleSeedFor(row.seed, row.depth) };
     s.stage = "combat";
@@ -177,9 +181,10 @@ async function resolveCombat(userId, decisions) {
   const kind = s.pending.kind;
   let out = { win, kind, turns: result.turns, log: result.log };
 
+  const diff = E.dungeonDiff(row.difficulty || "NORMAL");
   if (win) {
     const eff = E.relicRunEffects(s.relics);
-    let coinGain = Math.round((8 + row.depth * 4 + (kind === "ELITE" ? 15 : 0) + (kind === "JEFE" ? 50 : 0)) * eff.coinMult);
+    let coinGain = Math.round((8 + row.depth * 4 + (kind === "ELITE" ? 15 : 0) + (kind === "JEFE" ? 50 : 0)) * eff.coinMult * diff.coinMult);
     s.coins += coinGain;
     if (eff.healAfter) healTeam(s, eff.healAfter);
     out.coins = coinGain;
@@ -198,11 +203,17 @@ async function resolveCombat(userId, decisions) {
   }
   s.lastResult = out;
 
-  // Recompensa a la cuenta al terminar la run (cleared o dead).
+  // Al terminar la run (cleared o dead): registra el mejor del día por dificultad y
+  // concede monedas a la cuenta SOLO si superas tu mejor profundidad (anti-farmeo;
+  // runs ilimitadas). Repetir sin mejorar no infla el saldo.
   if (row.status !== "active") {
-    const reward = row.depth * 15 + (row.status === "cleared" ? 100 : 0) + Math.floor(s.coins * 0.5);
-    await db.query("UPDATE users SET coins = coins + $1 WHERE id=$2", [reward, userId]);
-    out.accountReward = reward;
+    const date = C.todayStr();
+    const sc = await endRunScore(userId, date, row.difficulty || "NORMAL", row.depth, row.status === "cleared");
+    if (sc.improved) {
+      const reward = Math.round((row.depth * 15 + (row.status === "cleared" ? 100 : 0)) * diff.coinMult) + Math.floor(s.coins * 0.5);
+      await db.query("UPDATE users SET coins = coins + $1 WHERE id=$2", [reward, userId]);
+      out.accountReward = reward;
+    } else { out.accountReward = 0; out.noReward = "no_best"; }
   }
   await saveRow(row);
   return Object.assign({ state: publicState(await loadRow(userId)) }, out);
@@ -263,14 +274,30 @@ async function shopAction(userId, action, arg) {
   return publicState(await loadRow(userId));
 }
 
-async function ranking(userId) {
+// Registra el mejor del día por (usuario, dificultad). Devuelve si MEJORÓ.
+async function endRunScore(userId, date, difficulty, depth, cleared) {
+  const prev = await db.query(
+    "SELECT best_depth FROM dungeon_scores WHERE daily_date=$1 AND user_id=$2 AND difficulty=$3",
+    [date, userId, difficulty]);
+  const prevBest = prev.rowCount ? prev.rows[0].best_depth : -1;
+  await db.query(
+    `INSERT INTO dungeon_scores (daily_date, user_id, difficulty, best_depth, cleared)
+     VALUES ($1,$2,$3,$4,$5)
+     ON CONFLICT (daily_date, user_id, difficulty) DO UPDATE
+       SET best_depth = GREATEST(dungeon_scores.best_depth, EXCLUDED.best_depth),
+           cleared = dungeon_scores.cleared OR EXCLUDED.cleared`,
+    [date, userId, difficulty, depth, cleared]);
+  return { improved: depth > prevBest, prevBest };
+}
+
+async function ranking(userId, difficulty) {
+  const diffId = E.DUNGEON_DIFFICULTIES[difficulty] ? difficulty : "NORMAL";
   const r = await db.query(
-    `SELECT u.display_name AS name, d.user_id, d.depth, d.status
-       FROM dungeon_runs d JOIN users u ON u.id = d.user_id
-      WHERE d.daily_date = CURRENT_DATE
-      ORDER BY d.depth DESC, (d.status='cleared') DESC LIMIT 50`
-  );
-  return r.rows.map((x, i) => ({ pos: i + 1, name: x.name, depth: x.depth, cleared: x.status === "cleared", me: x.user_id === userId }));
+    `SELECT u.display_name AS name, d.user_id, d.best_depth, d.cleared
+       FROM dungeon_scores d JOIN users u ON u.id = d.user_id
+      WHERE d.daily_date = CURRENT_DATE AND d.difficulty = $1
+      ORDER BY d.best_depth DESC, d.cleared DESC LIMIT 50`, [diffId]);
+  return { difficulty: diffId, rows: r.rows.map((x, i) => ({ pos: i + 1, name: x.name, depth: x.best_depth, cleared: x.cleared, me: x.user_id === userId })) };
 }
 
 module.exports = { startRun, getRun, chooseNode, resolveCombat, draftRelic, skipDraft, shopAction, ranking, publicState };

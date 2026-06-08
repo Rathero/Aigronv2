@@ -142,8 +142,8 @@ async function loginAs(subject) {
   ok(battles > 0, "se jugaron combates de mazmorra (" + battles + ")");
   ok(detOk, "combate de mazmorra: servidor == motor (determinista con reliquias)");
   ok(["cleared", "dead"].includes(st.status), "la run termina (status=" + st.status + ", depth=" + st.depth + ")");
-  const dgRank = await api(t1, "/dungeon/ranking");
-  ok(dgRank.status === 200 && Array.isArray(dgRank.data), "/dungeon/ranking ok");
+  const dgRank = await api(t1, "/dungeon/ranking?difficulty=NORMAL");
+  ok(dgRank.status === 200 && Array.isArray(dgRank.data.rows), "/dungeon/ranking ok");
 
   console.log(`\nResultado: ${pass} ok, ${fail} fallos`);
   process.exit(fail ? 1 : 0);

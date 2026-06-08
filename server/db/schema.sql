@@ -141,3 +141,17 @@ CREATE TABLE IF NOT EXISTS dungeon_runs (
   updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_dungeon_daily ON dungeon_runs(daily_date, depth DESC);
+-- Dificultad de la run ACTIVA (Fácil/Normal/Difícil/Experto/Pesadilla).
+ALTER TABLE dungeon_runs ADD COLUMN IF NOT EXISTS difficulty TEXT NOT NULL DEFAULT 'NORMAL';
+
+-- Mejor profundidad del día por (usuario, dificultad): soporta runs ILIMITADAS y
+-- ranking por dificultad. Se actualiza al terminar cada run.
+CREATE TABLE IF NOT EXISTS dungeon_scores (
+  daily_date DATE NOT NULL,
+  user_id    UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  difficulty TEXT NOT NULL,
+  best_depth INT  NOT NULL DEFAULT 0,
+  cleared    BOOLEAN NOT NULL DEFAULT false,
+  PRIMARY KEY (daily_date, user_id, difficulty)
+);
+CREATE INDEX IF NOT EXISTS idx_dscores ON dungeon_scores(daily_date, difficulty, best_depth DESC);

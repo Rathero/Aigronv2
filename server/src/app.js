@@ -549,7 +549,7 @@ const dungeonErr = (res, e) => res.status(400).json({ error: e.message });
 app.post("/dungeon/start", authMiddleware, wrap(async (req, res) => {
   try {
     const A = await buildTeamUnits(req.userId);
-    res.json(await dungeon.startRun(req.userId, A));
+    res.json(await dungeon.startRun(req.userId, A, req.body && req.body.difficulty));
   } catch (e) { dungeonErr(res, e); }
 }));
 app.get("/dungeon", authMiddleware, wrap(async (req, res) => {
@@ -558,8 +558,7 @@ app.get("/dungeon", authMiddleware, wrap(async (req, res) => {
 app.post("/dungeon/choose", authMiddleware, wrap(async (req, res) => {
   try {
     const tpls = await todayTemplates();
-    const base = teamAvgLevel(await buildTeamUnits(req.userId));
-    res.json(await dungeon.chooseNode(req.userId, (req.body && req.body.choice) | 0, tpls, base));
+    res.json(await dungeon.chooseNode(req.userId, (req.body && req.body.choice) | 0, tpls));
   } catch (e) { dungeonErr(res, e); }
 }));
 app.post("/dungeon/battle", authMiddleware, wrap(async (req, res) => {
@@ -577,7 +576,7 @@ app.post("/dungeon/shop", authMiddleware, wrap(async (req, res) => {
   catch (e) { dungeonErr(res, e); }
 }));
 app.get("/dungeon/ranking", authMiddleware, wrap(async (req, res) => {
-  res.json(await dungeon.ranking(req.userId));
+  res.json(await dungeon.ranking(req.userId, (req.query && req.query.difficulty) || "NORMAL"));
 }));
 
 // --------------------------------- HEALTH ------------------------------------

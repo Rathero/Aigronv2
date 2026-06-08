@@ -1255,6 +1255,7 @@ function dgHeader(){
      <div class="hpbar"><i style="width:${m.dead?0:Math.round(m.hp/m.hpMax*100)}%;background:${m.hp/m.hpMax<0.3?'var(--red)':m.hp/m.hpMax<0.6?'var(--gold)':'var(--green)'}"></i></div>
      <div style="font-size:10px">${m.dead?'☠️':m.hp+'/'+m.hpMax}</div></div>`).join("");
   return `<div class="dg-bar"><b>Nodo ${Math.min(D.depth+1,D.totalDepth)}/${D.totalDepth}</b>
+       <span class="dim">·</span><span style="color:var(--epi)">${D.diffLabel||''} · enemigos nv${D.diffLevel||'?'}</span>
        <span class="dim">·</span><span style="color:var(--gold)">🪙 ${D.coins}</span>
        <span style="margin-left:auto;display:flex;gap:3px">${pips.join("")}</span></div>
      <div class="dg-team">${team}</div>
@@ -1269,19 +1270,20 @@ async function renderDungeon(){
     el.innerHTML=`<h2 class="title">MAZMORRA <small>del día</small></h2>
       <div class="panel"><div class="tc" style="font-size:40px">🗺️</div>
         <div class="tc mb8"><b>Mazmorra del Día</b></div>
-        <div class="dim" style="font-size:13px;margin-bottom:10px">Recorre ${ENGINE.DUNGEON_DEPTH} nodos de dificultad creciente con tu equipo. El HP <b>se arrastra</b> entre combates. Recoge <b>reliquias</b> para crear tu build. Si caes, acaba la run. Mismo mapa para todos hoy → ¿hasta dónde llegas?</div>
-        <button class="btn mag" data-act="dgStart">ENTRAR — equipo actual</button></div>
-      <div class="panel"><b style="font-size:13px">Ranking de hoy</b><div id="dg-rank" class="mt8 dim" style="font-size:12px">Cargando…</div></div>`;
+        <div class="dim" style="font-size:13px">Recorre ${ENGINE.DUNGEON_DEPTH} nodos con tu equipo. El HP <b>se arrastra</b>, recoges <b>reliquias</b> y si caes acaba la run. <b>Elige dificultad</b>: el nivel de los enemigos lo fija ella, no el tuyo. Runs ilimitadas.</div></div>
+      ${difficultyPicker()}
+      ${dgRankSection()}`;
     loadDgRank(); return;
   }
   if(D.status==='cleared'||D.status==='dead'){
-    el.innerHTML=`<h2 class="title">MAZMORRA</h2>
+    el.innerHTML=`<h2 class="title">MAZMORRA <small>${D.diffLabel||''}</small></h2>
       <div class="panel tc">
         <div style="font-size:40px">${D.status==='cleared'?'🏆':'☠️'}</div>
         <div class="mb8"><b>${D.status==='cleared'?'¡MAZMORRA COMPLETADA!':'Run terminada'}</b></div>
-        <div class="dim" style="font-size:13px">Llegaste al nodo <b style="color:var(--cyan)">${D.depth}/${D.totalDepth}</b>. Vuelve mañana: mapa nuevo.</div></div>
+        <div class="dim" style="font-size:13px">Llegaste al nodo <b style="color:var(--cyan)">${D.depth}/${D.totalDepth}</b> en <b>${D.diffLabel}</b>. Reintenta o cambia de dificultad.</div></div>
       ${dgHeader()}
-      <div class="panel"><b style="font-size:13px">Ranking de hoy</b><div id="dg-rank" class="mt8 dim" style="font-size:12px">Cargando…</div></div>`;
+      ${difficultyPicker()}
+      ${dgRankSection()}`;
     renderCanvases(el); loadDgRank(); return;
   }
   let body='';
@@ -1310,12 +1312,29 @@ async function renderDungeon(){
   el.innerHTML=`<h2 class="title">MAZMORRA <small>nodo ${Math.min(D.depth+1,D.totalDepth)}/${D.totalDepth}</small></h2>${dgHeader()}${body}`;
   renderCanvases(el);
 }
+const DG_ORDER=['FACIL','NORMAL','DIFICIL','EXPERTO','PESADILLA'];
+let dgDiff='NORMAL';
+function difficultyPicker(){
+  const cards=DG_ORDER.map(id=>{const d=ENGINE.DUNGEON_DIFFICULTIES[id];
+    return `<div class="relic-card" style="align-items:center">
+      <div style="flex:1"><b>${d.label}</b><div class="dim" style="font-size:11px">Enemigos nv${d.level} · recompensa ×${d.coinMult}</div></div>
+      <button class="btn sm" data-act="dgStart" data-arg="${id}">JUGAR</button></div>`;}).join("");
+  return `<div class="panel"><b style="font-size:13px">Elige dificultad</b><div class="mt8">${cards}</div></div>`;
+}
+function dgRankSection(){
+  const tabs=DG_ORDER.map(id=>`<button class="f ${dgDiff===id?'on':''}" data-act="dgRankTab" data-arg="${id}">${ENGINE.DUNGEON_DIFFICULTIES[id].label}</button>`).join("");
+  return `<div class="panel"><b style="font-size:13px">Ranking de hoy</b>
+    <div class="filters mt8">${tabs}</div>
+    <div id="dg-rank" class="mt8 dim" style="font-size:12px">Cargando…</div></div>`;
+}
+function dgRankTab(id){ dgDiff=id; renderDungeon(); }
 async function loadDgRank(){
-  try{ const r=await api('/dungeon/ranking'); const box=$("#dg-rank"); if(!box)return;
-    box.innerHTML=r.length?r.slice(0,10).map(x=>`<div class="rank-row ${x.me?'me':''}" style="padding:5px 4px"><span class="pos">${x.pos}</span><span class="nm">${x.name}</span><span style="color:var(--gold)">${x.cleared?'🏆 ':''}nodo ${x.depth}</span></div>`).join(""):'Nadie ha entrado aún hoy.';
+  try{ const r=await api('/dungeon/ranking?difficulty='+dgDiff); const box=$("#dg-rank"); if(!box)return;
+    const rows=r.rows||[];
+    box.innerHTML=rows.length?rows.slice(0,10).map(x=>`<div class="rank-row ${x.me?'me':''}" style="padding:5px 4px"><span class="pos">${x.pos}</span><span class="nm">${x.name}</span><span style="color:var(--gold)">${x.cleared?'🏆 ':''}nodo ${x.depth}</span></div>`).join(""):'Nadie ha entrado aún en esta dificultad.';
   }catch(e){}
 }
-async function dgStart(){ try{ D=await api('/dungeon/start',{method:'POST'}); renderDungeon(); }catch(e){ toast(e.data&&e.data.error==='empty_team'?'Configura tu equipo en Combate':'No se pudo entrar'); } }
+async function dgStart(diff){ try{ dgDiff=ENGINE.DUNGEON_DIFFICULTIES[diff]?diff:dgDiff; D=await api('/dungeon/start',{method:'POST',body:{difficulty:dgDiff}}); renderDungeon(); }catch(e){ toast(e.data&&e.data.error==='empty_team'?'Configura tu equipo en INICIO':'No se pudo entrar'); } }
 async function dgChoose(i){ try{ D=await api('/dungeon/choose',{method:'POST',body:{choice:+i}}); renderDungeon(); }catch(e){ toast('No se pudo'); } }
 async function dgDraft(i){ try{ D=await api('/dungeon/draft',{method:'POST',body:{choice:+i}}); renderDungeon(); }catch(e){ toast('No se pudo'); } }
 async function dgSkipDraft(){ try{ D=await api('/dungeon/draft',{method:'POST',body:{skip:true}}); renderDungeon(); }catch(e){} }
@@ -1340,6 +1359,7 @@ function showDungeonResult(r){
   if(r.cleared) extra='<div style="color:var(--gold);margin-top:6px">🏆 ¡Mazmorra completada!</div>';
   else if(r.dead) extra='<div style="color:var(--red);margin-top:6px">☠️ Tu equipo cayó.</div>';
   if(r.accountReward) extra+=`<div class="mt8">🪙 Recompensa a tu cuenta: <b style="color:var(--gold)">+${r.accountReward}</b></div>`;
+  else if(r.noReward==='no_best'&&(r.cleared||r.dead)) extra+=`<div class="dim mt8" style="font-size:12px">Sin recompensa extra: no superaste tu mejor profundidad de hoy en esta dificultad.</div>`;
   openOverlay(`<div class="center">
      <div style="font-family:var(--pixel);font-size:15px;color:${win?'var(--gold)':'var(--ink-dim)'};margin-bottom:8px">${win?'¡NODO SUPERADO!':'DERROTA'}</div>
      <div style="font-size:44px">${win?'⚔️':'☠️'}</div>
@@ -1439,7 +1459,7 @@ const ACTIONS={
   purchase:(a)=>purchase(a),
   openTutorial:()=>openTutorial(),
   tutNext:()=>tutNext(), tutPrev:()=>tutPrev(), tutDone:()=>tutDone(),
-  dgStart:()=>dgStart(), dgChoose:(a)=>dgChoose(a), dgDraft:(a)=>dgDraft(a), dgSkipDraft:()=>dgSkipDraft(),
+  dgStart:(a)=>dgStart(a), dgRankTab:(a)=>dgRankTab(a), dgChoose:(a)=>dgChoose(a), dgDraft:(a)=>dgDraft(a), dgSkipDraft:()=>dgSkipDraft(),
   dgBuy:(a)=>dgBuy(a), dgHeal:()=>dgHeal(), dgLeaveShop:()=>dgLeaveShop(), dgFight:()=>dgFight(), dgContinue:()=>dgContinue(),
   goDungeon:()=>go('dungeon')
 };

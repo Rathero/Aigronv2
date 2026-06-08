@@ -331,6 +331,26 @@ test("generación de mazmorra determinista", () => {
   assert.equal(e1.length, 3, "equipo enemigo de 3");
 });
 
+test("dificultades de mazmorra: 5 niveles fijos crecientes + recompensa", () => {
+  const ids = ["FACIL", "NORMAL", "DIFICIL", "EXPERTO", "PESADILLA"];
+  const levels = ids.map((id) => E.DUNGEON_DIFFICULTIES[id].level);
+  const mults = ids.map((id) => E.DUNGEON_DIFFICULTIES[id].coinMult);
+  assert.deepEqual(levels, [10, 30, 50, 75, 100], "niveles base fijos");
+  for (let i = 1; i < 5; i++) { assert.ok(levels[i] > levels[i - 1], "nivel crece"); assert.ok(mults[i] > mults[i - 1], "recompensa crece"); }
+  assert.equal(E.dungeonDiff("desconocida").label, E.DUNGEON_DIFFICULTIES.NORMAL.label, "fallback NORMAL");
+});
+
+test("nivel enemigo lo fija la DIFICULTAD, no el jugador", () => {
+  const seed = E.hashStr("dungeon_2026-06-06_NORMAL");
+  const tpls = E.dailyBatch("2026-06-06", 40);
+  const lvls = (base) => E.dungeonEnemyTeam(seed, 3, "COMBATE", tpls, base).map((u) => u.level);
+  // Mismo (seed, depth, base) -> mismos niveles (determinista, sin depender del jugador).
+  assert.deepEqual(lvls(10), lvls(10), "determinista por nivel de dificultad");
+  // Mayor nivel de dificultad -> enemigos de mayor nivel.
+  const avg = (a) => a.reduce((s, x) => s + x, 0) / a.length;
+  assert.ok(avg(lvls(E.DUNGEON_DIFFICULTIES.PESADILLA.level)) > avg(lvls(E.DUNGEON_DIFFICULTIES.FACIL.level)), "Pesadilla > Fácil");
+});
+
 test("las decisiones del jugador influyen en el combate (timing importa)", () => {
   // Con un equipo fijo, lanzar habilidades en distintos turnos puede cambiar
   // el nº de turnos o el HP final en al menos un seed (no es no-op).

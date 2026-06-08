@@ -648,6 +648,16 @@
 
   // ----------------------- Generación determinista de la run -----------------
   const DUNGEON_DEPTH = 8; // nodos hasta el jefe (incluido)
+  // Dificultades elegibles: nivel BASE FIJO de los enemigos (sube con profundidad/
+  // élite/jefe sobre esa base) y multiplicador de recompensa. El jugador elige.
+  const DUNGEON_DIFFICULTIES = {
+    FACIL:     { label: "Fácil",     level: 10,  coinMult: 1.0 },
+    NORMAL:    { label: "Normal",    level: 30,  coinMult: 1.6 },
+    DIFICIL:   { label: "Difícil",   level: 50,  coinMult: 2.5 },
+    EXPERTO:   { label: "Experto",   level: 75,  coinMult: 3.5 },
+    PESADILLA: { label: "Pesadilla", level: 100, coinMult: 5.0 },
+  };
+  const dungeonDiff = (id) => DUNGEON_DIFFICULTIES[id] || DUNGEON_DIFFICULTIES.NORMAL;
   function dgnRng(seed, depth, salt) { return mulberry32(hashStr("dgn:" + seed + ":" + depth + ":" + (salt || "")) >>> 0); }
 
   // Dos opciones de nodo en cada profundidad (la última es el JEFE).
@@ -704,7 +714,7 @@
   return {
     // constantes
     TYPES, STRONG, RARITIES, RARITY_PROB, RANGES, ABILITIES, ABILITY_BY_TYPE,
-    TYPE_STATS, applyTypeBias, TYPE_CLASS, isPhysical, RELICS, DUNGEON_DEPTH,
+    TYPE_STATS, applyTypeBias, TYPE_CLASS, isPhysical, RELICS, DUNGEON_DEPTH, DUNGEON_DIFFICULTIES, dungeonDiff,
     ENERGY_MAX, ENERGY_REGEN_MS, COMBAT_ENERGY_MAX, TURNS_MAX, RELEASE_DUST, LEVEL_MAX,
     // funciones puras
     typeMult, typeEff, typesOf, levelCost, computeLeague, mulberry32, hashStr,
