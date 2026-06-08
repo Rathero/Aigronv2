@@ -89,6 +89,11 @@ test("escalado por nivel: +4% por nivel", () => {
   assert.equal(E.scaled(1000, 10), Math.round(1000 * 1.36));
 });
 
+test("nivel máximo = 100 (escala x4.96 a tope)", () => {
+  assert.equal(E.LEVEL_MAX, 100);
+  assert.equal(E.scaled(1000, 100), Math.round(1000 * (1 + 0.04 * 99))); // 4960
+});
+
 test("umbrales de liga", () => {
   assert.equal(E.computeLeague(0), "BRONCE");
   assert.equal(E.computeLeague(99), "BRONCE");

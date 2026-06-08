@@ -50,6 +50,20 @@ test("balance: todo combate termina (<=TURNS_MAX) con ganador, sin excepción", 
   }
 });
 
+// A nivel máximo (100) y en mismatches extremos de nivel, el combate sigue
+// terminando bien (sin overflow/NaN/cuelgue).
+test("balance: combates a nivel alto y dispares terminan limpio", () => {
+  const cases = [[100, 100], [1, 100], [100, 1], [50, 50], [25, 75]];
+  for (let s = 0; s < cases.length * 20; s++) {
+    const [la, lb] = cases[s % cases.length];
+    const A = teamFrom([s + 1, s + 2, s + 3], "A", la);
+    const B = teamFrom([s + 51, s + 52, s + 53], "B", lb);
+    const r = E.resolveBattle(A, B, 12000 + s, allAction(A, "ability"));
+    assert.ok(r.turns >= 1 && r.turns <= E.TURNS_MAX);
+    assert.ok((r.winner === "A" || r.winner === "B") && Number.isFinite(r.hpA) && Number.isFinite(r.hpB));
+  }
+});
+
 // El sustain extremo NO es inmortal: un equipo defensivo/curador enfrenta a uno
 // agresivo y el combate termina igualmente (no se eterniza hasta el cap por bug).
 test("balance: sustain máximo vs agresión -> el combate termina y decide", () => {

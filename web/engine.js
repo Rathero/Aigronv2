@@ -176,7 +176,7 @@
   const TURNS_MAX = 60;
   const RELEASE_DUST = { COMUN: 5, RARA: 12, EPICA: 30, LEGENDARIA: 80 };
   const levelCost = (level) => ({ dust: 10 * level, coins: 50 * level });
-  const LEVEL_MAX = 20;
+  const LEVEL_MAX = 100;
 
   // Ligas
   function computeLeague(lp) {

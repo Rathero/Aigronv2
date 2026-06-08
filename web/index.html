@@ -652,7 +652,8 @@ function openDetail(iid){
   const cost={dust:10*inst.level,coins:50*inst.level};
   const inTeam=S.team.includes(iid);
   const stats=t.stats||t.base_stats;
-  const canLevel=S.user.dust>=cost.dust&&S.user.coins>=cost.coins&&inst.level<20;
+  const atMax=inst.level>=ENGINE.LEVEL_MAX;
+  const canLevel=S.user.dust>=cost.dust&&S.user.coins>=cost.coins&&!atMax;
   openOverlay(`<div class="center">
     ${artTag(t,9)}
     <div style="font-size:20px;font-weight:700;margin-top:4px">${t.name} <span class="dim" style="font-size:13px">Nv.${inst.level}</span></div>
@@ -668,7 +669,7 @@ function openDetail(iid){
       <div class="dim" style="font-size:11px;margin-top:5px">⚡ = energía de combate: sube 1 por ronda; lanza la habilidad cuando llegue a ${ABILITIES[t.ability].cost}.</div>
     </div>
     <div class="row mb8">
-      <button class="btn sm" style="flex:1" data-act="levelUp" data-arg="${iid}" ${canLevel?'':'disabled'}>SUBIR NV (${cost.dust}✨ ${cost.coins}🪙)</button>
+      <button class="btn sm" style="flex:1" data-act="levelUp" data-arg="${iid}" ${canLevel?'':'disabled'}>${atMax?`NIVEL MÁX (${ENGINE.LEVEL_MAX})`:`SUBIR NV (${cost.dust}✨ ${cost.coins}🪙)`}</button>
     </div>
     <div class="row mb8">
       <button class="btn sm ghost" style="flex:1" data-act="toggleFav" data-arg="${iid}">${inst.favorite?'★ Favorito':'☆ Favorito'}</button>
