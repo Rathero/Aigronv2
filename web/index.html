@@ -748,16 +748,30 @@ function editTeam(){
   teamSel=S.team.slice();   // init UNA vez (no en cada re-render)
   renderTeamPicker();
 }
+function teamPickCard(i){
+  const sel=teamSel.includes(i.instance_id);
+  return `<div class="card r-${i.template.rarity}" data-iid="${i.instance_id}" style="${sel?'outline:3px solid var(--cyan);outline-offset:-3px':''}">
+    ${sel?`<div class="badge">${teamSel.indexOf(i.instance_id)+1}</div>`:''}
+    <div class="lv">L${i.level}</div>${artTag(i.template,6)}
+    <div class="nm">${i.template.name}</div></div>`;
+}
 function renderTeamPicker(){
-  const grid=S.collection.map(i=>{const sel=teamSel.includes(i.instance_id);
-    return `<div class="card r-${i.template.rarity}" data-iid="${i.instance_id}" style="${sel?'outline:3px solid var(--cyan);outline-offset:-3px':''}">
-      ${sel?`<div class="badge">${teamSel.indexOf(i.instance_id)+1}</div>`:''}
-      <div class="lv">L${i.level}</div>${artTag(i.template,6)}
-      <div class="nm">${i.template.name}</div></div>`;}).join("");
-  openOverlay(`<div><div class="center mb8"><b>Elige hasta 3</b></div>
-    <div class="grid" id="teamgrid" style="max-height:46vh;overflow-y:auto">${grid}</div>
+  const byId=id=>S.collection.find(c=>c.instance_id===id);
+  const selected=teamSel.map(byId).filter(Boolean);
+  const rest=S.collection.filter(i=>!teamSel.includes(i.instance_id));
+  const empties=Array.from({length:Math.max(0,3-selected.length)},()=>
+    `<div class="card" style="border-style:dashed;opacity:.45;display:flex;align-items:center;justify-content:center;min-height:96px"><span class="dim" style="font-size:11px">vacío</span></div>`).join("");
+  const selGrid=selected.map(teamPickCard).join("")+empties;
+  const restGrid=rest.length?rest.map(teamPickCard).join(""):`<div class="dim tc" style="grid-column:1/-1;padding:16px">No tienes más aigrons.</div>`;
+  openOverlay(`<div>
+    <div class="center mb8"><b>Tu equipo ${selected.length}/3</b>
+      <div class="dim" style="font-size:11px">toca un elegido para quitarlo</div></div>
+    <div class="grid">${selGrid}</div>
+    <div class="center" style="margin:12px 0 6px"><b style="font-size:13px">Cambiar / añadir</b>
+      <div class="dim" style="font-size:11px">toca uno para meterlo al equipo</div></div>
+    <div class="grid" id="restgrid" style="max-height:34vh;overflow-y:auto">${restGrid}</div>
     <button class="btn mt8" data-act="saveTeam">GUARDAR EQUIPO</button></div>`);
-  $("#teamgrid").querySelectorAll(".card").forEach(c=>c.onclick=()=>{
+  $("#modal").querySelectorAll(".card[data-iid]").forEach(c=>c.onclick=()=>{
     const iid=c.dataset.iid;const k=teamSel.indexOf(iid);
     if(k>=0)teamSel.splice(k,1);else if(teamSel.length<3)teamSel.push(iid);else{toast("Máx 3");return;}
     renderTeamPicker();});   // re-render SIN resetear teamSel
