@@ -355,6 +355,9 @@
 
   // Reducción de daño al estar en guardia (mecánica de proteger).
   const GUARD_REDUCTION = 0.6; // recibe 60% del daño
+  // Multiplicador global de daño directo: ajusta la DURACIÓN media del combate
+  // (~10-15 rondas) sin tocar el balance relativo (tipos, defensa, arquetipos).
+  const DAMAGE_SCALE = 1.6;
   // Objetivo efectivo de un golpe de objetivo único: una unidad enemiga EN GUARDIA
   // intercepta el golpe (protege a sus aliados); si no, el objetivo deseado (si vive)
   // o, en su defecto, el de menor HP%. Los AoE no se redirigen (golpean a todos).
@@ -377,7 +380,11 @@
     const critM = crit ? 1.8 : 1;
     const markM = tgt.markTurns > 0 ? 1 + tgt.markAmt : 1;
     const guardM = tgt.guarding ? GUARD_REDUCTION : 1;
-    const raw = Math.max(1, Math.round(effAtk(att) * mult * typeM * critM * markM * guardM * (100 / (100 + defv))));
+    // Constante de armadura ESCALADA por nivel: así la mitigación 100/(100+def) es
+    // invariante al nivel (atk, def y armorK suben igual) -> el combate dura las
+    // mismas rondas a cualquier nivel (no se eterniza a nivel alto).
+    const armorK = 100 * (1 + 0.04 * (((tgt.level || 1)) - 1));
+    const raw = Math.max(1, Math.round(effAtk(att) * mult * typeM * critM * markM * guardM * DAMAGE_SCALE * (armorK / (armorK + defv))));
     // Escudo/barrera: absorbe daño antes de tocar el HP.
     let dmg = raw, shielded = false;
     if (tgt.shield > 0) { const ab = Math.min(tgt.shield, dmg); tgt.shield -= ab; dmg -= ab; shielded = ab > 0; }

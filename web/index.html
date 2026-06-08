@@ -157,6 +157,7 @@ h2.title small{font-family:var(--ui);font-size:13px;color:var(--ink-dim);font-we
 .hpbar{height:7px;background:#0a0818;border:1px solid var(--line);margin:2px 4px}
 .hpbar i{display:block;height:100%;background:var(--green);transition:width .3s}
 .fname{font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.fighter .flv{position:absolute;top:2px;left:2px;background:#0a0818cc;font-size:9px;padding:1px 3px;border:1px solid var(--line);z-index:2;line-height:1.2}
 .energy-pips{display:flex;gap:2px;justify-content:center;margin-top:2px}
 .pip{width:6px;height:6px;background:#0a0818;border:1px solid var(--line)}
 .pip.on{background:var(--cyan);box-shadow:0 0 4px var(--cyan)}
@@ -834,6 +835,7 @@ function startBattle(captain,stance){
 function buildArena(){
   const fHTML=(u)=>`<div class="fighter ${u.team==='B'?'enemy':''}" data-uid="${u.uid}" ${u.team==='B'?`data-act="planEnemy" data-arg="${u.uid}"`:''}>
      <div class="thint"></div>
+     <div class="flv">Nv${u.level}</div>
      ${artTag(tpl(u.tplId),5)}
      <div class="hpbar"><i style="width:100%"></i></div>
      <div class="hpnum"></div>
@@ -925,7 +927,7 @@ function renderPlanner(){
     return `<div class="plan-unit ${CB.selecting===u.uid?'sel':''}">
       <div class="pu-spr">${artTag(tpl(u.tplId),4)}</div>
       <div class="pu-body">
-        <div class="pu-nm">${u.name} <span class="dim" style="font-size:10px">⚡${proj}/${ab.cost}</span></div>
+        <div class="pu-nm"><span class="dim" style="font-size:10px">Nv${u.level}</span> ${u.name} <span class="dim" style="font-size:10px">⚡${proj}/${ab.cost}</span></div>
         <div class="pu-ab">✨ ${ab.name}: ${abilityShort(u.ability)}</div>
         <div class="pu-lbl">${lbl}</div>
       </div>
