@@ -546,8 +546,14 @@ function cardHTML(inst,extra){const t=inst.template;return `<div class="card r-$
 function tplCardHTML(t){return `<div class="card r-${t.rarity}">
   ${artTag(t,5)}
   <div class="nm">${t.name}</div><div class="ty rar-txt ${t.rarity}">${t.rarity}</div></div>`;}
-function statBars(o){
-  const max={hp:1400,atkP:200,atkS:200,defP:130,defS:130,spd:130};
+function statBars(o,level){
+  // Tope teórico por stat = (tope rareza máxima LEGENDARIA) x (arquetipo máx ~1.3),
+  // escalado al MISMO nivel que el valor mostrado -> el nivel se cancela y la barra
+  // refleja la FORMA del aigron (rareza + arquetipo), no su nivel. Así nunca se
+  // llenan todas: ni el legendario perfecto sube unas sin bajar otras.
+  const f=1+0.04*((level||1)-1);
+  const base={hp:1680,atkP:250,atkS:250,defP:163,defS:163,spd:169};
+  const max={};for(const k in base)max[k]=base[k]*f;
   const row=(l,v,k,c)=>`<div class="stat"><span class="lab">${l}</span><span class="bar"><i class="fill" style="width:${Math.min(100,v/max[k]*100)}%;background:${c}"></i></span><span class="val">${v}</span></div>`;
   // back-compat por si llegan stats antiguas {atk,def}
   const atkP=o.atkP!=null?o.atkP:o.atk, atkS=o.atkS!=null?o.atkS:o.atk, defP=o.defP!=null?o.defP:o.def, defS=o.defS!=null?o.defS:o.def;
@@ -663,7 +669,7 @@ function openDetail(iid){
       <span class="dim" style="font-size:11px"> · ${ENGINE.isPhysical(t.type)?'⚔️ Físico':'✨ Especial'}</span></div>
     <div class="dim" style="font-size:11px;margin-bottom:8px">${ENGINE.isPhysical(t.type)?'Ataca con su <b>ATK Físico</b> contra la <b>DEF Física</b> del rival.':'Ataca con su <b>ATK Especial</b> contra la <b>DEF Especial</b> del rival.'}</div>
     <div class="dim" style="font-size:13px;margin-bottom:8px">"${t.lore}"</div>
-    <div style="text-align:left;margin-bottom:8px">${statBars(stats)}</div>
+    <div style="text-align:left;margin-bottom:8px">${statBars(stats, t.stats?inst.level:1)}</div>
     <div class="panel" style="text-align:left;margin-bottom:10px">
       <div style="font-weight:700;color:var(--gold);font-size:14px">✨ ${ABILITIES[t.ability].name}
         <span class="dim" style="font-size:11px;font-weight:400">· ⚡${ABILITIES[t.ability].cost} · ${abilityKind(t.ability)}</span></div>
