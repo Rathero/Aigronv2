@@ -674,7 +674,6 @@ function openDetail(iid){
       <div style="font-weight:700;color:var(--gold);font-size:14px">✨ ${ABILITIES[t.ability].name}
         <span class="dim" style="font-size:11px;font-weight:400">· ⚡${ABILITIES[t.ability].cost} · ${abilityKind(t.ability)}</span></div>
       <div style="font-size:13px;margin-top:5px;line-height:1.45">${abilityEffect(t.ability)}</div>
-      <div class="dim" style="font-size:11px;margin-top:5px">⚡ = energía de combate: sube 1 por ronda; lanza la habilidad cuando llegue a ${ABILITIES[t.ability].cost}.</div>
     </div>
     <div class="row mb8">
       <button class="btn sm" style="flex:1" data-act="levelUp" data-arg="${iid}" ${canLevel?'':'disabled'}>${atMax?`NIVEL MÁX (${ENGINE.LEVEL_MAX})`:`SUBIR NV (${cost.dust}✨ ${cost.coins}🪙)`}</button>
