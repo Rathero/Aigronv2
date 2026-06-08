@@ -204,6 +204,38 @@ test("ataque básico focalizado (acción 'attack') pega al objetivo elegido", ()
   assert.deepEqual({ w: r1.winner, t: r1.turns, b: r1.hpB }, { w: r2.winner, t: r2.turns, b: r2.hpB });
 });
 
+test("escudo absorbe daño antes del HP", () => {
+  const noCrit = () => 0.999;
+  const att = E.buildUnit(dmgTpl, 5, "A", 0);
+  const tgt = E.buildUnit(tgtTpl, 5, "B", 0); tgt.shield = 100000; const hp0 = tgt.hp;
+  const h = E.dealDamage(noCrit, att, tgt, 1, {});
+  assert.equal(tgt.hp, hp0, "HP intacto mientras hay escudo");
+  assert.ok(tgt.shield < 100000, "el escudo baja");
+  assert.equal(h.shielded, true);
+});
+
+test("veneno (dot): tickStatus daña cada turno y decrece", () => {
+  const u = E.buildUnit(tgtTpl, 5, "A", 0); u.poisonTurns = 2; u.poisonAmt = 0.1; const hp0 = u.hp;
+  const s1 = E.tickStatus(u); assert.ok(s1.poison > 0); assert.ok(u.hp < hp0); assert.equal(u.poisonTurns, 1);
+  E.tickStatus(u); assert.equal(u.poisonTurns, 0);
+  assert.equal(E.tickStatus(u).poison, 0, "sin veneno restante no hace daño");
+});
+
+test("aturdir (stun): tickStatus marca stunned y decrece", () => {
+  const u = E.buildUnit(tgtTpl, 5, "A", 0); u.stunTurns = 1;
+  const s = E.tickStatus(u); assert.equal(s.stunned, true); assert.equal(u.stunTurns, 0);
+  assert.equal(E.tickStatus(u).stunned, false);
+});
+
+test("drenar: el lanzador se cura parte del daño hecho", () => {
+  const drainTpl = { id: "t_dr", name: "Dr", type: "VOLCAN", ability: "DRENAJE", base_stats: dmgTpl.base_stats };
+  const att = E.buildUnit(drainTpl, 5, "A", 0); att.energy = 5; att.hp = 200;
+  const foes = [E.buildUnit(tgtTpl, 5, "B", 0)];
+  const a = E.performAction(() => 0.999, att, { type: "ability" }, [att], foes);
+  assert.ok(a.hits.length > 0 && a.hits[0].dmg > 0, "hace daño");
+  assert.ok(att.hp > 200, "el lanzador se curó con el drenaje");
+});
+
 // ------------------------------ roguelike ----------------------------------
 test("applyRelics hornea stats y rellena mods", () => {
   const team = () => [E.buildUnit(dmgTpl, 5, "A", 0), E.buildUnit(tgtTpl, 5, "A", 1)];

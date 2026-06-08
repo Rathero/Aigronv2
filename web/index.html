@@ -516,9 +516,11 @@ function abilityShort(id){const a=ABILITIES[id];return {
   aoe:`Daño ×${a.mult} a todos`, buffDef:`+${a.amt*100}% DEF ${a.team?"equipo":"propia"} ${a.turns}t`,
   buffAtk:`+${a.amt*100}% ATK`+(a.defDown?`, −${a.defDown*100}% DEF`:""), critDown:`−${a.amt*100}% crítico rival ${a.turns}t`,
   mark:`Marca: +${a.amt*100}% daño recibido ${a.turns}t`, heal:`Cura ${a.amt*100}% propia`,
-  healTeam:`Cura ${a.amt*100}% al equipo`, double:`2 ataques`}[a.kind];}
+  healTeam:`Cura ${a.amt*100}% al equipo`, double:`2 ataques`,
+  dot:`Veneno: ${Math.round(a.amt*100)}% vida/turno ${a.turns}t`, stun:`Aturde ${a.turns}t`,
+  shield:`Escudo ${a.amt*100}% ${a.team?"equipo":"propio"}`, drain:`Daño ×${a.mult}, cura ${a.drain*100}%`}[a.kind];}
 // Categoría rápida.
-function abilityKind(id){const a=ABILITIES[id];return {dmg:"Daño",aoe:"Daño en área",buffDef:"Defensa",buffAtk:"Mejora",critDown:"Debilita",mark:"Debilita",heal:"Cura",healTeam:"Cura equipo",double:"Daño"}[a.kind];}
+function abilityKind(id){const a=ABILITIES[id];return {dmg:"Daño",aoe:"Daño en área",buffDef:"Defensa",buffAtk:"Mejora",critDown:"Debilita",mark:"Debilita",heal:"Cura",healTeam:"Cura equipo",double:"Daño",dot:"Veneno",stun:"Control",shield:"Escudo",drain:"Drenar"}[a.kind];}
 // Versión CLARA y explicada (para el detalle del aigrón).
 function abilityEffect(id){const a=ABILITIES[id];return {
   dmg:`Golpe fuerte a un enemigo: hace ${a.mult}× tu ataque`+(a.ignoreDef?`, ignorando el ${a.ignoreDef*100}% de su defensa`:"")+(a.crit?", siempre crítico":"")+(a.selfHp?`. Pierdes el ${a.selfHp*100}% de tu vida`:""),
@@ -529,7 +531,11 @@ function abilityEffect(id){const a=ABILITIES[id];return {
   mark:`Marca a un enemigo: durante ${a.turns} turnos recibirá un +${a.amt*100}% de daño de TODOS los golpes. Úsala y luego concéntrate en ese enemigo para rematarlo.`,
   heal:`Se cura el ${a.amt*100}% de su vida máxima.`,
   healTeam:`Cura el ${a.amt*100}% de vida a TODO tu equipo.`,
-  double:`Actúa dos veces este turno: hace dos ataques en lugar de uno.`}[a.kind];}
+  double:`Actúa dos veces este turno: hace dos ataques en lugar de uno.`,
+  dot:`Envenena a un enemigo: pierde el ${Math.round(a.amt*100)}% de su vida máxima cada turno durante ${a.turns} turnos (ignora defensa).`,
+  stun:`Aturde a un enemigo: se salta su próxima acción (${a.turns} turno${a.turns>1?'s':''}).`,
+  shield:`Da un escudo que absorbe daño (${a.amt*100}% de la vida máxima) ${a.team?"a todo tu equipo":"a esta criatura"} antes de tocar el HP.`,
+  drain:`Daña a un enemigo (${a.mult}× tu ataque) y te curas el ${a.drain*100}% del daño hecho.`}[a.kind];}
 function abilityDesc(id){const a=ABILITIES[id];return `${a.name} · ⚡${a.cost} — ${abilityShort(id)}`;}
 function cardHTML(inst,extra){const t=inst.template;return `<div class="card r-${t.rarity}" data-iid="${inst.instance_id}">
   <div class="lv">L${inst.level}</div>${inst.favorite?'<div class="fav">★</div>':''}${extra||""}
@@ -841,7 +847,10 @@ function refreshArena(){
     if(!u.hpEl)return;
     u.hpEl.style.width=(Math.max(0,u.hp)/u.hpMax*100)+"%";
     u.hpEl.style.background=u.hp/u.hpMax<0.3?"var(--red)":u.hp/u.hpMax<0.6?"var(--gold)":"var(--green)";
-    if(u.hpNumEl) u.hpNumEl.textContent = u.hp<=0?"☠️":(Math.max(0,Math.round(u.hp))+"/"+u.hpMax);
+    if(u.hpNumEl){
+      const badges=(u.shield>0?" 🛡"+u.shield:"")+(u.poisonTurns>0?" ☠":"")+(u.stunTurns>0?" 💫":"");
+      u.hpNumEl.innerHTML = (u.hp<=0?"☠️":(Math.max(0,Math.round(u.hp))+"/"+u.hpMax))+'<span style="font-size:9px">'+badges+'</span>';
+    }
     if(u.hp<=0)u.el.classList.add("dead");
     u.el.classList.toggle("guarding", !!u.guarding && u.hp>0);
     u.pipsEl.forEach((p,i)=>p.classList.toggle("on",i<u.energy));
@@ -971,22 +980,31 @@ function resolveTick(){
   if(u.el) u.el.classList.add("acting");
   E.decBuffs(u);
   u.energy=Math.min(COMBAT_ENERGY_MAX,u.energy+1);
+  const st=E.tickStatus(u); // veneno/quemadura + aturdimiento (igual que el motor)
   const mine=u.team==='A'?CB.A:CB.B, foes=u.team==='A'?CB.B:CB.A;
-  let intent;
-  if(u.team==='A'){
-    const pl=CB.plan[u.uid];
-    if(pl&&pl.action==='guard') intent={type:'guard'};
-    else if(pl&&pl.action==='ability'&&u.energy>=ABILITIES[u.ability].cost) intent={type:'ability',target:pl.target,overcharge:!!pl.overcharge};
-    else if(pl&&pl.action==='attack') intent={type:'basic',target:pl.target};
-    else intent={type:'basic'};
-  } else intent=E.aiIntent(CB.rng,u,foes,mine);
-  const action=E.performAction(CB.rng,u,intent,mine,foes);
   const who=u.team==='A'?'var(--cyan)':'var(--magenta)';
-  if(action.guard) setBanner(`<span style="color:${who}">${u.name}</span> se protege 🛡️`);
+  let action;
+  if(u.hp<=0){ action={uid:u.uid,name:u.name,ability:null,guard:false,hits:[],poison:st.poison,died:true}; }
+  else if(st.stunned){ action={uid:u.uid,name:u.name,stunned:true,hits:[],poison:st.poison}; }
+  else {
+    let intent;
+    if(u.team==='A'){
+      const pl=CB.plan[u.uid];
+      if(pl&&pl.action==='guard') intent={type:'guard'};
+      else if(pl&&pl.action==='ability'&&u.energy>=ABILITIES[u.ability].cost) intent={type:'ability',target:pl.target,overcharge:!!pl.overcharge};
+      else if(pl&&pl.action==='attack') intent={type:'basic',target:pl.target};
+      else intent={type:'basic'};
+    } else intent=E.aiIntent(CB.rng,u,foes,mine);
+    action=E.performAction(CB.rng,u,intent,mine,foes); action.poison=st.poison;
+  }
+  if(st.poison && u.el) floatNum(u,"☠"+st.poison,"var(--epi)"); // daño de veneno/quemadura
+  if(action.stunned) setBanner(`<span style="color:${who}">${u.name}</span> está aturdido 💫`);
+  else if(action.died) setBanner(`<span style="color:${who}">${u.name}</span> cae por el veneno ☠`);
+  else if(action.guard) setBanner(`<span style="color:${who}">${u.name}</span> se protege 🛡️`);
   else if(action.ability) setBanner(`<span style="color:${who}">${u.name}</span> usa <b style="color:var(--gold)">${action.ability}</b>${action.overcharge?' ⚡⚡×1.5':''}`);
-  else setBanner(`<span style="color:${who}">${u.name}</span> ataca`);
+  else if(action.hits.length) setBanner(`<span style="color:${who}">${u.name}</span> ataca`);
   action.hits.forEach(h=>{const t=h.tgt; if(!t.el)return; t.el.classList.remove("hit");void t.el.offsetWidth;t.el.classList.add("hit");
-    floatNum(t,(h.guarded?"🛡️":"")+(h.crit?"¡":"")+h.dmg+(h.crit?"!":""),h.crit?"var(--gold)":h.guarded?"var(--cyan)":h.typeM>1?"var(--magenta)":"#fff");});
+    floatNum(t,(h.shielded?"🛡":"")+(h.guarded?"🛡️":"")+(h.crit?"¡":"")+h.dmg+(h.crit?"!":""),h.crit?"var(--gold)":h.shielded?"#aebfce":h.guarded?"var(--cyan)":h.typeM>1?"var(--magenta)":"#fff");});
   refreshArena();
   if(!CB.A.some(x=>x.hp>0)||!CB.B.some(x=>x.hp>0)) finishBattle();
 }
@@ -1017,6 +1035,9 @@ function finishBattle(){
     const rr=E.resolveBattle(A2,B2,CB.seed,CB.decisions);
     const animWin=CB.A.some(u=>u.hp>0)&&(!CB.B.some(u=>u.hp>0)||sumHp(CB.A)>=sumHp(CB.B));
     if((rr.winner==='A')!==animWin) console.warn('AIGRONS: animación≠motor', rr.winner, animWin, CB.decisions);
+    // Comparación HP por-unidad (detecta divergencias finas en veneno/aturdir/escudo/drenaje).
+    const cmp=(anim,eng)=>anim.forEach((u,i)=>{ if(Math.round(u.hp)!==Math.round(eng[i].hp)) console.warn('AIGRONS: HP≠motor', u.team, u.name, Math.round(u.hp), Math.round(eng[i].hp), CB.decisions); });
+    cmp(CB.A,A2); cmp(CB.B,B2);
   }catch(e){}
   const battleId=CB.battleId, decisions=CB.decisions, mode=CB.mode;
   setTimeout(()=>{

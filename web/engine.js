@@ -93,31 +93,39 @@
     CURA_MENOR: { name: "Cura", cost: 2, kind: "heal", amt: 0.18, self: true },
     ALIENTO: { name: "Aliento", cost: 4, kind: "healTeam", amt: 0.2 },
     CORAZA: { name: "Coraza", cost: 2, kind: "buffDef", amt: 0.45, turns: 3, self: true },
-    VENENO: { name: "Veneno", cost: 2, kind: "mark", amt: 0.25, turns: 4 },
     CEGUERA: { name: "Ceguera", cost: 2, kind: "critDown", amt: 0.5, turns: 3 },
+    // --- Mecánicas nuevas: DoT, aturdir, escudo, drenar ---
+    VENENO: { name: "Veneno", cost: 2, kind: "dot", amt: 0.08, turns: 3 },
+    QUEMADURA: { name: "Quemadura", cost: 3, kind: "dot", amt: 0.1, turns: 3 },
+    ATURDIR: { name: "Aturdir", cost: 3, kind: "stun", turns: 1 },
+    ESCARCHA: { name: "Escarcha", cost: 4, kind: "stun", turns: 1 },
+    BARRERA: { name: "Barrera", cost: 2, kind: "shield", amt: 0.3, self: true },
+    EGIDA: { name: "Égida", cost: 4, kind: "shield", amt: 0.2, team: true },
+    DRENAJE: { name: "Drenaje", cost: 3, kind: "drain", mult: 1.6, drain: 0.5 },
+    MORDISCO: { name: "Mordisco", cost: 2, kind: "drain", mult: 1.4, drain: 0.6 },
   };
   // 3-4 habilidades por tipo; genTemplate elige una al azar del pool.
   const ABILITY_BY_TYPE = {
-    VOLCAN: ["ERUPCION_LENTA", "LLAMARADA", "TAJO", "FRENESI_BESTIA"],
-    NIEBLA: ["NIEBLA_DENSA", "CEGUERA", "MARCA_FATAL", "VENENO"],
-    CRISTAL: ["MURO_CRISTAL", "ESCUDO_EQUIPO", "CORAZA", "RAYO"],
-    RELOJ: ["ROBO_DE_TIEMPO", "MARCA_FATAL", "NIEBLA_DENSA", "CEGUERA"],
-    VACIO: ["COLAPSO_VACIO", "SACRIFICIO", "MARCA_FATAL", "AVALANCHA"],
-    BESTIA: ["FRENESI_BESTIA", "SACRIFICIO", "TAJO", "ERUPCION_LENTA"],
-    PLANTA: ["RAICES", "REGENERAR", "CURA_MENOR", "VENENO"],
-    TORMENTA: ["RAYO", "COLAPSO_VACIO", "LLAMARADA", "AVALANCHA"],
-    METAL: ["MURO_CRISTAL", "CORAZA", "TAJO", "ERUPCION_LENTA"],
-    HUESO: ["SACRIFICIO", "MARCA_FATAL", "VENENO", "TAJO"],
-    SOMBRA: ["MARCA_FATAL", "COLAPSO_VACIO", "VENENO", "CEGUERA"],
-    LUMEN: ["RAYO", "ESCUDO_EQUIPO", "REGENERAR", "LLAMARADA"],
-    HIELO: ["MURO_CRISTAL", "NIEBLA_DENSA", "CEGUERA", "CORAZA"],
-    MAREA: ["REGENERAR", "COLAPSO_VACIO", "AVALANCHA", "ALIENTO"],
-    ARENA: ["FRENESI_BESTIA", "MURO_CRISTAL", "TAJO", "CORAZA"],
-    TOXICO: ["MARCA_FATAL", "VENENO", "SACRIFICIO", "CEGUERA"],
-    ECO: ["ROBO_DE_TIEMPO", "RAYO", "AVALANCHA", "LLAMARADA"],
-    RUNA: ["ESCUDO_EQUIPO", "REGENERAR", "ALIENTO", "CORAZA"],
-    PLUMA: ["ROBO_DE_TIEMPO", "RAICES", "RAYO", "CURA_MENOR"],
-    HONGO: ["RAICES", "REGENERAR", "CURA_MENOR", "VENENO"],
+    VOLCAN: ["ERUPCION_LENTA", "LLAMARADA", "QUEMADURA", "TAJO"],
+    NIEBLA: ["NIEBLA_DENSA", "CEGUERA", "VENENO", "MARCA_FATAL"],
+    CRISTAL: ["MURO_CRISTAL", "BARRERA", "CORAZA", "RAYO"],
+    RELOJ: ["ROBO_DE_TIEMPO", "ATURDIR", "MARCA_FATAL", "CEGUERA"],
+    VACIO: ["COLAPSO_VACIO", "SACRIFICIO", "DRENAJE", "AVALANCHA"],
+    BESTIA: ["FRENESI_BESTIA", "MORDISCO", "TAJO", "SACRIFICIO"],
+    PLANTA: ["RAICES", "REGENERAR", "VENENO", "CURA_MENOR"],
+    TORMENTA: ["RAYO", "AVALANCHA", "ATURDIR", "LLAMARADA"],
+    METAL: ["MURO_CRISTAL", "BARRERA", "CORAZA", "TAJO"],
+    HUESO: ["SACRIFICIO", "VENENO", "MORDISCO", "MARCA_FATAL"],
+    SOMBRA: ["MARCA_FATAL", "VENENO", "DRENAJE", "ATURDIR"],
+    LUMEN: ["RAYO", "EGIDA", "REGENERAR", "LLAMARADA"],
+    HIELO: ["ESCARCHA", "MURO_CRISTAL", "CEGUERA", "CORAZA"],
+    MAREA: ["REGENERAR", "COLAPSO_VACIO", "ALIENTO", "DRENAJE"],
+    ARENA: ["FRENESI_BESTIA", "BARRERA", "TAJO", "QUEMADURA"],
+    TOXICO: ["VENENO", "QUEMADURA", "MARCA_FATAL", "DRENAJE"],
+    ECO: ["ROBO_DE_TIEMPO", "ATURDIR", "AVALANCHA", "RAYO"],
+    RUNA: ["ESCUDO_EQUIPO", "EGIDA", "REGENERAR", "BARRERA"],
+    PLUMA: ["ROBO_DE_TIEMPO", "RAICES", "CURA_MENOR", "RAYO"],
+    HONGO: ["VENENO", "RAICES", "DRENAJE", "REGENERAR"],
   };
 
   // --------------------------------- Economía --------------------------------
@@ -241,7 +249,7 @@
       energy: 0, team,
       atkMul: 1, defMul: 1, atkTurns: 0, defTurns: 0,
       critDownTurns: 0, critDownAmt: 0, markTurns: 0, markAmt: 0,
-      guarding: false, mods: {},
+      guarding: false, poisonTurns: 0, poisonAmt: 0, stunTurns: 0, shield: 0, mods: {},
     };
   }
   // Construye una unidad a partir de stats ya escalados (snapshot/publicUnit).
@@ -255,7 +263,7 @@
       energy: s.startEnergy || 0, team,
       atkMul: 1, defMul: 1, atkTurns: 0, defTurns: 0,
       critDownTurns: 0, critDownAmt: 0, markTurns: 0, markAmt: 0,
-      guarding: false, mods: {},
+      guarding: false, poisonTurns: 0, poisonAmt: 0, stunTurns: 0, shield: 0, mods: {},
     };
   }
 
@@ -325,12 +333,15 @@
     const critM = crit ? 1.8 : 1;
     const markM = tgt.markTurns > 0 ? 1 + tgt.markAmt : 1;
     const guardM = tgt.guarding ? GUARD_REDUCTION : 1;
-    const dmg = Math.max(1, Math.round(effAtk(att) * mult * typeM * critM * markM * guardM * (100 / (100 + defv))));
+    const raw = Math.max(1, Math.round(effAtk(att) * mult * typeM * critM * markM * guardM * (100 / (100 + defv))));
+    // Escudo/barrera: absorbe daño antes de tocar el HP.
+    let dmg = raw, shielded = false;
+    if (tgt.shield > 0) { const ab = Math.min(tgt.shield, dmg); tgt.shield -= ab; dmg -= ab; shielded = ab > 0; }
     tgt.hp = Math.max(0, tgt.hp - dmg);
     // Reliquia: robo de vida (VAMPIRISMO) y espinas que reflejan daño (ESPINAS).
     if (am.lifesteal) att.hp = Math.min(att.hpMax, att.hp + Math.round(dmg * am.lifesteal));
     if (tm.thorns && dmg > 0) att.hp = Math.max(0, att.hp - Math.round(dmg * tm.thorns));
-    return { tgt, dmg, crit, typeM, guarded: tgt.guarding };
+    return { tgt, dmg, crit, typeM, guarded: tgt.guarding, shielded };
   }
 
   // Se ejecuta al inicio de la acción propia: la guardia dura desde que se declara
@@ -341,6 +352,15 @@
     if (u.critDownTurns > 0) u.critDownTurns--;
     if (u.markTurns > 0) u.markTurns--;
     if (u.guarding) u.guarding = false;
+  }
+  // Estados al inicio del turno de la unidad (tras decBuffs): aplica DAÑO POR TURNO
+  // (veneno/quemadura, ignora defensa) y consume ATURDIMIENTO. Devuelve {poison, stunned}.
+  function tickStatus(u) {
+    let poison = 0;
+    if (u.poisonTurns > 0) { poison = Math.max(1, Math.round(u.hpMax * u.poisonAmt)); u.hp = Math.max(0, u.hp - poison); u.poisonTurns--; }
+    let stunned = false;
+    if (u.hp > 0 && u.stunTurns > 0) { stunned = true; u.stunTurns--; }
+    return { poison, stunned };
   }
 
   const OVERCHARGE_EXTRA = 2;   // energía extra para sobrecargar
@@ -400,6 +420,14 @@
           const b = resolveTarget(intent.target, foes); if (b) action.hits.push(dealDamage(rng, u, b, M, {}));
           break;
         }
+        case "dot": { const t = resolveTarget(intent.target, foes); if (t) { t.poisonTurns = ab.turns; t.poisonAmt = ab.amt; action.statusTgt = t.uid; } break; }
+        case "stun": { const t = resolveTarget(intent.target, foes); if (t) { t.stunTurns = ab.turns; action.statusTgt = t.uid; } break; }
+        case "shield": (ab.team ? alive(mine) : [u]).forEach((x) => { x.shield = (x.shield || 0) + Math.round(x.hpMax * ab.amt * M); }); break;
+        case "drain": {
+          const t = resolveTarget(intent.target, foes);
+          if (t) { const h = dealDamage(rng, u, t, ab.mult * M, {}); action.hits.push(h); u.hp = Math.min(u.hpMax, u.hp + Math.round(h.dmg * (ab.drain || 0.5))); }
+          break;
+        }
       }
     } else {
       const t = resolveTarget(intent.target, foes);
@@ -447,19 +475,28 @@
         if (u.hp <= 0) continue;
         decBuffs(u);
         u.energy = Math.min(COMBAT_ENERGY_MAX, u.energy + 1);
+        const st = tickStatus(u); // veneno/quemadura + aturdimiento
         const mine = u.team === "A" ? teamA : teamB;
         const foes = u.team === "A" ? teamB : teamA;
-        let intent;
-        if (u.team === "A") {
-          const d = dmap.get(turn + ":" + u.uid);
-          if (!d) intent = { type: "basic" };
-          else if (d.action === "guard") intent = { type: "guard" };
-          else if (d.action === "attack") intent = { type: "basic", target: d.target }; // básico focalizado
-          else intent = { type: "ability", target: d.target, overcharge: !!d.overcharge };
+        let action;
+        if (u.hp <= 0) {
+          action = { uid: u.uid, name: u.name, ability: null, guard: false, hits: [], poison: st.poison, died: true };
+        } else if (st.stunned) {
+          action = { uid: u.uid, name: u.name, stunned: true, hits: [], poison: st.poison };
         } else {
-          intent = aiIntent(rng, u, foes, mine);
+          let intent;
+          if (u.team === "A") {
+            const d = dmap.get(turn + ":" + u.uid);
+            if (!d) intent = { type: "basic" };
+            else if (d.action === "guard") intent = { type: "guard" };
+            else if (d.action === "attack") intent = { type: "basic", target: d.target }; // básico focalizado
+            else intent = { type: "ability", target: d.target, overcharge: !!d.overcharge };
+          } else {
+            intent = aiIntent(rng, u, foes, mine);
+          }
+          action = performAction(rng, u, intent, mine, foes);
+          action.poison = st.poison;
         }
-        const action = performAction(rng, u, intent, mine, foes);
         log.push(Object.assign({ turn }, action));
         if (!alive(teamA).length || !alive(teamB).length) break;
       }
@@ -608,7 +645,7 @@
     genName, genLore, pickRange, scaled, todayStr, genTemplate, dailyBatch,
     // combate
     buildUnit, unitFromStats, applyCaptainStance, STANCES, pickTarget, resolveTarget,
-    dealDamage, decBuffs, performAction, aiIntent, turnOrder, resolveBattle, botTeamFromSeed,
+    dealDamage, decBuffs, tickStatus, performAction, aiIntent, turnOrder, resolveBattle, botTeamFromSeed,
     // roguelike / mazmorra
     applyRelics, relicRunEffects, dungeonNodeOptions, dungeonEnemyTeam, dungeonDraft,
   };
