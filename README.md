@@ -6,6 +6,7 @@
 
 ---
 
+
 ## 0. Qué es AIGRONS (contexto de producto)
 
 Juego móvil **casual-coleccionista** de sesiones muy cortas (1-3 min). Cada día una IA
