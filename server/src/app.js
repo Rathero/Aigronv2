@@ -139,7 +139,7 @@ async function missionsPublic(userId) {
 }
 
 // Construye las unidades de combate del equipo del jugador (con stats escalados).
-async function buildTeamUnits(userId) {
+async function buildTeamUnits(userId, team = "A") {
   const t = await db.query("SELECT slot1,slot2,slot3 FROM teams WHERE user_id=$1", [userId]);
   let slots = t.rows[0] ? [t.rows[0].slot1, t.rows[0].slot2, t.rows[0].slot3].filter(Boolean) : [];
   if (!slots.length) {
@@ -158,7 +158,7 @@ async function buildTeamUnits(userId) {
   return slots.map((iid, i) => {
     const r = byId[iid]; if (!r) return null;
     const tplLike = { id: r.template_id, name: r.name, type: r.type, types: tplTypes(r), ability: r.ability_id, base_stats: tplBaseStats(r) };
-    const u = combat.buildUnit(tplLike, r.level, "A", i);
+    const u = combat.buildUnit(tplLike, r.level, team, i);
     u.instanceId = iid; // para mapear el capitán elegido a su uid de combate
     return u;
   }).filter(Boolean);
@@ -451,31 +451,39 @@ app.post("/battle/resolve", authMiddleware, wrap(async (req, res) => {
   // Marca la oferta consumida (atómico: una oferta = un combate).
   await db.query("UPDATE battle_offers SET consumed=true WHERE id=$1", [battleId]);
 
+  const award = await awardBattleResult({ user: u, win, abilitiesUsed, defenderId: offer.defender_id, seed: offer.seed | 0 });
+
+  res.json({ win, coins: award.coins, leaguePoints: award.leaguePoints, league: award.league, energy: award.energy, log: result.log, turns: result.turns, pvp: !!offer.defender_id });
+}));
+
+// Aplica el resultado de un combate a un usuario: monedas, puntos de liga (±),
+// energía −1, registro en `battles`, `daily_scores` y misiones. Reutilizado por el
+// combate PvE (/battle/resolve) y por el PvP en vivo (pvp.js, ambos jugadores).
+// `user` debe venir ya con la energía sincronizada (syncEnergy).
+async function awardBattleResult({ user, win, abilitiesUsed = 0, defenderId = null, seed = 0 }) {
   const coins = win ? 40 : 8;
   const lpDelta = win ? 12 : -6;
-  const newLp = Math.max(0, u.league_points + lpDelta);
+  const newLp = Math.max(0, user.league_points + lpDelta);
   const league = C.computeLeague(newLp);
-  const newEnergy = u.energy - 1;
-  // Si baja del máximo, (re)inicia el contador de regeneración desde ahora.
-  const energyAt = newEnergy < C.ENERGY_MAX ? new Date() : u.energy_updated_at;
+  const newEnergy = Math.max(0, user.energy - 1);
+  const energyAt = newEnergy < C.ENERGY_MAX ? new Date() : user.energy_updated_at;
   await db.query(
     "UPDATE users SET energy=$1, energy_updated_at=$2, coins=coins+$3, league_points=$4, league=$5 WHERE id=$6",
-    [newEnergy, energyAt, coins, newLp, league, u.id]
+    [newEnergy, energyAt, coins, newLp, league, user.id]
   );
   await db.query("INSERT INTO battles (attacker_id, defender_id, seed, result, daily_date) VALUES ($1,$2,$3,$4,$5)",
-    [u.id, offer.defender_id, offer.seed | 0, win ? "WIN" : "LOSS", C.todayStr()]);
+    [user.id, defenderId, seed | 0, win ? "WIN" : "LOSS", C.todayStr()]);
   if (win) {
     await db.query(
       `INSERT INTO daily_scores (daily_date, user_id, wins) VALUES ($1,$2,1)
        ON CONFLICT (daily_date, user_id) DO UPDATE SET wins = daily_scores.wins + 1`,
-      [C.todayStr(), u.id]
+      [C.todayStr(), user.id]
     );
-    await bumpMission(u.id, "wins", 1);
+    await bumpMission(user.id, "wins", 1);
   }
-  if (abilitiesUsed > 0) await bumpMission(u.id, "abilities", abilitiesUsed);
-
-  res.json({ win, coins, leaguePoints: newLp, league, energy: newEnergy, log: result.log, turns: result.turns, pvp: !!offer.defender_id });
-}));
+  if (abilitiesUsed > 0) await bumpMission(user.id, "abilities", abilitiesUsed);
+  return { coins, leaguePoints: newLp, league, energy: newEnergy };
+}
 
 // --------------------------------- RANKINGS ----------------------------------
 app.get("/rankings/daily", authMiddleware, wrap(async (req, res) => {
@@ -592,6 +600,15 @@ if (require.main === module) {
   // Escuchar en 0.0.0.0 (requisito de Railway/PaaS para que el proxy llegue a la app).
   server = app.listen(PORT, "0.0.0.0", () => console.log(`AIGRONS API escuchando en 0.0.0.0:${PORT} (frontend en /)`));
   startCron(generateDailyBatch, DAILY_N);
+
+  // PvP en vivo (WebSocket en /pvp, mismo puerto). Inyecta los helpers compartidos.
+  try {
+    const { attachPvp } = require("./pvp");
+    attachPvp(server, { db, getUser, syncEnergy, buildTeamUnits, awardBattleResult, publicUnit, MATCH_LEVEL_WINDOW });
+    console.log("PvP en vivo (WebSocket) activo en /pvp");
+  } catch (e) {
+    console.warn("[pvp] no se pudo activar el WebSocket:", e.message);
+  }
 
   // Apagado ordenado: deja de aceptar, cierra el pool.
   const shutdown = (sig) => {

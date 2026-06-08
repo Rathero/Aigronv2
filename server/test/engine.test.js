@@ -258,6 +258,38 @@ test("drenar: el lanzador se cura parte del daño hecho", () => {
   assert.ok(att.hp > 200, "el lanzador se curó con el drenaje");
 });
 
+// ------------------------------ PvP en vivo ---------------------------------
+// stepTurn ronda-a-ronda (autoritativo del servidor) == resolveBattle batch.
+test("PvP: stepTurn acumulado == resolveBattle batch (mismas decisiones)", () => {
+  const ids = ["p1", "p2", "p3"], idsB = ["q1", "q2", "q3"];
+  const mk = (team) => { const d = []; for (let t = 1; t <= 8; t++) for (let i = 0; i < 3; i++) d.push({ turn: t, uid: team + i, action: "ability" }); return d; };
+  const dec = [...mk("A"), ...mk("B")];
+  const batch = E.resolveBattle(teamFrom(ids, "A", 10), teamFrom(idsB, "B", 10), 777, dec);
+  const A2 = teamFrom(ids, "A", 10), B2 = teamFrom(idsB, "B", 10);
+  const rng = E.mulberry32(777 >>> 0), dmap = new Map(dec.map((d) => [d.turn + ":" + d.uid, d]));
+  let turn = 0;
+  while (turn < 60) { turn++; const r = E.stepTurn(A2, B2, rng, dmap, turn); if (r.done) break; }
+  const sum = (t) => t.filter((u) => u.hp > 0).reduce((s, u) => s + u.hp, 0);
+  assert.equal(batch.turns, turn, "mismo nº de turnos");
+  assert.equal(batch.hpA, sum(A2), "mismo HP A");
+  assert.equal(batch.hpB, sum(B2), "mismo HP B");
+});
+
+// Con decisiones de AMBOS equipos: determinista y las decisiones de B importan
+// (no se usa aiIntent).
+test("PvP: decisiones de ambos equipos -> determinista e influyen", () => {
+  const run = (bAction) => {
+    const A = teamFrom(["x1", "x2", "x3"], "A", 10), B = teamFrom(["y1", "y2", "y3"], "B", 10);
+    const d = [];
+    for (let t = 1; t <= 12; t++) { for (let i = 0; i < 3; i++) d.push({ turn: t, uid: "A" + i, action: "attack" }); for (let i = 0; i < 3; i++) d.push({ turn: t, uid: "B" + i, action: bAction }); }
+    return E.resolveBattle(A, B, 1234, d);
+  };
+  const a = run("attack"), b = run("attack");
+  assert.equal(a.winner, b.winner); assert.equal(a.hpA, b.hpA); assert.equal(a.hpB, b.hpB);
+  const g = run("guard");
+  assert.ok(a.hpA !== g.hpA || a.hpB !== g.hpB || a.turns !== g.turns, "cambiar la decisión de B cambia el resultado");
+});
+
 // ------------------------------ roguelike ----------------------------------
 test("applyRelics hornea stats y rellena mods", () => {
   const team = () => [E.buildUnit(dmgTpl, 5, "A", 0), E.buildUnit(tgtTpl, 5, "A", 1)];

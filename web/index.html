@@ -740,6 +740,7 @@ async function renderBattle(){
       <div class="grid">${team.length?team.map(i=>cardHTML(i)).join(""):'<div class="dim">Elige 3 aigrons</div>'}</div>
     </div>
     <button class="btn mag" data-act="prepBattle" ${team.length<1?'disabled':''}>PREPARAR COMBATE — ⚡1</button>
+    <button class="btn mt8" data-act="livePvp" ${team.length<1?'disabled':''}>⚔️ PvP EN VIVO — ⚡1</button>
     <div class="panel mt8"><b style="font-size:14px">Estrategia</b>
       <div class="dim" style="font-size:13px;margin-top:6px">Antes del combate eliges <b>capitán</b> y <b>estancia</b>. En combate: toca una habilidad y luego un <b>enemigo</b> para apuntar (mira ⬆/⬇ de tipo); <b>🛡️ guardia</b> protege a tu equipo un turno; con energía de sobra, <b>sobrecarga</b> (⚡⚡) pega ×1.5. ¡El <i>timing</i> y el objetivo deciden!</div></div>`;
   renderCanvases($("#s-battle"));
@@ -785,6 +786,145 @@ async function saveTeam(){
 
 let CB=null, prep=null;
 function mkUnit(s,team,i){ return E.unitFromStats(s,team,i); }
+
+/* =========================== PvP EN VIVO (WebSocket) =========================
+   Localmente SIEMPRE: mi equipo = 'A' (abajo), rival = 'B' (arriba) -> reutiliza
+   toda la UI de combate. Solo traduzco uids al hablar con el servidor (si soy 'B'
+   intercambio A<->B). El servidor es autoritativo: manda el log + estado; aquí
+   solo se anima. */
+let PVP=null;
+const pvpSwap=(uid)=> (uid[0]==='A'?'B':'A')+uid.slice(1);
+const toServerUid=(luid)=> (CB.you==='A'?luid:pvpSwap(luid));
+const toLocalUid=(suid)=> (!suid?suid:(CB.you==='A'?suid:pvpSwap(suid)));
+function pvpWsUrl(){
+  const tok=encodeURIComponent(TOKEN||'');
+  if(API_BASE) return API_BASE.replace(/^http/,'ws')+'/pvp?token='+tok;
+  return (location.protocol==='https:'?'wss':'ws')+'://'+location.host+'/pvp?token='+tok;
+}
+function startLivePvp(){
+  if(!S.user||S.user.energy<1){toast('Sin energía ⚡');return;}
+  if(!S.team.length){toast('Equipo vacío');return;}
+  if(PVP){return;}
+  let ws; try{ ws=new WebSocket(pvpWsUrl()); }catch(e){ toast('PvP no disponible'); return; }
+  PVP={ws,status:'connecting'};
+  pvpQueueUI('Conectando…');
+  ws.onmessage=(ev)=>{ let m;try{m=JSON.parse(ev.data);}catch(e){return;} pvpOnMessage(m); };
+  ws.onclose=()=>{ const wasPlaying=PVP&&(PVP.status==='match'); PVP=null; if(wasPlaying&&CB&&CB.live&&!CB.ended){ toast('Conexión PvP perdida'); CB=null; closeOverlay(); go('battle'); } };
+  ws.onerror=()=>{};
+}
+function pvpSend(o){ if(PVP&&PVP.ws&&PVP.ws.readyState===1) PVP.ws.send(JSON.stringify(o)); }
+function pvpCancel(){ if(PVP){ pvpSend({t:'leave'}); try{PVP.ws.close();}catch(e){} PVP=null; } closeOverlay(); }
+function pvpQueueUI(msg){
+  openOverlay(`<div class="center">
+    <div style="font-family:var(--pixel);font-size:12px;color:var(--cyan);margin-bottom:12px">PvP EN VIVO</div>
+    <div class="spinner" style="margin:14px auto"></div>
+    <div class="dim" id="pvp-status" style="font-size:13px;margin:10px 0">${msg}</div>
+    <button class="btn sm ghost" data-act="pvpCancel" style="width:100%">CANCELAR</button></div>`);
+}
+function pvpStatus(msg){ const e=$('#pvp-status'); if(e)e.textContent=msg; }
+function pvpOnMessage(m){
+  if(!PVP)return;
+  if(m.t==='hello'){ PVP.status='queue'; pvpSend({t:'queue',captain:S.team[0],stance:'NEUTRAL'}); pvpStatus('Buscando rival…'); }
+  else if(m.t==='queued'){ pvpStatus('Buscando rival…'); }
+  else if(m.t==='error'){ toast(m.msg==='no_energy'?'Sin energía ⚡':m.msg==='empty_team'?'Equipo vacío':'PvP no disponible'); pvpCancel(); }
+  else if(m.t==='match'){ PVP.status='match'; closeOverlay(); startLiveBattle(m); }
+  else if(m.t==='round'){ pvpRound(m); }
+  else if(m.t==='resolve'){ pvpResolve(m); }
+  else if(m.t==='opponentLeft'){ toast('Tu rival abandonó'); }
+  else if(m.t==='over'){ PVP.status='over'; pvpOver(m); }
+}
+function startLiveBattle(m){
+  go('battle');
+  const A=m.team.map((s,i)=>mkUnit(s,'A',i));      // MI equipo -> local 'A' (abajo)
+  const B=m.opponent.map((s,i)=>mkUnit(s,'B',i));  // rival -> local 'B' (arriba)
+  CB={A,B,seed:0,battleId:m.matchId,pvp:true,live:true,you:m.you,oppName:m.oppName||'Rival',
+      rng:null,turn:0,order:[],oi:0,plan:{},planTurn:0,selecting:null,phase:'wait',speed:1,
+      decisions:[],timer:null,planTimer:null,initA:m.team,initB:m.opponent,ended:false};
+  buildArena();
+  const vs=$(".vs"); if(vs){vs.style.opacity=1;setTimeout(()=>{vs.style.opacity=0;},800);}
+  setBanner(`⚔️ PvP vs <b>${CB.oppName}</b>`);
+}
+function pvpRound(m){
+  if(!CB||!CB.live||CB.ended)return;
+  if(CB.timer){clearInterval(CB.timer);CB.timer=null;}
+  CB.phase='plan'; CB.planTurn=m.round; CB.selecting=null;
+  CB.plan={}; CB.A.forEach(u=>{ if(u.hp>0) CB.plan[u.uid]={action:'basic',target:null,overcharge:false}; });
+  [...CB.A,...CB.B].forEach(x=>x.el&&x.el.classList.remove("acting"));
+  renderPlanner();
+  CB.planEndsAt=m.deadline||(Date.now()+10000);
+  if(CB.planTimer)clearInterval(CB.planTimer);
+  CB.planTimer=setInterval(planTimerTick,100);
+}
+function pvpConfirm(){
+  const decisions=[];
+  Object.keys(CB.plan).forEach(uid=>{ const pl=CB.plan[uid]; let d;
+    if(pl.action==='guard') d={uid,action:'guard'};
+    else if(pl.action==='ability') d={uid,action:'ability',target:pl.target||undefined,overcharge:!!pl.overcharge};
+    else if(pl.action==='attack') d={uid,action:'attack',target:pl.target||undefined};
+    else d={uid,action:'attack'};
+    d.uid=toServerUid(d.uid); if(d.target) d.target=toServerUid(d.target);
+    decisions.push(d);
+  });
+  pvpSend({t:'plan',round:CB.planTurn,decisions});
+  CB.phase='wait';
+  const p=$("#planner"); if(p) p.innerHTML='<div class="dim tc" style="padding:12px">Esperando al rival…</div>';
+  setBanner('Esperando al rival…');
+}
+function pvpResolve(m){
+  if(!CB||!CB.live||CB.ended)return;
+  CB.phase='resolve';
+  liveAnimate(m.log||[], m.state);
+}
+function liveAnimate(log, state){
+  const smap={};
+  if(state){ (state.A||[]).forEach(s=>smap[toLocalUid(s.uid)]=s); (state.B||[]).forEach(s=>smap[toLocalUid(s.uid)]=s); }
+  const byUid=(luid)=> CB.A.find(x=>x.uid===luid)||CB.B.find(x=>x.uid===luid);
+  let i=0;
+  if(CB.timer)clearInterval(CB.timer);
+  CB.timer=setInterval(()=>{
+    if(!CB||CB.ended){ clearInterval(CB.timer); CB.timer=null; return; }
+    if(i>=log.length){
+      [...CB.A,...CB.B].forEach(u=>{ const s=smap[u.uid]; if(s){ u.hp=s.hp; u.shield=s.shield; u.poisonTurns=s.poisonTurns; u.stunTurns=s.stunTurns; u.energy=s.energy; } });
+      refreshArena();
+      if(CB.timer){clearInterval(CB.timer);CB.timer=null;}
+      CB.phase='wait'; // espera al siguiente 'round' o 'over' del servidor
+      return;
+    }
+    const e=log[i++];
+    const actor=byUid(toLocalUid(e.uid));
+    [...CB.A,...CB.B].forEach(x=>x.el&&x.el.classList.remove("acting"));
+    if(actor&&actor.el) actor.el.classList.add("acting");
+    const who=actor&&actor.team==='A'?'var(--cyan)':'var(--magenta)';
+    const nm=actor?actor.name:e.name;
+    if(e.poison&&actor&&actor.el) floatNum(actor,"☠"+e.poison,"var(--epi)");
+    if(e.stunned) setBanner(`<span style="color:${who}">${nm}</span> está aturdido 💫`);
+    else if(e.died) setBanner(`<span style="color:${who}">${nm}</span> cae por el veneno ☠`);
+    else if(e.guard) setBanner(`<span style="color:${who}">${nm}</span> se protege 🛡️`);
+    else if(e.ability) setBanner(`<span style="color:${who}">${nm}</span> usa <b style="color:var(--gold)">${e.ability}</b>${e.overcharge?' ⚡⚡×1.5':''}`);
+    else if(e.hits&&e.hits.length) setBanner(`<span style="color:${who}">${nm}</span> ataca`);
+    (e.hits||[]).forEach(h=>{ const luid=toLocalUid(h.tgt&&h.tgt.uid); const t=byUid(luid); if(!t||!t.el)return;
+      t.el.classList.remove("hit");void t.el.offsetWidth;t.el.classList.add("hit");
+      floatNum(t,(h.shielded?"🛡":"")+(h.guarded?"🛡️":"")+(h.crit?"¡":"")+h.dmg+(h.crit?"!":""),h.crit?"var(--gold)":h.shielded?"#aebfce":h.guarded?"var(--cyan)":h.typeM>1?"var(--magenta)":"#fff");
+      const ss=smap[luid]; if(ss) t.hp=ss.hp;
+    });
+    const sa=actor&&smap[actor.uid]; if(sa) actor.hp=sa.hp;
+    refreshArena();
+  }, Math.round(560/(CB.speed||1)));
+}
+function pvpOver(m){
+  if(CB){ CB.ended=true; if(CB.timer){clearInterval(CB.timer);CB.timer=null;} if(CB.planTimer){clearInterval(CB.planTimer);CB.planTimer=null;} }
+  if(m.leaguePoints!=null){ S.user.leaguePoints=m.leaguePoints; S.user.league=m.league; }
+  if(m.energy!=null) S.user.energy=m.energy;
+  refreshChips();
+  const won=!!m.youWon;
+  openOverlay(`<div class="center">
+    <div style="font-family:var(--pixel);font-size:16px;color:${won?'var(--green)':'var(--red)'};margin:6px 0 10px">${won?'¡VICTORIA!':'DERROTA'}</div>
+    <div class="dim" style="font-size:13px">${m.reason==='opponent_left'?(won?'Tu rival abandonó.':'Abandonaste.'):'Combate PvP en vivo terminado.'}</div>
+    <div style="margin:12px 0;font-size:14px">Liga <b>${m.league}</b> · ${m.leaguePoints} pts</div>
+    <button class="btn" data-act="pvpDone" style="width:100%">CONTINUAR</button></div>`);
+  if(PVP){ try{PVP.ws.close();}catch(e){} PVP=null; }
+}
+function pvpDone(){ closeOverlay(); CB=null; go('battle'); }
 
 /* --- Preparación: capitán + estancia (decisión previa) --- */
 function prepBattle(){
@@ -977,6 +1117,7 @@ function planAuto(){ if(!CB||!CB.selecting)return; const pl=CB.plan[CB.selecting
 function confirmPlan(){
   if(!CB||CB.phase!=='plan')return;
   if(CB.planTimer){clearInterval(CB.planTimer);CB.planTimer=null;}
+  if(CB.live){ return pvpConfirm(); }
   Object.keys(CB.plan).forEach(uid=>{ const pl=CB.plan[uid];
     if(pl.action==='guard') CB.decisions.push({turn:CB.planTurn,uid,action:'guard'});
     else if(pl.action==='ability') CB.decisions.push({turn:CB.planTurn,uid,action:'ability',target:pl.target||undefined,overcharge:!!pl.overcharge});
@@ -1272,6 +1413,7 @@ const ACTIONS={
   fusionPick:(a)=>fusionPick(a),
   editTeam:()=>editTeam(),
   prepBattle:()=>prepBattle(),
+  livePvp:()=>startLivePvp(), pvpCancel:()=>pvpCancel(), pvpDone:()=>pvpDone(),
   goBattle:()=>goBattle(),
   saveTeam:()=>saveTeam(),
   planSet:(a)=>planSet(a),

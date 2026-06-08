@@ -509,50 +509,65 @@
     return alive(teamA.concat(teamB)).sort((a, b) => b.spd - a.spd || (a.team < b.team ? -1 : 1));
   }
 
-  // Resolución completa y autoritativa.
-  // `decisions` = [{ turn, uid, action?, target?, overcharge? }]
-  //   action: 'ability' (defecto) | 'guard'   ·   target: uid enemigo   ·   overcharge: bool
-  // Compatibilidad: una decisión vieja {turn, uid} = lanzar habilidad a objetivo auto.
+  // Construye el `intent` a partir de una decisión { action, target, overcharge }.
+  // d ausente -> ataque básico (objetivo auto).
+  function intentFromDecision(d) {
+    if (!d) return { type: "basic" };
+    if (d.action === "guard") return { type: "guard" };
+    if (d.action === "attack") return { type: "basic", target: d.target }; // básico focalizado
+    return { type: "ability", target: d.target, overcharge: !!d.overcharge };
+  }
+
+  // Ejecuta UN turno completo (todas las unidades vivas actúan una vez por turnOrder),
+  // mutando los equipos. Cada unidad usa su decisión de `dmap` si la tiene; si no:
+  //   - equipo A -> ataque básico (compat PvE: el jugador siempre manda decisiones)
+  //   - equipo B -> aiIntent (PvE) ... salvo que tenga decisión (PvP: humano).
+  // Devuelve { log, done }. Fuente única usada por resolveBattle (PvE/batch) y por
+  // el orquestador PvP (ronda a ronda, autoritativo).
+  function stepTurn(teamA, teamB, rng, dmap, turn) {
+    const log = [];
+    const order = turnOrder(teamA, teamB);
+    for (const u of order) {
+      if (u.hp <= 0) continue;
+      decBuffs(u);
+      u.energy = Math.min(COMBAT_ENERGY_MAX, u.energy + 1);
+      const st = tickStatus(u); // veneno/quemadura + aturdimiento
+      const mine = u.team === "A" ? teamA : teamB;
+      const foes = u.team === "A" ? teamB : teamA;
+      let action;
+      if (u.hp <= 0) {
+        action = { uid: u.uid, name: u.name, ability: null, guard: false, hits: [], poison: st.poison, died: true };
+      } else if (st.stunned) {
+        action = { uid: u.uid, name: u.name, stunned: true, hits: [], poison: st.poison };
+      } else {
+        const d = dmap && dmap.get(turn + ":" + u.uid);
+        let intent;
+        if (d) intent = intentFromDecision(d);
+        else if (u.team === "B") intent = aiIntent(rng, u, foes, mine);
+        else intent = { type: "basic" };
+        action = performAction(rng, u, intent, mine, foes);
+        action.poison = st.poison;
+      }
+      log.push(Object.assign({ turn }, action));
+      if (!alive(teamA).length || !alive(teamB).length) break;
+    }
+    const done = !alive(teamA).length || !alive(teamB).length || turn >= TURNS_MAX;
+    return { log, done };
+  }
+
+  // Resolución completa y autoritativa (PvE/batch). `decisions` = [{ turn, uid,
+  // action?, target?, overcharge? }]. Para PvP, las decisiones incluyen AMBOS equipos.
   function resolveBattle(teamA, teamB, seed, decisions) {
     const rng = mulberry32(seed >>> 0);
     const dmap = new Map((decisions || []).map((d) => [d.turn + ":" + d.uid, d]));
     const log = [];
     let turn = 0;
-
     while (alive(teamA).length && alive(teamB).length && turn < TURNS_MAX) {
       turn++;
-      const order = turnOrder(teamA, teamB);
-      for (const u of order) {
-        if (u.hp <= 0) continue;
-        decBuffs(u);
-        u.energy = Math.min(COMBAT_ENERGY_MAX, u.energy + 1);
-        const st = tickStatus(u); // veneno/quemadura + aturdimiento
-        const mine = u.team === "A" ? teamA : teamB;
-        const foes = u.team === "A" ? teamB : teamA;
-        let action;
-        if (u.hp <= 0) {
-          action = { uid: u.uid, name: u.name, ability: null, guard: false, hits: [], poison: st.poison, died: true };
-        } else if (st.stunned) {
-          action = { uid: u.uid, name: u.name, stunned: true, hits: [], poison: st.poison };
-        } else {
-          let intent;
-          if (u.team === "A") {
-            const d = dmap.get(turn + ":" + u.uid);
-            if (!d) intent = { type: "basic" };
-            else if (d.action === "guard") intent = { type: "guard" };
-            else if (d.action === "attack") intent = { type: "basic", target: d.target }; // básico focalizado
-            else intent = { type: "ability", target: d.target, overcharge: !!d.overcharge };
-          } else {
-            intent = aiIntent(rng, u, foes, mine);
-          }
-          action = performAction(rng, u, intent, mine, foes);
-          action.poison = st.poison;
-        }
-        log.push(Object.assign({ turn }, action));
-        if (!alive(teamA).length || !alive(teamB).length) break;
-      }
+      const r = stepTurn(teamA, teamB, rng, dmap, turn);
+      for (const e of r.log) log.push(e);
+      if (r.done) break;
     }
-
     const hpA = alive(teamA).reduce((s, u) => s + u.hp, 0);
     const hpB = alive(teamB).reduce((s, u) => s + u.hp, 0);
     const winner = alive(teamA).length && (!alive(teamB).length || hpA >= hpB) ? "A" : "B";
@@ -696,7 +711,7 @@
     genName, genLore, pickRange, scaled, todayStr, genTemplate, dailyBatch,
     // combate
     buildUnit, unitFromStats, applyCaptainStance, STANCES, pickTarget, resolveTarget,
-    dealDamage, decBuffs, tickStatus, performAction, aiIntent, turnOrder, resolveBattle, botTeamFromSeed,
+    dealDamage, decBuffs, tickStatus, performAction, aiIntent, turnOrder, stepTurn, intentFromDecision, resolveBattle, botTeamFromSeed,
     // roguelike / mazmorra
     applyRelics, relicRunEffects, dungeonNodeOptions, dungeonEnemyTeam, dungeonDraft,
   };

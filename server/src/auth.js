@@ -81,4 +81,10 @@ async function verifyIdentity({ provider, subject, idToken, displayName }) {
   throw new Error("dev_auth_disabled");
 }
 
-module.exports = { sign, authMiddleware, verifyIdentity };
+// Verifica un JWT de sesión y devuelve el userId (uid), o null si es inválido.
+// Lo usa el servidor WebSocket (PvP en vivo) para autenticar la conexión.
+function verifyToken(token) {
+  try { return jwt.verify(token, SECRET).uid; } catch (e) { return null; }
+}
+
+module.exports = { sign, authMiddleware, verifyIdentity, verifyToken };

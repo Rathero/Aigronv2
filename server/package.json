@@ -23,7 +23,8 @@
     "helmet": "^7.1.0",
     "jsonwebtoken": "^9.0.2",
     "node-cron": "^3.0.3",
-    "pg": "^8.12.0"
+    "pg": "^8.12.0",
+    "ws": "^8.21.0"
   },
   "optionalDependencies": {
     "openai": "^4.56.0"
