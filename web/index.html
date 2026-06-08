@@ -1523,7 +1523,7 @@ async function showLogin(){
   showBoot(); showLoadingSec(false); loginErr('');
   let cfg={}; try{ cfg=await api('/auth/config'); }catch(e){ loginErr('No se pudo conectar con el servidor.'); showLoadingSec(true); bootMsg('Sin conexión.',true); return; }
   const devBox=$("#login-dev"); devBox.innerHTML='';
-  if(cfg.allowDev){ devBox.innerHTML='<button class="btn sm ghost" id="devbtn" style="width:100%">Entrar como invitado (dev)</button>'; $("#devbtn").onclick=devLogin; }
+  if(cfg.allowDev){ devBox.innerHTML=(cfg.googleClientId?'<div class="dim" style="font-size:11px;margin:8px 0">ó</div>':'')+'<button class="btn sm ghost" id="devbtn" style="width:100%">👤 Entrar como invitado</button>'; $("#devbtn").onclick=devLogin; }
   const gbtn=$("#gbtn"); gbtn.innerHTML='';
   if(cfg.googleClientId){
     const ok=await gisReady();
