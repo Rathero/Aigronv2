@@ -317,7 +317,6 @@ h2.title small{font-family:var(--ui);font-size:13px;color:var(--ink-dim);font-we
 
   <div class="nav">
     <button data-screen="home" class="on"><span class="ni">🏠</span>Inicio</button>
-    <button data-screen="battle"><span class="ni">⚔️</span>Combate</button>
     <button data-screen="dungeon"><span class="ni">🗺️</span>Mazmorra</button>
     <button data-screen="collection"><span class="ni">📖</span>Colección</button>
     <button data-screen="ranking"><span class="ni">🏆</span>Ranking</button>
@@ -609,13 +608,25 @@ async function renderHome(){
      ${m.done&&!m.claimed?`<button class="btn sm gold" style="padding:4px 8px" data-act="claimMission" data-arg="${m.key}">+${m.reward}🪙</button>`
         :`<span style="color:var(--gold)">${m.claimed?'✔':'+'+m.reward+'🪙'}</span>`}</div>`;};
   $("#s-home").innerHTML=`
-    <h2 class="title">INICIO <small>Liga ${S.user.league}</small></h2>
+    <h2 class="title">INICIO <small>Liga ${S.user.league} · ${S.user.leaguePoints} pts</small></h2>
     ${dailyCard}
+    ${teamCombatHTML()}
     <div class="panel"><b style="font-size:14px">Misiones diarias</b>
       ${missions.map(mrow).join("")}
     </div>
     ${dungeonHomeCard(dg)}`;
   renderCanvases($("#s-home"));
+  $("#s-home").querySelectorAll(".card").forEach(c=>c.onclick=()=>openDetail(c.dataset.iid));
+}
+// Bloque "Tu equipo" + botón de combate PvP (en INICIO).
+function teamCombatHTML(){
+  const team=S.team.map(instById).filter(Boolean);
+  return `<div class="panel"><div class="row" style="justify-content:space-between;align-items:center;margin-bottom:8px">
+      <b style="font-size:14px">Tu equipo</b>
+      <button class="btn sm ghost" data-act="editTeam">EDITAR</button></div>
+      <div class="grid">${team.length?team.map(i=>cardHTML(i)).join(""):'<div class="dim">Elige 3 aigrons en tu colección</div>'}</div>
+    </div>
+    <button class="btn mag mb8" data-act="prepBattle" ${team.length<1?'disabled':''}>⚔️ COMBATE PvP EN VIVO — ⚡1</button>`;
 }
 async function doClaim(){
   try{
@@ -779,7 +790,7 @@ function renderTeamPicker(){
 }
 async function saveTeam(){
   if(!teamSel.length){toast("Elige al menos 1");return;}
-  try{ const r=await api('/team',{method:'PUT',body:{slots:teamSel.slice()}}); S.team=r.slots; closeOverlay(); renderBattle(); }
+  try{ const r=await api('/team',{method:'PUT',body:{slots:teamSel.slice()}}); S.team=r.slots; closeOverlay(); renderHome(); }
   catch(e){ toast('No se pudo guardar'); }
 }
 
@@ -923,7 +934,7 @@ function pvpOver(m){
     <button class="btn" data-act="pvpDone" style="width:100%">CONTINUAR</button></div>`);
   if(PVP){ try{PVP.ws.close();}catch(e){} PVP=null; }
 }
-function pvpDone(){ closeOverlay(); CB=null; go('battle'); }
+function pvpDone(){ closeOverlay(); CB=null; go('home'); }
 
 /* --- Preparación: capitán + estancia (decisión previa) --- */
 function prepBattle(){
@@ -1214,7 +1225,7 @@ function finishBattle(){
     } else {
       api('/battle/resolve',{method:'POST',body:{battleId,decisions}})
         .then(r=>{ refreshMe().then(refreshChips); showResult(r); })
-        .catch(err=>{ toast('Error al resolver el combate'); CB=null; renderBattle(); });
+        .catch(err=>{ toast('Error al resolver el combate'); CB=null; go('home'); });
     }
   },650);
 }
@@ -1232,7 +1243,7 @@ function showResult(r){
      <button class="btn mt8" data-act="continueBattle">CONTINUAR</button>
    </div>`);
 }
-function flee(){if(CB){if(CB.timer)clearInterval(CB.timer);if(CB.planTimer)clearInterval(CB.planTimer);}CB=null;renderBattle();}
+function flee(){if(CB){if(CB.live){pvpSend({t:'leave'});if(PVP){try{PVP.ws.close();}catch(e){}PVP=null;}}if(CB.timer)clearInterval(CB.timer);if(CB.planTimer)clearInterval(CB.planTimer);}CB=null;go('home');}
 
 /* ====================== MAZMORRA (roguelike) ====================== */
 let D=null;
@@ -1422,7 +1433,7 @@ const ACTIONS={
   confirmPlan:()=>confirmPlan(),
   cbSpeed:()=>cbSpeed(), combatTipOk:()=>combatTipOk(),
   flee:()=>flee(),
-  continueBattle:()=>{closeOverlay();renderBattle();},
+  continueBattle:()=>{closeOverlay();go('home');},
   setRank:(a)=>setRank(a),
   shopRoll:()=>shopRoll(),
   purchase:(a)=>purchase(a),
