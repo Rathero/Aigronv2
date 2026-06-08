@@ -15,7 +15,8 @@ const path = require("path");
 const db = require("./db");
 const C = require("./config");
 const combat = require("./combat");
-const { sign, authMiddleware, verifyIdentity } = require("./auth");
+const auth = require("./auth");
+const { sign, authMiddleware, verifyIdentity } = auth;
 const { generateDailyBatch } = require("./jobs/generateDailyBatch");
 const { startCron } = require("./cron");
 const { fuse } = require("./fusion");
@@ -31,14 +32,18 @@ app.use(
     contentSecurityPolicy: {
       directives: {
         defaultSrc: ["'self'"],
-        scriptSrc: ["'self'", "'unsafe-inline'"],
-        styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+        // Google Sign-In (GIS): script + iframe + estilos + conexión a accounts.google.com.
+        scriptSrc: ["'self'", "'unsafe-inline'", "https://accounts.google.com/gsi/client"],
+        styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com", "https://accounts.google.com/gsi/style"],
         fontSrc: ["'self'", "https://fonts.gstatic.com"],
         imgSrc: ["'self'", "data:", "https:"],
-        connectSrc: ["'self'"],
+        connectSrc: ["'self'", "https://accounts.google.com"],
+        frameSrc: ["'self'", "https://accounts.google.com"],
       },
     },
     crossOriginEmbedderPolicy: false,
+    // Permite la ventana emergente de Google Sign-In (comunicación con el opener).
+    crossOriginOpenerPolicy: { policy: "same-origin-allow-popups" },
   })
 );
 
@@ -170,6 +175,11 @@ function publicUnit(u) {
 }
 
 // ---------------------------------- AUTH -------------------------------------
+// Config pública para el login: el cliente la pide para inicializar Google
+// Sign-In y saber si el login de invitado (dev) está permitido.
+app.get("/auth/config", (req, res) => {
+  res.json({ googleClientId: auth.GOOGLE_CLIENT_ID, allowDev: auth.ALLOW_DEV_AUTH });
+});
 app.post("/auth/login", wrap(async (req, res) => {
   const { provider = "dev", subject, idToken, displayName } = req.body || {};
   let identity;

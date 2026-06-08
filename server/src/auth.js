@@ -87,4 +87,4 @@ function verifyToken(token) {
   try { return jwt.verify(token, SECRET).uid; } catch (e) { return null; }
 }
 
-module.exports = { sign, authMiddleware, verifyIdentity, verifyToken };
+module.exports = { sign, authMiddleware, verifyIdentity, verifyToken, ALLOW_DEV_AUTH, GOOGLE_CLIENT_ID: process.env.AUTH_GOOGLE_CLIENT_ID || "" };

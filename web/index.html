@@ -300,6 +300,7 @@ h2.title small{font-family:var(--ui);font-size:13px;color:var(--ink-dim);font-we
       <div class="chip ene"><span>⚡</span><span id="c-ene">5</span></div>
     </div>
     <button class="help" data-act="openTutorial" title="Tutorial">?</button>
+    <button class="help" data-act="logout" title="Cerrar sesión" style="margin-left:4px">⎋</button>
   </div>
 
   <!-- HOME -->
@@ -328,11 +329,20 @@ h2.title small{font-family:var(--ui);font-size:13px;color:var(--ink-dim);font-we
 
   <div class="boot" id="boot">
     <div class="logo" style="font-size:18px">AI<b>GRONS</b></div>
-    <div class="spinner" id="boot-spin"></div>
-    <div class="dim" id="boot-msg">Conectando…</div>
-    <button class="btn sm" id="boot-retry" style="display:none;width:auto" onclick="window.__retryBoot&&window.__retryBoot()">REINTENTAR</button>
+    <div id="boot-loading">
+      <div class="spinner" id="boot-spin"></div>
+      <div class="dim" id="boot-msg">Conectando…</div>
+      <button class="btn sm" id="boot-retry" style="display:none;width:auto" onclick="window.__retryBoot&&window.__retryBoot()">REINTENTAR</button>
+    </div>
+    <div id="boot-login" style="display:none;text-align:center;max-width:300px">
+      <div class="dim" style="font-size:13px;margin:14px 0 12px">Inicia sesión para jugar</div>
+      <div id="gbtn" style="display:flex;justify-content:center;min-height:44px"></div>
+      <div id="login-dev" style="margin-top:10px"></div>
+      <div id="login-err" style="color:var(--red);font-size:12px;min-height:16px;margin-top:8px"></div>
+    </div>
   </div>
 </div>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
 <script src="engine.js"></script>
 <script>
 /* =========================================================================
@@ -1459,6 +1469,7 @@ const ACTIONS={
   purchase:(a)=>purchase(a),
   openTutorial:()=>openTutorial(),
   tutNext:()=>tutNext(), tutPrev:()=>tutPrev(), tutDone:()=>tutDone(),
+  logout:()=>logout(),
   dgStart:(a)=>dgStart(a), dgRankTab:(a)=>dgRankTab(a), dgChoose:(a)=>dgChoose(a), dgDraft:(a)=>dgDraft(a), dgSkipDraft:()=>dgSkipDraft(),
   dgBuy:(a)=>dgBuy(a), dgHeal:()=>dgHeal(), dgLeaveShop:()=>dgLeaveShop(), dgFight:()=>dgFight(), dgContinue:()=>dgContinue(),
   goDungeon:()=>go('dungeon')
@@ -1504,20 +1515,47 @@ function maybeTutorial(){ if(!localStorage.getItem('aigrons_tut')){ localStorage
 function bootMsg(msg,retry){ $("#boot-msg").textContent=msg; $("#boot-spin").style.display=retry?'none':'block'; $("#boot-retry").style.display=retry?'inline-block':'none'; }
 function hideBoot(){ $("#boot").classList.add("hide"); }
 function showBoot(){ $("#boot").classList.remove("hide"); }
-async function boot(){
-  showBoot(); bootMsg('Conectando…',false);
-  try{
-    if(!TOKEN){ await login(); }
-    try{ await refreshMe(); }
-    catch(e){ if(e.status===401){ await login(); await refreshMe(); } else throw e; }
-    await Promise.all([refreshDaily(),refreshCollection(),refreshTeam()]);
-    hideBoot();
-    go("home");
-    maybeTutorial();
-  }catch(e){
-    bootMsg('No se pudo conectar con el servidor. Asegúrate de que la API está arrancada.',true);
+function showLoadingSec(loading){ const l=$("#boot-loading"),g=$("#boot-login"); if(l)l.style.display=loading?'block':'none'; if(g)g.style.display=loading?'none':'block'; }
+function loginErr(msg){ const e=$("#login-err"); if(e)e.textContent=msg||''; }
+function gisReady(){ return new Promise(res=>{ let n=0; const t=setInterval(()=>{ if(window.google&&google.accounts&&google.accounts.id){clearInterval(t);res(true);} else if(++n>50){clearInterval(t);res(false);} },100); }); }
+// Pantalla de login (obligatoria). Google si está configurado; invitado solo en dev.
+async function showLogin(){
+  showBoot(); showLoadingSec(false); loginErr('');
+  let cfg={}; try{ cfg=await api('/auth/config'); }catch(e){ loginErr('No se pudo conectar con el servidor.'); showLoadingSec(true); bootMsg('Sin conexión.',true); return; }
+  const devBox=$("#login-dev"); devBox.innerHTML='';
+  if(cfg.allowDev){ devBox.innerHTML='<button class="btn sm ghost" id="devbtn" style="width:100%">Entrar como invitado (dev)</button>'; $("#devbtn").onclick=devLogin; }
+  const gbtn=$("#gbtn"); gbtn.innerHTML='';
+  if(cfg.googleClientId){
+    const ok=await gisReady();
+    if(ok){
+      google.accounts.id.initialize({ client_id:cfg.googleClientId, callback:onGoogleCredential });
+      google.accounts.id.renderButton(gbtn,{ theme:'filled_black', size:'large', shape:'pill', text:'continue_with', width:260 });
+    } else { gbtn.innerHTML='<div class="dim" style="font-size:12px">No se pudo cargar Google Sign-In.</div>'; }
+  } else if(!cfg.allowDev){
+    loginErr('Login no configurado (falta AUTH_GOOGLE_CLIENT_ID).');
   }
 }
+function onGoogleCredential(resp){
+  if(!resp||!resp.credential){ loginErr('Inicio de sesión cancelado.'); return; }
+  loginErr(''); showLoadingSec(true); bootMsg('Entrando…',false);
+  api('/auth/login',{method:'POST',body:{provider:'google',idToken:resp.credential}})
+    .then(r=>{ TOKEN=r.token; localStorage.setItem('aigrons_token',TOKEN); afterAuth(); })
+    .catch(()=>{ showLoadingSec(false); loginErr('No se pudo iniciar sesión con Google.'); });
+}
+function devLogin(){ showLoadingSec(true); bootMsg('Entrando…',false); login().then(afterAuth).catch(()=>{ showLoadingSec(false); loginErr('No se pudo entrar.'); }); }
+async function afterAuth(){
+  try{ await refreshMe(); }
+  catch(e){ if(e.status===401){ TOKEN=''; localStorage.removeItem('aigrons_token'); return showLogin(); } throw e; }
+  await Promise.all([refreshDaily(),refreshCollection(),refreshTeam()]);
+  hideBoot(); go("home"); maybeTutorial();
+}
+async function boot(){
+  showBoot(); showLoadingSec(true); bootMsg('Conectando…',false);
+  if(!TOKEN){ return showLogin(); }
+  try{ await afterAuth(); }
+  catch(e){ bootMsg('No se pudo conectar con el servidor. Asegúrate de que la API está arrancada.',true); }
+}
+function logout(){ TOKEN=''; localStorage.removeItem('aigrons_token'); try{ if(window.google&&google.accounts)google.accounts.id.disableAutoSelect(); }catch(e){} S.user=null; CB=null; showLogin(); }
 window.__retryBoot=boot;
 // PWA: registra el service worker (instalable en móvil). No bloquea si falla.
 if('serviceWorker' in navigator){ window.addEventListener('load',()=>navigator.serviceWorker.register('/sw.js').catch(()=>{})); }
