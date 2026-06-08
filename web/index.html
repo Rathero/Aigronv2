@@ -110,9 +110,10 @@ h2.title small{font-family:var(--ui);font-size:13px;color:var(--ink-dim);font-we
 @keyframes bob{0%,100%{transform:translateY(0)}50%{transform:translateY(-8px)}}
 
 /* ---------- creature card ---------- */
-.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
 .card{background:var(--panel2);border:2px solid var(--com);padding:6px 4px 7px;text-align:center;
-  position:relative;cursor:pointer;transition:transform .08s}
+  position:relative;cursor:pointer;transition:transform .08s;min-width:0}
+.card canvas,.card .aigimg,.card img{max-width:100%}
 .card:active{transform:scale(.96)}
 .card.r-RARA{border-color:var(--rar)} .card.r-EPICA{border-color:var(--epi);box-shadow:0 0 12px rgba(192,97,255,.35)}
 .card.r-LEGENDARIA{border-color:var(--leg);box-shadow:0 0 16px rgba(255,210,63,.45);animation:legpulse 2s infinite}
