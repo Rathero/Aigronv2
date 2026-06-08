@@ -16,7 +16,7 @@
 require("dotenv").config();
 const db = require("../db");
 const { dailyBatch } = require("../generator");
-const { getImageProvider, clampStats } = require("../ai/imageProvider");
+const { getImageProvider } = require("../ai/imageProvider");
 
 // Construye el "concepto" que consume el proveedor de imagen a partir de la
 // plantilla determinista (en modo openai esto alimenta el prompt de imagen).
@@ -63,7 +63,10 @@ async function generateDailyBatch(date, n) {
     if (delayMs) await sleep(delayMs);
     if (!art) { rejected++; continue; } // descartada por el filtro de calidad
 
-    const s = clampStats(t.base_stats, t.rarity);
+    // Stats DIRECTAS de genTemplate: ya incluyen el arquetipo por tipo (applyTypeBias),
+    // que sale del rango base de rareza a propósito. NO usar clampStats aquí (recortaría
+    // el arquetipo). clampStats es solo para stats propuestas por un LLM no fiable.
+    const s = t.base_stats;
 
     const r = await db.query(
       `INSERT INTO creature_templates
