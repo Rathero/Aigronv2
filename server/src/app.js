@@ -358,6 +358,8 @@ async function opponentFromSnapshot(snapshot) {
 }
 
 const STANCES_OK = ["NEUTRAL", "AGRESIVA", "DEFENSIVA"];
+// Ventana de emparejamiento PvP por nivel medio de equipo (±). Fuera de rango -> bot.
+const MATCH_LEVEL_WINDOW = 15;
 app.post("/battle/find", authMiddleware, wrap(async (req, res) => {
   const A = await buildTeamUnits(req.userId);
   if (!A.length) return res.status(400).json({ error: "empty_team" });
@@ -371,16 +373,23 @@ app.post("/battle/find", authMiddleware, wrap(async (req, res) => {
 
   const me = await getUser(req.userId);
 
-  // PvP asíncrono: busca el snapshot de un rival de liga similar; si no hay, bot.
+  // PvP asíncrono: busca el snapshot de un rival de NIVEL similar (ventana dura),
+  // desempatando por cercanía de liga; si no hay nadie en rango, bot (que escala
+  // al nivel del atacante -> combate siempre justo).
   let B = [];
   let defenderId = null;
   const rival = await db.query(
-    `SELECT t.user_id, t.snapshot
-       FROM teams t JOIN users u ON u.id = t.user_id
-      WHERE t.user_id <> $1 AND t.snapshot IS NOT NULL AND jsonb_array_length(t.snapshot) > 0
-      ORDER BY abs(u.league_points - $2) ASC, random()
+    `WITH cand AS (
+       SELECT t.user_id, t.snapshot, u.league_points,
+              (SELECT avg((e->>'level')::numeric) FROM jsonb_array_elements(t.snapshot) e) AS lvl
+         FROM teams t JOIN users u ON u.id = t.user_id
+        WHERE t.user_id <> $1 AND t.snapshot IS NOT NULL AND jsonb_array_length(t.snapshot) > 0
+     )
+     SELECT user_id, snapshot FROM cand
+      WHERE lvl IS NOT NULL AND abs(lvl - $2) <= $3
+      ORDER BY abs(lvl - $2) ASC, abs(league_points - $4) ASC, random()
       LIMIT 10`,
-    [req.userId, me.league_points]
+    [req.userId, lvl, MATCH_LEVEL_WINDOW, me.league_points]
   );
   if (rival.rowCount) {
     const pick = rival.rows[Math.floor(Math.random() * rival.rowCount)];

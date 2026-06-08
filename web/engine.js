@@ -175,7 +175,10 @@
   const COMBAT_ENERGY_MAX = 6;
   const TURNS_MAX = 60;
   const RELEASE_DUST = { COMUN: 5, RARA: 12, EPICA: 30, LEGENDARIA: 80 };
-  const levelCost = (level) => ({ dust: 10 * level, coins: 50 * level });
+  // Coste de subir de nivel: curva SUB-LINEAL (raíz) -> ramp suave hasta nivel 100
+  // (ej. Nv1: 12✨/60🪙, Nv20: 54/268, Nv50: 85/424, Nv100: 120/600) en vez del
+  // antiguo lineal que explotaba (Nv100 = 1000✨/5000🪙).
+  const levelCost = (level) => ({ dust: Math.round(12 * Math.sqrt(level)), coins: Math.round(60 * Math.sqrt(level)) });
   const LEVEL_MAX = 100;
 
   // Ligas

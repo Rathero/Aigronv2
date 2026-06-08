@@ -94,6 +94,19 @@ test("nivel máximo = 100 (escala x4.96 a tope)", () => {
   assert.equal(E.scaled(1000, 100), Math.round(1000 * (1 + 0.04 * 99))); // 4960
 });
 
+test("coste de subida: curva suave sub-lineal y monótona", () => {
+  assert.deepEqual(E.levelCost(1), { dust: 12, coins: 60 });
+  // Monótona no decreciente.
+  for (let l = 2; l <= 100; l++) {
+    const a = E.levelCost(l - 1), b = E.levelCost(l);
+    assert.ok(b.dust >= a.dust && b.coins >= a.coins, `coste baja en nivel ${l}`);
+  }
+  // Sub-lineal: Nv100 cuesta ~10x el Nv1 (raíz), no 100x como el lineal viejo.
+  const c100 = E.levelCost(100);
+  assert.ok(c100.dust <= 130 && c100.coins <= 650, `Nv100 demasiado caro: ${JSON.stringify(c100)}`);
+  assert.ok(c100.dust < 15 * E.levelCost(1).dust, "no es sub-lineal");
+});
+
 test("umbrales de liga", () => {
   assert.equal(E.computeLeague(0), "BRONCE");
   assert.equal(E.computeLeague(99), "BRONCE");
