@@ -133,6 +133,11 @@ h2.title small{font-family:var(--ui);font-size:13px;color:var(--ink-dim);font-we
 
 /* ---------- creature card ---------- */
 .grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+/* estado vacío dentro de una cuadrícula: ocupa todo el ancho (no 1 celda) y
+   es tocable (abre el editor de equipo) */
+.grid-hint{grid-column:1/-1;text-align:center;color:var(--ink-dim);font-size:13px;
+  border:2px dashed var(--line);padding:18px 10px;cursor:pointer}
+.grid-hint:active{transform:scale(.98)}
 .card{background:var(--panel2);border:2px solid var(--com);padding:6px 4px 7px;text-align:center;
   position:relative;cursor:pointer;transition:transform .08s;min-width:0}
 .card canvas,.card .aigimg,.card img{max-width:100%}

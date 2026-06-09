@@ -338,7 +338,7 @@ function teamCombatHTML(){
       <b style="font-size:14px">Tu equipo</b>
       ${power?`<span class="dim" style="font-size:12px">PODER <b style="color:var(--cyan)">${power}</b></span>`:''}
       <button class="btn sm ghost" data-act="editTeam">EDITAR</button></div>
-      <div class="grid team-grid">${team.length?team.map(i=>cardHTML(i)).join(""):'<div class="dim">Elige 3 aigrons en tu colección</div>'}</div>
+      <div class="grid team-grid">${team.length?team.map(i=>cardHTML(i)).join(""):'<div class="grid-hint" data-act="editTeam">＋ Elige 3 aigrons de tu colección</div>'}</div>
     </div>
     <button class="btn mag mb8" data-act="prepBattle" ${team.length<1?'disabled':''}>⚔️ COMBATE PvP EN VIVO — ⚡1</button>`;
 }
@@ -462,7 +462,7 @@ async function renderBattle(){
     <div class="panel"><div class="row" style="justify-content:space-between;align-items:center;margin-bottom:8px">
         <b style="font-size:14px">Tu equipo</b>
         <button class="btn sm ghost" data-act="editTeam">EDITAR</button></div>
-      <div class="grid">${team.length?team.map(i=>cardHTML(i)).join(""):'<div class="dim">Elige 3 aigrons</div>'}</div>
+      <div class="grid">${team.length?team.map(i=>cardHTML(i)).join(""):'<div class="grid-hint" data-act="editTeam">＋ Elige 3 aigrons de tu colección</div>'}</div>
     </div>
     <button class="btn mag" data-act="prepBattle" ${team.length<1?'disabled':''}>⚔️ COMBATE PvP EN VIVO — ⚡1</button>
     <div class="panel mt8"><b style="font-size:14px">Estrategia</b>
