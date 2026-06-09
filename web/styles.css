@@ -1,6 +1,6 @@
 :root{
   --bg0:#0a0818; --bg1:#12102a; --bg2:#1b1740; --panel:#1d1842; --panel2:#241e52;
-  --ink:#e8e4ff; --ink-dim:#9a92c8; --line:#3a3270;
+  --ink:#e8e4ff; --ink-dim:#aaa2dc; --line:#3a3270; /* ink-dim subido para contraste AA sobre paneles oscuros */
   --cyan:#34f5e4; --magenta:#ff4d9d; --gold:#ffd23f; --green:#7CFF6B; --red:#ff5d5d;
   --com:#8b86b8; --rar:#43b6ff; --epi:#c061ff; --leg:#ffd23f;
   --pixel: 'Press Start 2P', monospace;
@@ -43,7 +43,7 @@ body::before{
   background:repeating-linear-gradient(0deg, rgba(0,0,0,.06) 0 1px, transparent 1px 3px);mix-blend-mode:overlay}
 
 /* ---------- top bar ---------- */
-.topbar{display:flex;align-items:center;gap:8px;padding:10px 12px;
+.topbar{display:flex;align-items:center;gap:8px;padding:calc(10px + env(safe-area-inset-top)) 12px 10px;
   border-bottom:2px solid var(--line);background:rgba(10,8,24,.6);backdrop-filter:blur(4px);z-index:10}
 .logo{font-family:var(--pixel);font-size:13px;letter-spacing:1px;
   color:var(--cyan);text-shadow:2px 2px 0 #0a3, 0 0 12px rgba(52,245,228,.5)}
@@ -54,6 +54,18 @@ body::before{
 .chip span:first-child{font-size:11px}
 .chip .ic{width:12px;height:12px;display:inline-block;image-rendering:pixelated}
 .chip.coin{color:var(--gold)} .chip.dust{color:#bfe3ff} .chip.gem{color:var(--magenta)} .chip.ene{color:var(--cyan)}
+/* cuenta atrás de la próxima ⚡ dentro del chip de energía */
+.chip .ene-t{font-size:10px;color:var(--ink-dim);font-weight:400}
+.chip .ene-t:empty{display:none}
+
+/* menú de la topbar (tutorial / cerrar sesión) */
+.menu{position:absolute;top:calc(44px + env(safe-area-inset-top));right:10px;z-index:120;display:none;
+  background:var(--panel);border:2px solid var(--line);box-shadow:0 0 0 2px #000,0 12px 30px #000c;min-width:170px}
+.menu.show{display:block;animation:fade .15s}
+.menu button{display:block;width:100%;text-align:left;background:none;border:none;cursor:pointer;
+  font-family:var(--ui);font-weight:700;font-size:13px;color:var(--ink);padding:10px 12px}
+.menu button+button{border-top:1px solid var(--line)}
+.menu button:active{background:#0a0818}
 
 /* ---------- screens ---------- */
 .screen{flex:1;overflow-y:auto;overflow-x:hidden;padding:14px 12px 16px;display:none}
@@ -82,17 +94,42 @@ h2.title small{font-family:var(--ui);font-size:13px;color:var(--ink-dim);font-we
 .btn.mag:active{box-shadow:0 0 0,0 2px 0 #000}
 .btn.gold{background:var(--gold);color:#2a1d00;box-shadow:0 4px 0 #b58e10,0 6px 0 #000}
 .btn.ghost{background:#0a0818;color:var(--ink);box-shadow:0 4px 0 #000;border:2px solid var(--line)}
+/* variante secundaria cian: misma jerarquía visual que ghost pero "viva".
+   Se usa para acciones secundarias (p. ej. CONTINUAR mazmorra) para que no
+   compitan con la CTA primaria magenta de la pantalla. */
+.btn.ghost.cyan{border-color:var(--cyan);color:var(--cyan)}
 .btn.sm{font-size:13px;padding:8px 10px;width:auto}
 .btn[disabled]{filter:grayscale(.7) brightness(.6);cursor:not-allowed}
 .row{display:flex;gap:8px}
 
 /* ---------- daily claim card ---------- */
 .daily{position:relative;text-align:center;padding:18px 12px;overflow:hidden}
+/* versión compacta cuando YA se reclamó: una banda fina con cuenta atrás al
+   próximo lote + racha, en vez de un panel grande "sin nada que hacer". */
+.daily-compact{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:13px}
+.daily-compact b{color:var(--cyan)}
+
+/* barra de progreso de liga (bajo el título de INICIO) */
+.league-wrap{display:flex;align-items:center;gap:8px;font-size:12px;margin:-6px 0 12px}
+.league-wrap .lg-now{color:var(--gold);font-weight:700;white-space:nowrap}
+.league-wrap .lg-next{color:var(--ink-dim);white-space:nowrap}
+.league-bar{flex:1;height:8px;background:#0a0818;border:1px solid var(--line);overflow:hidden}
+.league-bar i{display:block;height:100%;background:linear-gradient(90deg,var(--cyan),var(--magenta));transition:width .4s}
 .daily .halo{position:absolute;inset:0;pointer-events:none;background:radial-gradient(circle at 50% 40%,rgba(52,245,228,.18),transparent 60%);animation:pulse 3s ease-in-out infinite}
 @keyframes pulse{0%,100%{opacity:.6}50%{opacity:1}}
 .egg{width:120px;height:120px;margin:6px auto;image-rendering:pixelated;
   filter:drop-shadow(0 0 14px rgba(52,245,228,.4));animation:bob 2.4s ease-in-out infinite}
 @keyframes bob{0%,100%{transform:translateY(0)}50%{transform:translateY(-8px)}}
+
+/* ---------- misiones diarias ---------- */
+.mis{margin:7px 0}
+.mis .mrow{display:flex;align-items:center;justify-content:space-between;font-size:13px;gap:8px}
+.mis-bar{height:6px;background:#0a0818;border:1px solid var(--line);overflow:hidden;margin-top:3px}
+.mis-bar i{display:block;height:100%;background:var(--cyan);transition:width .3s}
+.mis.done .mis-bar i{background:var(--green)}
+/* recompensa lista para reclamar: pulso para que no pase desapercibida */
+.pulse{animation:claimpulse 1.2s ease-in-out infinite}
+@keyframes claimpulse{0%,100%{box-shadow:0 4px 0 #b58e10,0 6px 0 #000}50%{box-shadow:0 4px 0 #b58e10,0 6px 0 #000,0 0 14px rgba(255,210,63,.8)}}
 
 /* ---------- creature card ---------- */
 .grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
@@ -173,6 +210,18 @@ h2.title small{font-family:var(--ui);font-size:13px;color:var(--ink-dim);font-we
 .targhint{font-size:13px;text-align:center;padding:6px;color:var(--cyan);border:2px dashed var(--cyan);background:#0a0818;margin-bottom:6px;font-weight:700}
 /* banner de acción + controles de velocidad */
 .action-banner{font-size:13px;text-align:center;padding:7px;border:2px solid var(--line);background:#0a0818;margin-bottom:8px;min-height:32px;font-weight:700}
+/* historial de turnos: lo ocurrido, en pequeño bajo el banner (lo último arriba) */
+.turnlog{font-size:10px;color:var(--ink-dim);max-height:74px;overflow-y:auto;
+  border:2px solid var(--line);background:#0a0818;padding:4px 7px;margin-bottom:8px;line-height:1.8}
+.turnlog:empty{display:none}
+.turnlog .tl:first-child{color:var(--ink)} /* la línea más reciente, destacada */
+.turnlog .tl-r{color:var(--gold);font-weight:700;margin-right:2px}
+.turnlog .tl-dmg{color:#fff}
+.turnlog .tl-heal{color:var(--green)}
+.turnlog .tl-crit{color:var(--gold)}
+.turnlog .tl-ab{color:var(--gold)}
+.turnlog .tl-eff{color:var(--magenta);font-style:normal}
+.turnlog .tl-res{color:var(--ink-dim);font-style:normal;opacity:.8}
 .combat-ctrl{display:flex;gap:6px;margin-top:8px}
 .cbtn{flex:1;font-family:var(--ui);font-weight:700;font-size:12px;padding:8px 4px;border:2px solid var(--line);background:#0a0818;color:var(--ink);cursor:pointer}
 .cbtn.on{border-color:var(--cyan);color:var(--cyan)}
@@ -216,12 +265,14 @@ h2.title small{font-family:var(--ui);font-size:13px;color:var(--ink-dim);font-we
 .shop-item .meta{flex:1}.shop-item .meta .t{font-weight:700}.shop-item .meta .d{font-size:12px;color:var(--ink-dim)}
 
 /* ---------- bottom nav ---------- */
-.nav{display:flex;border-top:2px solid var(--line);background:rgba(10,8,24,.85);backdrop-filter:blur(6px);z-index:10}
+.nav{display:flex;border-top:2px solid var(--line);background:rgba(10,8,24,.85);backdrop-filter:blur(6px);z-index:10;
+  padding-bottom:env(safe-area-inset-bottom)} /* respeta el gesto de home en iOS */
 .nav button{flex:1;background:none;border:none;color:var(--ink-dim);padding:8px 2px 9px;cursor:pointer;
   font-family:var(--ui);font-size:11px;display:flex;flex-direction:column;align-items:center;gap:3px}
-.nav button .ni{font-size:18px;line-height:1}
+.nav button .ni{font-size:18px;line-height:1;display:flex;align-items:center;justify-content:center;height:18px}
+.nav button .ni svg{width:18px;height:18px;display:block}
 .nav button.on{color:var(--cyan);text-shadow:0 0 8px var(--cyan)}
-.nav button.on .ni{transform:translateY(-1px)}
+.nav button.on .ni{transform:translateY(-1px);filter:drop-shadow(0 0 5px var(--cyan))}
 
 /* ---------- overlay / modal ---------- */
 .overlay{position:absolute;inset:0;background:rgba(5,4,14,.85);backdrop-filter:blur(3px);z-index:100;
@@ -256,6 +307,12 @@ h2.title small{font-family:var(--ui);font-size:13px;color:var(--ink-dim);font-we
 .dg-bar{display:flex;align-items:center;gap:8px;font-size:13px;margin-bottom:6px;flex-wrap:wrap}
 .dg-pip{width:10px;height:10px;border:1px solid var(--line);background:#0a0818}
 .dg-pip.done{background:var(--cyan)}.dg-pip.boss{border-color:var(--gold)}
+.dg-pip.cur{border-color:var(--cyan);box-shadow:0 0 5px var(--cyan)} /* nodo actual */
+.dg-pips-row{display:flex;gap:4px;margin-top:8px}
+
+/* sprites del equipo en INICIO: bob de 2 frames (pixel-feel, sin blur) */
+.team-grid .card canvas,.team-grid .card .aigimg{animation:idle 1.6s steps(1) infinite}
+@keyframes idle{0%,49%{transform:translateY(0)}50%,100%{transform:translateY(-2px)}}
 .dg-team{display:flex;gap:6px;margin-bottom:10px}
 .dg-mem{flex:1;border:2px solid var(--line);background:var(--panel2);padding:4px;text-align:center;position:relative}
 .dg-mem.dead{opacity:.35;filter:grayscale(1)}

@@ -125,10 +125,22 @@ function userPublic(u) {
     id: u.id, displayName: u.display_name,
     coins: u.coins, gems: u.gems, dust: u.dust,
     energy: u.energy, energyMax: C.ENERGY_MAX,
+    // Cuándo regenera la próxima ⚡ (null si está llena): el cliente muestra la
+    // cuenta atrás sin tener que conocer ENERGY_REGEN_MS ni energy_updated_at.
+    energyNextAt: u.energy < C.ENERGY_MAX
+      ? new Date(new Date(u.energy_updated_at).getTime() + C.ENERGY_REGEN_MS).toISOString()
+      : null,
     league: u.league, leaguePoints: u.league_points,
     streak: u.daily_streak,
     claimedToday: !!(u.last_claim_date && C.todayStr(new Date(u.last_claim_date)) === C.todayStr()),
   };
+}
+
+// Próximo cambio de lote = medianoche LOCAL del servidor (todayStr usa fecha
+// local). El cliente lo usa para la cuenta atrás "nuevo lote en…".
+function nextBatchAt() {
+  const n = new Date();
+  return new Date(n.getFullYear(), n.getMonth(), n.getDate() + 1).toISOString();
 }
 
 // ---------------------------- misiones diarias ------------------------------
@@ -246,7 +258,7 @@ app.get("/me", authMiddleware, wrap(async (req, res) => {
 app.get("/daily", authMiddleware, wrap(async (req, res) => {
   const u = await getUser(req.userId);
   const list = await todayTemplates();
-  res.json({ date: C.todayStr(), count: list.length, claimed: userPublic(u).claimedToday, batch: list });
+  res.json({ date: C.todayStr(), count: list.length, claimed: userPublic(u).claimedToday, nextBatchAt: nextBatchAt(), batch: list });
 }));
 
 app.post("/daily/claim", authMiddleware, wrap(async (req, res) => {
@@ -658,6 +670,12 @@ app.post("/dungeon/choose", authMiddleware, wrap(async (req, res) => {
 }));
 app.post("/dungeon/battle", authMiddleware, wrap(async (req, res) => {
   try { res.json(await dungeon.resolveCombat(req.userId, (req.body && req.body.decisions) || [])); }
+  catch (e) { dungeonErr(res, e); }
+}));
+// Huir = perder la run (permadeath): sin esto, huir permitiría reintentar
+// gratis cualquier combate perdido de la mazmorra.
+app.post("/dungeon/abandon", authMiddleware, wrap(async (req, res) => {
+  try { res.json(await dungeon.abandonRun(req.userId)); }
   catch (e) { dungeonErr(res, e); }
 }));
 app.post("/dungeon/draft", authMiddleware, wrap(async (req, res) => {

@@ -163,8 +163,32 @@ function refreshChips(){
   $("#c-coins").textContent=S.user.coins;
   $("#c-dust").textContent=S.user.dust;
   $("#c-gems").textContent=S.user.gems;
-  $("#c-ene").textContent=S.user.energy>=S.user.energyMax?S.user.energy:S.user.energy+"/"+S.user.energyMax;
+  $("#c-ene").textContent=S.user.energy+"/"+S.user.energyMax;
 }
+/* -------- cuentas atrás (energía y próximo lote), tick de 1 s -------- */
+function fmtMMSS(ms){ms=Math.max(0,ms);const m=Math.floor(ms/60000),s=Math.floor(ms%60000/1000);return m+":"+String(s).padStart(2,"0");}
+function fmtHMS(ms){ms=Math.max(0,ms);const h=Math.floor(ms/3600000),m=Math.floor(ms%3600000/60000),s=Math.floor(ms%60000/1000);
+  return h>0?`${h}h ${String(m).padStart(2,"0")}m`:(m>0?`${m}m ${String(s).padStart(2,"0")}s`:`${s}s`);}
+let _eneSyncing=false;
+function tickCountdowns(){
+  const et=$("#c-ene-t");
+  if(et){
+    if(S.user&&S.user.energyNextAt&&S.user.energy<S.user.energyMax){
+      const ms=new Date(S.user.energyNextAt)-Date.now();
+      et.textContent="·"+fmtMMSS(ms);
+      if(ms<=0&&!_eneSyncing){ // llegó la ⚡: resincroniza con el servidor
+        _eneSyncing=true;
+        refreshMe().then(()=>{refreshChips();}).catch(()=>{}).finally(()=>{_eneSyncing=false;});
+      }
+    } else et.textContent="";
+  }
+  const nb=$("#next-batch");
+  if(nb&&S.daily){
+    const t=S.daily.nextBatchAt?new Date(S.daily.nextBatchAt):(()=>{const n=new Date();return new Date(n.getFullYear(),n.getMonth(),n.getDate()+1);})();
+    nb.textContent=fmtHMS(t-Date.now());
+  }
+}
+setInterval(tickCountdowns,1000);
 function toast(msg){const t=$("#toast");t.textContent=msg;t.classList.add("show");
   clearTimeout(t._t);t._t=setTimeout(()=>t.classList.remove("show"),1600);}
 function openOverlay(html){$("#modal").innerHTML=html;$("#overlay").classList.add("show");renderCanvases($("#modal"));}
@@ -232,25 +256,45 @@ function dungeonHomeCard(dg){
   }
   const at=`nodo ${Math.min(dg.depth+1,dg.totalDepth)}/${dg.totalDepth}`;
   if(dg.status==='active'){
+    const nR=dg.relics.length;
+    const relicTxt=nR===0?'sin reliquias':nR===1?'1 reliquia':`${nR} reliquias`;
+    const pips=Array.from({length:dg.totalDepth},(_,i)=>
+      `<span class="dg-pip ${i<dg.depth?'done':''} ${i===dg.depth?'cur':''} ${i===dg.totalDepth-1?'boss':''}"></span>`).join('');
     return `<div class="panel glow-cyan"><div class="row" style="justify-content:space-between;align-items:center">
-      <b style="font-size:14px">🗺️ Mazmorra · ${at}</b><span style="color:var(--gold);font-size:12px">🪙 ${dg.coins}</span></div>
-      <div class="dim mt8" style="font-size:12px">Tienes una run en marcha · ${dg.relics.length} reliquia(s).</div>
-      <button class="btn sm mt8" style="width:100%" data-act="goDungeon">CONTINUAR</button></div>`;
+      <b style="font-size:14px">🗺️ Mazmorra · ${at}</b><span class="dim" style="font-size:12px">botín: <b style="color:var(--gold)">${dg.coins}</b>🪙</span></div>
+      <div class="dg-pips-row">${pips}</div>
+      <div class="dim mt8" style="font-size:12px">Run en marcha · ${relicTxt}.</div>
+      <button class="btn sm ghost cyan mt8" style="width:100%" data-act="goDungeon">CONTINUAR ▶</button></div>`;
   }
   return `<div class="panel"><div class="row" style="justify-content:space-between;align-items:center">
       <b style="font-size:14px">🗺️ Mazmorra</b><span class="dim" style="font-size:12px">${dg.status==='cleared'?'🏆 completada':'☠️ terminada'}</span></div>
       <div class="dim mt8" style="font-size:12px">Llegaste al ${at}. Mapa nuevo mañana.</div>
       <button class="btn sm ghost mt8" style="width:100%" data-act="goDungeon">VER RANKING</button></div>`;
 }
+// Barra de progreso hacia la siguiente liga (umbrales de engine.computeLeague).
+const LEAGUE_STEPS=[["BRONCE",0],["PLATA",100],["ORO",250],["PLATINO",450],["DIAMANTE",700]];
+function leagueBarHTML(){
+  const lp=S.user.leaguePoints;
+  const i=LEAGUE_STEPS.findIndex(([name])=>name===S.user.league);
+  const next=LEAGUE_STEPS[i+1];
+  if(!next) return `<div class="league-wrap"><span class="lg-now">🏅 ${S.user.league}</span>
+    <div class="league-bar"><i style="width:100%"></i></div><span class="lg-next">${lp} pts · liga máxima</span></div>`;
+  const from=LEAGUE_STEPS[i][1];
+  const pct=Math.max(0,Math.min(100,Math.round((lp-from)/(next[1]-from)*100)));
+  return `<div class="league-wrap"><span class="lg-now">🏅 ${S.user.league}</span>
+    <div class="league-bar"><i style="width:${pct}%"></i></div>
+    <span class="lg-next">${lp}/${next[1]} → ${next[0]}</span></div>`;
+}
 async function renderHome(){
   refreshChips();
   const claimed=S.daily&&S.daily.claimed;
   let dg=null; try{ dg=await api('/dungeon'); }catch(e){}
+  // Reclamado: banda compacta con cuenta atrás (anticipación) en vez de un
+  // panel grande "sin nada que hacer" ocupando el espacio premium.
   const dailyCard=claimed?
-    `<div class="daily panel glow-cyan"><div class="halo"></div>
-       <div class="tc"><b style="font-size:15px">Ya reclamaste hoy</b></div>
-       <div class="subtle tc mt8">Vuelve mañana — habrá un lote nuevo de aigrons.</div>
-       <div class="tc mt8" style="font-size:13px">🔥 Racha diaria: <b style="color:var(--gold)">${S.user.streak}</b> días</div>
+    `<div class="panel daily-compact">
+       <span>🎁 Nuevo lote en <b id="next-batch">--</b></span>
+       <span>🔥 Racha: <b style="color:var(--gold)">${S.user.streak}</b> día${S.user.streak===1?'':'s'}</span>
      </div>`:
     `<div class="daily panel glow-cyan"><div class="halo"></div>
        <div class="tc"><b style="font-size:14px;color:var(--cyan)">AIGRÓN DEL DÍA</b></div>
@@ -260,12 +304,17 @@ async function renderHome(){
      </div>`;
   const missions=(S.user.missions)||[];
   const labels={claim:"Reclama tu aigrón",win:"Gana 3 combates",ability:"Usa 5 habilidades"};
-  const mrow=(m)=>{return `<div class="row" style="align-items:center;justify-content:space-between;font-size:13px;margin:4px 0">
-     <span>${m.done?"✅":"▫️"} ${labels[m.key]||m.key} <span class="dim">(${m.progress}/${m.goal})</span></span>
-     ${m.done&&!m.claimed?`<button class="btn sm gold" style="padding:4px 8px" data-act="claimMission" data-arg="${m.key}">+${m.reward}🪙</button>`
-        :`<span style="color:var(--gold)">${m.claimed?'✔':'+'+m.reward+'🪙'}</span>`}</div>`;};
+  const mrow=(m)=>{const pct=Math.min(100,Math.round(m.progress/m.goal*100));
+    return `<div class="mis ${m.done?'done':''}">
+     <div class="mrow">
+       <span>${m.done?"✅":"▫️"} ${labels[m.key]||m.key} <span class="dim">(${m.progress}/${m.goal})</span></span>
+       ${m.done&&!m.claimed?`<button class="btn sm gold pulse" style="padding:4px 8px" data-act="claimMission" data-arg="${m.key}">+${m.reward}🪙</button>`
+          :`<span style="color:var(--gold)">${m.claimed?'✔':'+'+m.reward+'🪙'}</span>`}
+     </div>
+     <div class="mis-bar"><i style="width:${pct}%"></i></div></div>`;};
   $("#s-home").innerHTML=`
-    <h2 class="title">INICIO <small>Liga ${S.user.league} · ${S.user.leaguePoints} pts</small></h2>
+    <h2 class="title">${(S.user.displayName||'INICIO').toUpperCase()}</h2>
+    ${leagueBarHTML()}
     ${dailyCard}
     ${teamCombatHTML()}
     <div class="panel"><b style="font-size:14px">Misiones diarias</b>
@@ -273,15 +322,23 @@ async function renderHome(){
     </div>
     ${dungeonHomeCard(dg)}`;
   renderCanvases($("#s-home"));
+  tickCountdowns();
   $("#s-home").querySelectorAll(".card").forEach(c=>c.onclick=()=>openDetail(c.dataset.iid));
 }
 // Bloque "Tu equipo" + botón de combate PvP (en INICIO).
+function teamPower(team){
+  // Índice simple de fuerza: suma de stats escalados (HP ponderado a /10).
+  return Math.round(team.reduce((a,i)=>{const s=i.template.stats;
+    return a+(s?s.hp/10+s.atkP+s.atkS+s.defP+s.defS+s.spd:0);},0));
+}
 function teamCombatHTML(){
   const team=S.team.map(instById).filter(Boolean);
+  const power=teamPower(team);
   return `<div class="panel"><div class="row" style="justify-content:space-between;align-items:center;margin-bottom:8px">
       <b style="font-size:14px">Tu equipo</b>
+      ${power?`<span class="dim" style="font-size:12px">PODER <b style="color:var(--cyan)">${power}</b></span>`:''}
       <button class="btn sm ghost" data-act="editTeam">EDITAR</button></div>
-      <div class="grid">${team.length?team.map(i=>cardHTML(i)).join(""):'<div class="dim">Elige 3 aigrons en tu colección</div>'}</div>
+      <div class="grid team-grid">${team.length?team.map(i=>cardHTML(i)).join(""):'<div class="dim">Elige 3 aigrons en tu colección</div>'}</div>
     </div>
     <button class="btn mag mb8" data-act="prepBattle" ${team.length<1?'disabled':''}>⚔️ COMBATE PvP EN VIVO — ⚡1</button>`;
 }
@@ -569,6 +626,21 @@ function liveAnimate(log, state){
     else if(e.guard) setBanner(`<span style="color:${who}">${nm}</span> se protege 🛡️`);
     else if(e.ability) setBanner(`<span style="color:${who}">${nm}</span> usa <b style="color:var(--gold)">${e.ability}</b>${e.overcharge?' ⚡⚡×1.5':''}`);
     else if(e.hits&&e.hits.length) setBanner(`<span style="color:${who}">${nm}</span> ataca`);
+    // Historial (PvP en vivo): mismo formato que el combate local.
+    {
+      const rnd=`<span class="tl-r">R${CB.planTurn}</span>`;
+      const nmH=`<span style="color:${who}">${nm}</span>`;
+      if(e.poison) logTurn(`${rnd} ☠ ${nmH} sufre <b class="tl-dmg">−${e.poison}</b> de veneno/quemadura`);
+      if(e.stunned) logTurn(`${rnd} 💫 ${nmH} está aturdido — pierde el turno`);
+      else if(e.died) logTurn(`${rnd} ☠ ${nmH} cae`);
+      else if(e.guard) logTurn(`${rnd} 🛡️ ${nmH} se pone en guardia`);
+      else {
+        const what=e.ability?`usa <b class="tl-ab">${e.ability}</b>${e.overcharge?' ⚡⚡':''}`:'ataca';
+        const det=(e.hits||[]).map(h=>{const t=byUid(toLocalUid(h.tgt&&h.tgt.uid));
+          return hitTxt(h,(t&&t.name)||'rival',!!(h.tgt&&h.tgt.hp<=0));}).join(' · ');
+        logTurn(`${rnd} ${nmH} ${what}${det?' '+det:''}`);
+      }
+    }
     (e.hits||[]).forEach(h=>{ const luid=toLocalUid(h.tgt&&h.tgt.uid); const t=byUid(luid); if(!t||!t.el)return;
       t.el.classList.remove("hit");void t.el.offsetWidth;t.el.classList.add("hit");
       floatNum(t,(h.shielded?"🛡":"")+(h.guarded?"🛡️":"")+(h.crit?"¡":"")+h.dmg+(h.crit?"!":""),h.crit?"var(--gold)":h.shielded?"#aebfce":h.guarded?"var(--cyan)":h.typeM>1?"var(--magenta)":"#fff");
@@ -640,6 +712,7 @@ function buildArena(){
       <div class="side player-side">${CB.A.map(fHTML).join("")}</div>
     </div>
     <div class="action-banner" id="abanner">¡Empieza el combate!</div>
+    <div class="turnlog" id="turnlog"></div>
     <div id="planner"></div>
     <div class="combat-ctrl">
       <button class="cbtn" data-act="flee">🏳 Huir</button>
@@ -675,6 +748,58 @@ function refreshArena(){
   });
 }
 function setBanner(html){ const b=$("#abanner"); if(b) b.innerHTML=html; }
+/* ---- Historial de turnos: lo ya ocurrido, bajo el banner de la acción actual.
+   Lo más reciente arriba; con números de daño/cura y estados alterados. ---- */
+function logTurn(html){
+  const l=$("#turnlog"); if(!l) return;
+  const d=document.createElement("div"); d.className="tl"; d.innerHTML=html;
+  l.prepend(d);
+  while(l.children.length>80) l.removeChild(l.lastChild);
+}
+function hitTxt(h,tname,killed){
+  const eff=h.typeM>1?' <i class="tl-eff">eficaz</i>':(h.typeM<1?' <i class="tl-res">resistido</i>':'');
+  return `→ ${tname} <b class="tl-dmg">−${h.dmg}</b>${h.crit?' <b class="tl-crit">¡CRÍT!</b>':''}${h.shielded?' 🛡':''}${h.guarded?' 🛡️':''}${eff}${killed?' ☠':''}`;
+}
+// Línea de historial para una acción del combate local (resolveTick).
+function logAction(u,action,st,extras){
+  const who=u.team==='A'?'var(--cyan)':'var(--magenta)';
+  const rnd=`<span class="tl-r">R${CB.turn}</span>`;
+  const nm=`<span style="color:${who}">${u.name}</span>`;
+  if(st&&st.poison) logTurn(`${rnd} ☠ ${nm} sufre <b class="tl-dmg">−${st.poison}</b> de veneno/quemadura`);
+  if(action.stunned){ logTurn(`${rnd} 💫 ${nm} está aturdido — pierde el turno`); return; }
+  if(action.died){ logTurn(`${rnd} ☠ ${nm} cae`); return; }
+  if(action.guard){ logTurn(`${rnd} 🛡️ ${nm} se pone en guardia`); return; }
+  const what=action.ability?`usa <b class="tl-ab">${action.ability}</b>${action.overcharge?' ⚡⚡':''}`:'ataca';
+  const det=action.hits.map(h=>hitTxt(h,h.tgt.name,h.tgt.hp<=0)).join(' · ');
+  logTurn(`${rnd} ${nm} ${what}${det?' '+det:''}${extras||''}`);
+}
+// Curas/escudos/estados que el motor aplica sin registrarlos en `action`:
+// se detectan por diferencia de HP (snapshot antes/después) + tipo de habilidad.
+function actionExtras(u,action,hpBefore,mine,foes){
+  if(action.stunned||action.died||action.guard) return '';
+  const out=[];
+  const hitUids=new Set(action.hits.map(h=>h.tgt.uid));
+  [...mine,...foes].forEach(x=>{
+    const before=hpBefore.get(x.uid); if(before==null) return;
+    const d=Math.round(x.hp-before);
+    if(d>0) out.push(`💚 ${x.name} <b class="tl-heal">+${d}</b>`);
+    else if(d<0&&!hitUids.has(x.uid)&&x.uid===u.uid) out.push(`(se hiere <b class="tl-dmg">−${-d}</b>)`);
+  });
+  if(action.ability){
+    const ab=ABILITIES[u.ability];
+    const tgtName=action.statusTgt?((foes.find(x=>x.uid===action.statusTgt)||{}).name||''):'';
+    if(ab){
+      if(ab.kind==='dot'&&tgtName) out.push(`☠ envenena a ${tgtName}`);
+      if(ab.kind==='stun'&&tgtName) out.push(`💫 aturde a ${tgtName}`);
+      if(ab.kind==='shield') out.push(`🛡 escudo${ab.team?' al equipo':''}`);
+      if(ab.kind==='buffAtk') out.push('⬆ ATK');
+      if(ab.kind==='buffDef') out.push(`⬆ DEF${ab.team?' al equipo':''}`);
+      if(ab.kind==='critDown'&&tgtName) out.push(`⬇ crítico de ${tgtName}`);
+      if(ab.kind==='mark'&&tgtName) out.push(`🎯 marca a ${tgtName}`);
+    }
+  }
+  return out.length?' · '+out.join(' · '):'';
+}
 /* ===== COMBATE POR RONDAS: planificas (10s) y luego se resuelve ===== */
 function startCombat(){
   CB.speed=1;
@@ -799,6 +924,7 @@ function resolveTick(){
   const st=E.tickStatus(u); // veneno/quemadura + aturdimiento (igual que el motor)
   const mine=u.team==='A'?CB.A:CB.B, foes=u.team==='A'?CB.B:CB.A;
   const who=u.team==='A'?'var(--cyan)':'var(--magenta)';
+  const hpBefore=new Map([...CB.A,...CB.B].map(x=>[x.uid,x.hp])); // para detectar curas en el historial
   let action;
   if(u.hp<=0){ action={uid:u.uid,name:u.name,ability:null,guard:false,hits:[],poison:st.poison,died:true}; }
   else if(st.stunned){ action={uid:u.uid,name:u.name,stunned:true,hits:[],poison:st.poison}; }
@@ -813,6 +939,7 @@ function resolveTick(){
     } else intent=E.aiIntent(CB.rng,u,foes,mine);
     action=E.performAction(CB.rng,u,intent,mine,foes); action.poison=st.poison;
   }
+  logAction(u,action,st,actionExtras(u,action,hpBefore,mine,foes));
   if(st.poison && u.el) floatNum(u,"☠"+st.poison,"var(--epi)"); // daño de veneno/quemadura
   if(action.stunned) setBanner(`<span style="color:${who}">${u.name}</span> está aturdido 💫`);
   else if(action.died) setBanner(`<span style="color:${who}">${u.name}</span> cae por el veneno ☠`);
@@ -882,7 +1009,35 @@ function showResult(r){
      <button class="btn mt8" data-act="continueBattle">CONTINUAR</button>
    </div>`);
 }
-function flee(){if(CB){if(CB.live){pvpSend({t:'leave'});if(PVP){try{PVP.ws.close();}catch(e){}PVP=null;}}if(CB.timer)clearInterval(CB.timer);if(CB.planTimer)clearInterval(CB.planTimer);}CB=null;go('home');}
+function flee(){
+  // En la mazmorra huir NO es gratis: termina la run (permadeath). Confirmación.
+  if(CB&&CB.mode==='dungeon'&&!CB.ended){
+    openOverlay(`<div class="center">
+      <div style="font-family:var(--pixel);font-size:13px;color:var(--red);margin-bottom:10px">¿HUIR?</div>
+      <div style="font-size:13px;line-height:1.6;margin-bottom:12px">Si huyes, la run <b>termina aquí</b> (☠️ permadeath).<br>Contará como derrota en el nodo actual.</div>
+      <button class="btn mag" data-act="fleeDungeon">🏳 HUIR — FIN DE LA RUN</button>
+      <button class="btn ghost mt8" data-act="fleeStay">SEGUIR LUCHANDO</button>
+    </div>`);
+    return;
+  }
+  if(CB){if(CB.live){pvpSend({t:'leave'});if(PVP){try{PVP.ws.close();}catch(e){}PVP=null;}}if(CB.timer)clearInterval(CB.timer);if(CB.planTimer)clearInterval(CB.planTimer);}
+  CB=null;go('home');
+}
+function fleeStay(){
+  closeOverlay();
+  // Si estaba planificando, devuelve los 10 s completos (el reloj siguió corriendo).
+  if(CB&&CB.phase==='plan') CB.planEndsAt=Date.now()+10000;
+}
+function fleeDungeon(){
+  closeOverlay();
+  if(!CB||CB.ended) return;
+  if(CB.timer)clearInterval(CB.timer);
+  if(CB.planTimer)clearInterval(CB.planTimer);
+  CB=null;
+  api('/dungeon/abandon',{method:'POST'})
+    .then(r=>{ D=r.state; refreshMe().then(refreshChips).catch(()=>{}); showDungeonResult(Object.assign({win:false},r)); })
+    .catch(()=>{ toast('No se pudo huir'); go('dungeon'); });
+}
 
 /* ====================== MAZMORRA (roguelike) ====================== */
 let D=null;
@@ -996,6 +1151,7 @@ function dgFight(){
 function showDungeonResult(r){
   const win=r.win; let extra='';
   if(r.cleared) extra='<div style="color:var(--gold);margin-top:6px">🏆 ¡Mazmorra completada!</div>';
+  else if(r.fled) extra='<div style="color:var(--red);margin-top:6px">🏳 Huiste — la run termina aquí.</div>';
   else if(r.dead) extra='<div style="color:var(--red);margin-top:6px">☠️ Tu equipo cayó.</div>';
   if(r.accountReward) extra+=`<div class="mt8">🪙 Recompensa a tu cuenta: <b style="color:var(--gold)">+${r.accountReward}</b></div>`;
   else if(r.noReward==='no_best'&&(r.cleared||r.dead)) extra+=`<div class="dim mt8" style="font-size:12px">Sin recompensa extra: no superaste tu mejor profundidad de hoy en esta dificultad.</div>`;
@@ -1092,6 +1248,7 @@ const ACTIONS={
   confirmPlan:()=>confirmPlan(),
   cbSpeed:()=>cbSpeed(), combatTipOk:()=>combatTipOk(),
   flee:()=>flee(),
+  fleeDungeon:()=>fleeDungeon(), fleeStay:()=>fleeStay(),
   continueBattle:()=>{closeOverlay();go('home');},
   setRank:(a)=>setRank(a),
   shopRoll:()=>shopRoll(),
@@ -1099,12 +1256,19 @@ const ACTIONS={
   openTutorial:()=>openTutorial(),
   tutNext:()=>tutNext(), tutPrev:()=>tutPrev(), tutDone:()=>tutDone(),
   logout:()=>logout(),
+  menuToggle:()=>$("#topmenu").classList.toggle("show"),
+  menuTutorial:()=>{$("#topmenu").classList.remove("show");openTutorial();},
+  menuLogout:()=>{$("#topmenu").classList.remove("show");logout();},
   dgStart:(a)=>dgStart(a), dgRankTab:(a)=>dgRankTab(a), dgChoose:(a)=>dgChoose(a), dgDraft:(a)=>dgDraft(a), dgSkipDraft:()=>dgSkipDraft(),
   dgBuy:(a)=>dgBuy(a), dgHeal:()=>dgHeal(), dgLeaveShop:()=>dgLeaveShop(), dgFight:()=>dgFight(), dgContinue:()=>dgContinue(),
   goDungeon:()=>go('dungeon')
 };
 document.getElementById("app").addEventListener("click",e=>{
-  const el=e.target.closest("[data-act]"); if(!el) return;
+  const el=e.target.closest("[data-act]");
+  // El menú de la topbar se cierra al tocar fuera de él.
+  const menu=$("#topmenu");
+  if(menu&&menu.classList.contains("show")&&!e.target.closest("#topmenu")&&(!el||el.dataset.act!=="menuToggle")) menu.classList.remove("show");
+  if(!el) return;
   const fn=ACTIONS[el.dataset.act]; if(fn) fn(el.dataset.arg, el);
 });
 

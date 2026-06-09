@@ -274,6 +274,31 @@ async function shopAction(userId, action, arg) {
   return publicState(await loadRow(userId));
 }
 
+// Abandonar/huir de una run ACTIVA: cuenta como muerte (permadeath). Huir de un
+// combate no puede ser gratis — si no, se reintentaría cualquier pelea perdida.
+// Registra el mejor del día (misma lógica de recompensa que morir en combate).
+async function abandonRun(userId) {
+  const row = await loadRow(userId);
+  if (!row || row.status !== "active") throw new Error("no_active_run");
+  const s = row.state;
+  row.status = "dead";
+  s.stage = "done";
+  s.pending = null; s.draft = null; s.shop = null;
+  s.lastResult = { fled: true, dead: true };
+
+  const date = C.todayStr();
+  const diff = E.dungeonDiff(row.difficulty || "NORMAL");
+  const out = { dead: true, fled: true };
+  const sc = await endRunScore(userId, date, row.difficulty || "NORMAL", row.depth, false);
+  if (sc.improved) {
+    const reward = Math.round(row.depth * 15 * diff.coinMult) + Math.floor(s.coins * 0.5);
+    await db.query("UPDATE users SET coins = coins + $1 WHERE id=$2", [reward, userId]);
+    out.accountReward = reward;
+  } else { out.accountReward = 0; out.noReward = "no_best"; }
+  await saveRow(row);
+  return Object.assign({ state: publicState(await loadRow(userId)) }, out);
+}
+
 // Registra el mejor del día por (usuario, dificultad). Devuelve si MEJORÓ.
 async function endRunScore(userId, date, difficulty, depth, cleared) {
   const prev = await db.query(
@@ -300,4 +325,4 @@ async function ranking(userId, difficulty) {
   return { difficulty: diffId, rows: r.rows.map((x, i) => ({ pos: i + 1, name: x.name, depth: x.best_depth, cleared: x.cleared, me: x.user_id === userId })) };
 }
 
-module.exports = { startRun, getRun, chooseNode, resolveCombat, draftRelic, skipDraft, shopAction, ranking, publicState };
+module.exports = { startRun, getRun, chooseNode, resolveCombat, abandonRun, draftRelic, skipDraft, shopAction, ranking, publicState };

@@ -231,6 +231,7 @@ Todas requieren `Authorization: Bearer <token>` salvo `/auth/login`.
 | POST | `/fusion` | Fusiona 2 instancias → criatura nueva (caché por par, doc §3.7) |
 | POST | `/dungeon/start` · GET `/dungeon` | Mazmorra del día (roguelike): inicia/reanuda y consulta la run |
 | POST | `/dungeon/choose` · `/dungeon/battle` · `/dungeon/draft` · `/dungeon/shop` | Avanzar nodo, resolver combate, draftear reliquia, tienda |
+| POST | `/dungeon/abandon` | Huir de la run activa = permadeath (cuenta como muerte, registra score) |
 | GET  | `/dungeon/ranking` | Ranking diario por profundidad alcanzada |
 | GET  | `/health` | Healthcheck (usado por Docker / balanceadores) |
 
