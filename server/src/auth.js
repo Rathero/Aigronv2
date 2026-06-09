@@ -16,8 +16,11 @@ const crypto = require("crypto");
 const SECRET = process.env.JWT_SECRET || "dev-secret-cambia-esto";
 const ALLOW_DEV_AUTH = process.env.ALLOW_DEV_AUTH !== "false";
 
+// Fail-closed: sin JWT_SECRET real en producción cualquiera podría forjar
+// tokens de sesión. Mejor no arrancar que arrancar inseguro.
 if (process.env.NODE_ENV === "production" && SECRET === "dev-secret-cambia-esto") {
-  console.warn("⚠️  JWT_SECRET no configurado en producción. Configúralo en el entorno.");
+  console.error("❌ JWT_SECRET no configurado en producción. Configúralo en el entorno (p. ej. `openssl rand -hex 32`).");
+  process.exit(1);
 }
 
 function sign(user) {
@@ -47,20 +50,30 @@ async function verifyGoogle(idToken) {
   return { subject: p.sub, displayName: p.name || p.email || "Jugador" };
 }
 
+// Caché de claves públicas de Apple con TTL: Apple las rota, así que se
+// refrescan periódicamente y también si llega un `kid` desconocido (rotación
+// entre refrescos). Antes la caché era eterna y exigía reiniciar el servidor.
+const APPLE_KEYS_TTL_MS = 6 * 60 * 60 * 1000; // 6 h
 let _appleKeys = null;
-async function appleKeys() {
-  if (_appleKeys) return _appleKeys;
+let _appleKeysAt = 0;
+async function appleKeys(force = false) {
+  if (!force && _appleKeys && Date.now() - _appleKeysAt < APPLE_KEYS_TTL_MS) return _appleKeys;
   const resp = await fetch("https://appleid.apple.com/auth/keys");
   if (!resp.ok) throw new Error("apple_keys_unavailable");
   _appleKeys = (await resp.json()).keys;
+  _appleKeysAt = Date.now();
   return _appleKeys;
 }
 async function verifyApple(idToken) {
   const clientId = process.env.AUTH_APPLE_CLIENT_ID;
   const decoded = jwt.decode(idToken, { complete: true });
   if (!decoded) throw new Error("apple_token_unparseable");
-  const keys = await appleKeys();
-  const jwk = keys.find((k) => k.kid === decoded.header.kid);
+  let keys = await appleKeys();
+  let jwk = keys.find((k) => k.kid === decoded.header.kid);
+  if (!jwk) {
+    keys = await appleKeys(true); // kid desconocido: puede ser rotación reciente
+    jwk = keys.find((k) => k.kid === decoded.header.kid);
+  }
   if (!jwk) throw new Error("apple_kid_unknown");
   const pubKey = crypto.createPublicKey({ key: jwk, format: "jwk" });
   const opts = { algorithms: ["RS256"], issuer: "https://appleid.apple.com" };

@@ -39,6 +39,8 @@ services:
       GEN_DELAY_MS: ${GEN_DELAY_MS:-2500}
       AI_VISION_FILTER: ${AI_VISION_FILTER:-off}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      # Opcional: rate limiting compartido entre instancias (vacío = en memoria).
+      REDIS_URL: ${REDIS_URL:-}
     ports:
       - "${PORT:-3000}:3000"
     volumes:

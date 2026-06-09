@@ -20,7 +20,7 @@ const GRACE_MS = 1500;   // margen tras el deadline antes de resolver con defaul
 const STANCES_OK = ["NEUTRAL", "AGRESIVA", "DEFENSIVA"];
 
 function attachPvp(server, deps) {
-  const { db, getUser, syncEnergy, buildTeamUnits, awardBattleResult, publicUnit, MATCH_LEVEL_WINDOW } = deps;
+  const { getUser, syncEnergy, buildTeamUnits, awardBattleResult, publicUnit, MATCH_LEVEL_WINDOW } = deps;
   const wss = new WebSocketServer({ server, path: "/pvp" });
 
   let queue = [];           // [{ userId, ws, captain, stance, level, name }]

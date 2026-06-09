@@ -3,8 +3,8 @@
 //     fresco (los despliegues llegan al instante); si no hay red, cae a la caché.
 //   - Arte (/art, inmutable): CACHE-FIRST (rápido, ahorra datos).
 //   - API (/me, /daily, /battle, ...): red directa (datos de juego al día).
-const CACHE = "aigrons-v2";
-const SHELL = ["/", "/index.html", "/engine.js", "/manifest.webmanifest", "/icon.svg"];
+const CACHE = "aigrons-v3"; // bump: CSS/JS extraídos de index.html a ficheros propios
+const SHELL = ["/", "/index.html", "/styles.css", "/app.js", "/engine.js", "/manifest.webmanifest", "/icon.svg"];
 
 self.addEventListener("install", (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));

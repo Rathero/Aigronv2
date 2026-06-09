@@ -1,0 +1,1195 @@
+/* =========================================================================
+   AIGRONS — frontend ONLINE (habla con la API del backend).
+   - El estado vive en el servidor (auth, colección, equipo, combate, tienda).
+   - El sprite pixel-art se dibuja de forma DETERMINISTA desde template_id/art_seed
+     (motor compartido engine.js); si la plantilla trae image_url (arte IA), se
+     muestra esa imagen con fallback al sprite procedural.
+   - El combate usa el MISMO motor seeded que el servidor: se reproduce la
+     animación con el `seed` de /battle/find, se registran las decisiones y el
+     servidor recalcula para conceder recompensas (anti-trampa).
+   ========================================================================= */
+const E = window.ENGINE;
+const { ABILITIES, mulberry32, hashStr, genTemplate, COMBAT_ENERGY_MAX, TURNS_MAX } = E;
+
+/* paletas pixel por tipo: [oscuro, medio, claro, acento] */
+const PAL = {
+  VOLCAN:["#5a1500","#c4391a","#ff8a3c","#ffe27a"],
+  NIEBLA:["#2a3340","#5d7488","#aebfce","#d7f3ff"],
+  CRISTAL:["#0a4d5e","#1fb6c9","#7df0ff","#ffffff"],
+  RELOJ:["#4a2e0a","#a9741f","#ffcf5e","#fff2c0"],
+  VACIO:["#1b0a33","#5b1f96","#a45cff","#ff8af0"],
+  BESTIA:["#3a2412","#7a4a23","#c79a5e","#ffe6b0"],
+  PLANTA:["#0d3d1a","#2c8f3a","#79e06a","#e6ffba"],
+  TORMENTA:["#0a2150","#2552c9","#5fa8ff","#ffe45e"],
+  METAL:["#2a2e35","#6b7280","#aeb6c2","#e8edf5"],
+  HUESO:["#3a352a","#8a7e63","#cabfa0","#f3ead0"],
+  SOMBRA:["#0a0a14","#2a1f3d","#5a3f7a","#9a6fd0"],
+  LUMEN:["#5a4a10","#c9a82a","#ffe57a","#fffbe0"],
+  HIELO:["#0a3a4d","#2a9fc9","#9fe8ff","#ffffff"],
+  MAREA:["#06283d","#1f6fb6","#4fb0ff","#bfe9ff"],
+  ARENA:["#5a4520","#b08a3a","#e6c879","#fff0c0"],
+  TOXICO:["#243d0a","#6fa01f","#b6ff3e","#eaff9a"],
+  ECO:["#0a2a33","#1f7a96","#5cc4ff","#9af0ff"],
+  RUNA:["#0a2a2a","#1f7a7a","#5cc9c9","#9affff"],
+  PLUMA:["#3a2a40","#8a6fae","#c7aee0","#f0e6ff"],
+  HONGO:["#3a1a2a","#8a3f5a","#c76f8e","#ffb0c0"]
+};
+
+/* ---------------- Generador de sprite pixel-art (determinista) ---------------- */
+function spriteSeed(tpl){ return (tpl.art_seed!=null?tpl.art_seed:hashStr(tpl.id||"x"))>>>0; }
+function buildSprite(tpl){
+  const N=16, half=8, rng=mulberry32(spriteSeed(tpl)^0x9e3779b9);
+  const g=Array.from({length:N},()=>Array(N).fill(0));
+  const rowW=[]; let topY=N, botY=0;
+  for(let y=0;y<N;y++){
+    const profile=Math.sin(Math.PI*(y+0.5)/N);
+    let w=Math.round(profile*6 + (rng()*2-1)*1.2);
+    if(y<3||y>13) w=Math.max(0,w-1);
+    w=Math.max(0,Math.min(7,w));
+    rowW[y]=w;
+    if(w>0){topY=Math.min(topY,y);botY=Math.max(botY,y);}
+  }
+  for(let y=0;y<N;y++){
+    const w=rowW[y]; if(!w)continue;
+    for(let x=8-w;x<=7;x++){
+      let v=1;
+      if(y<=topY+2 && rng()<0.55) v=2;
+      else if(x===8-w && rng()<0.6) v=3;
+      else if(rng()<0.12) v=5;
+      g[y][x]=v;
+    }
+  }
+  let eyeY=Math.min(botY-2, topY+3);
+  if(eyeY<topY) eyeY=topY+1;
+  const ex=Math.max(8-rowW[eyeY]+1, 4);
+  if(rowW[eyeY]>0 && g[eyeY] && g[eyeY][ex]){ g[eyeY][ex]=7; if(g[eyeY-1]) g[eyeY-1][ex]=6; }
+  if((tpl.rarity==="EPICA"||tpl.rarity==="LEGENDARIA") && topY>0){
+    const hx=Math.max(8-rowW[topY],3);
+    g[topY-1][hx]=8; if(topY-2>=0)g[topY-2][hx]=8;
+  }
+  for(let y=0;y<N;y++) for(let x=0;x<half;x++) g[y][N-1-x]=g[y][x];
+  const out=Array.from({length:N},()=>Array(N).fill(0));
+  for(let y=0;y<N;y++)for(let x=0;x<N;x++){
+    if(g[y][x]!==0)continue;
+    const nb=[[1,0],[-1,0],[0,1],[0,-1]];
+    for(const[dx,dy]of nb){const ny=y+dy,nx=x+dx;
+      if(ny>=0&&ny<N&&nx>=0&&nx<N&&g[ny][nx]!==0&&g[ny][nx]!==4){out[y][x]=4;break;}}
+  }
+  for(let y=0;y<N;y++)for(let x=0;x<N;x++) if(out[y][x]===4&&g[y][x]===0) g[y][x]=4;
+  if(tpl.rarity==="LEGENDARIA"){for(let k=0;k<4;k++){const sx=Math.floor(rng()*N),sy=Math.floor(rng()*N);if(g[sy][sx]===0)g[sy][sx]=9;}}
+  return g;
+}
+function colorFor(v,tpl){
+  const p=PAL[tpl.type]||PAL.VACIO;
+  switch(v){case 1:return p[1];case 2:return p[2];case 3:return p[0];case 5:return p[3];
+    case 6:return "#ffffff";case 7:return "#0c0a1a";case 8:return p[3];
+    case 4:return tpl.rarity==="LEGENDARIA"?"#ffd23f":"#08060f";case 9:return "#fff7c8";default:return null;}
+}
+const _spriteCache={};
+function drawAigron(canvas,tpl,px){
+  px=px||8; const N=16;
+  canvas.width=N*px; canvas.height=N*px;
+  const ctx=canvas.getContext("2d"); ctx.imageSmoothingEnabled=false;
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  const key=tpl.id||("s"+spriteSeed(tpl));
+  const g=_spriteCache[key]||(_spriteCache[key]=buildSprite(tpl));
+  for(let y=0;y<N;y++)for(let x=0;x<N;x++){
+    const c=colorFor(g[y][x],tpl); if(!c)continue;
+    ctx.fillStyle=c; ctx.fillRect(x*px,y*px,px,px);
+  }
+}
+function drawEgg(canvas,px){
+  px=px||8;const N=16;canvas.width=N*px;canvas.height=N*px;
+  const ctx=canvas.getContext("2d");ctx.imageSmoothingEnabled=false;ctx.clearRect(0,0,N*px,N*px);
+  for(let y=2;y<15;y++){const w=Math.round(Math.sin(Math.PI*(y-1)/15)*6);
+    for(let x=8-w;x<=7+w;x++){ctx.fillStyle=(y<6?"#7df0ff":"#1fb6c9");ctx.fillRect(x*px,y*px,px,px);}}
+  ctx.fillStyle="#08060f";
+  [[7,6],[8,6],[7,7],[8,8],[7,9],[7,11]].forEach(([x,y])=>ctx.fillRect(x*px,y*px,px,px));
+}
+
+/* ---------------- Caché de plantillas ---------------- */
+const TPL={};
+function registerTpl(t){ if(t&&t.id){ TPL[t.id]=Object.assign(TPL[t.id]||{},t); } return t; }
+function tpl(id){ return TPL[id]||(TPL[id]=genTemplate(id)); }
+/* HTML del arte: imagen IA si existe, si no canvas procedural */
+function artTag(t,px){
+  if(t&&t.image_url) return `<img class="aigimg" src="${t.image_url}" alt="${t.name||''}">`;
+  return `<canvas data-aig="${t.id}" data-px="${px}"></canvas>`;
+}
+/* tipos de una plantilla (1 o 2) */
+function tplTypes(t){ return (t&&t.types&&t.types.length)?t.types:[t&&t.type].filter(Boolean); }
+function typesLabel(t){ return tplTypes(t).join(" / "); }
+function typePills(t){ return tplTypes(t).map(ty=>`<span class="type-pill">${ty}</span>`).join(" "); }
+
+/* ---------------- Capa de API ---------------- */
+const API_BASE = (location.protocol==='file:') ? (localStorage.getItem('aigrons_api')||'http://localhost:3000') : '';
+let TOKEN = localStorage.getItem('aigrons_token')||'';
+function deviceId(){
+  let d=localStorage.getItem('aigrons_device');
+  if(!d){ d='dev-'+Math.random().toString(36).slice(2)+Date.now().toString(36); localStorage.setItem('aigrons_device',d); }
+  return d;
+}
+async function api(path, opts={}){
+  const headers={'content-type':'application/json'};
+  if(TOKEN) headers.authorization='Bearer '+TOKEN;
+  let res;
+  try{
+    res = await fetch(API_BASE+path, {method:opts.method||'GET', headers, body:opts.body?JSON.stringify(opts.body):undefined});
+  }catch(e){ throw {status:0, network:true}; }
+  if(res.status===401){ TOKEN=''; localStorage.removeItem('aigrons_token'); throw {status:401}; }
+  let data={}; try{ data=await res.json(); }catch(e){}
+  if(!res.ok) throw {status:res.status, data};
+  return data;
+}
+async function login(){
+  let name=localStorage.getItem('aigrons_name');
+  if(!name){ name='Jugador'+Math.floor(Math.random()*9000+1000); localStorage.setItem('aigrons_name',name); }
+  const r=await api('/auth/login',{method:'POST',body:{provider:'dev',subject:deviceId(),displayName:name}});
+  TOKEN=r.token; localStorage.setItem('aigrons_token',TOKEN); return r.user;
+}
+
+/* ---------------- Estado (cache del servidor) ---------------- */
+const S={user:null,daily:null,collection:[],team:[]};
+async function refreshMe(){ S.user=await api('/me'); }
+async function refreshDaily(){ S.daily=await api('/daily'); (S.daily.batch||[]).forEach(registerTpl); }
+async function refreshCollection(){ const c=await api('/collection'); c.forEach(x=>registerTpl(x.template)); S.collection=c; }
+async function refreshTeam(){ const t=await api('/team'); S.team=[t.slot1,t.slot2,t.slot3].filter(Boolean); }
+function instById(id){ return S.collection.find(c=>c.instance_id===id); }
+
+/* ====================== UI: helpers ====================== */
+const $=s=>document.querySelector(s);
+function refreshChips(){
+  if(!S.user)return;
+  $("#c-coins").textContent=S.user.coins;
+  $("#c-dust").textContent=S.user.dust;
+  $("#c-gems").textContent=S.user.gems;
+  $("#c-ene").textContent=S.user.energy>=S.user.energyMax?S.user.energy:S.user.energy+"/"+S.user.energyMax;
+}
+function toast(msg){const t=$("#toast");t.textContent=msg;t.classList.add("show");
+  clearTimeout(t._t);t._t=setTimeout(()=>t.classList.remove("show"),1600);}
+function openOverlay(html){$("#modal").innerHTML=html;$("#overlay").classList.add("show");renderCanvases($("#modal"));}
+function closeOverlay(){$("#overlay").classList.remove("show");}
+$("#overlay").addEventListener("click",e=>{if(e.target.id==="overlay")closeOverlay();});
+function renderCanvases(root){
+  root.querySelectorAll("canvas[data-aig]").forEach(c=>{if(c._done)return;drawAigron(c,tpl(c.dataset.aig),parseInt(c.dataset.px||"8"));c._done=1;});
+  root.querySelectorAll("canvas[data-egg]").forEach(c=>{if(c._done)return;drawEgg(c,parseInt(c.dataset.px||"8"));c._done=1;});
+}
+// Versión CORTA (para el planificador de combate).
+function abilityShort(id){const a=ABILITIES[id];return {
+  dmg:`Daño ×${a.mult} a 1`+(a.ignoreDef?` (ignora DEF)`:"")+(a.crit?", crítico":"")+(a.selfHp?`, −HP propio`:""),
+  aoe:`Daño ×${a.mult} a todos`, buffDef:`+${a.amt*100}% DEF ${a.team?"equipo":"propia"} ${a.turns}t`,
+  buffAtk:`+${a.amt*100}% ATK`+(a.defDown?`, −${a.defDown*100}% DEF`:""), critDown:`−${a.amt*100}% crítico rival ${a.turns}t`,
+  mark:`Marca: +${a.amt*100}% daño recibido ${a.turns}t`, heal:`Cura ${a.amt*100}% propia`,
+  healTeam:`Cura ${a.amt*100}% al equipo`, double:`2 ataques`,
+  dot:`Veneno: ${Math.round(a.amt*100)}% vida/turno ${a.turns}t`, stun:`Aturde ${a.turns}t`,
+  shield:`Escudo ${a.amt*100}% ${a.team?"equipo":"propio"}`, drain:`Daño ×${a.mult}, cura ${a.drain*100}%`}[a.kind];}
+// Categoría rápida.
+function abilityKind(id){const a=ABILITIES[id];return {dmg:"Daño",aoe:"Daño en área",buffDef:"Defensa",buffAtk:"Mejora",critDown:"Debilita",mark:"Debilita",heal:"Cura",healTeam:"Cura equipo",double:"Daño",dot:"Veneno",stun:"Control",shield:"Escudo",drain:"Drenar"}[a.kind];}
+// Versión CLARA y explicada (para el detalle del aigrón).
+function abilityEffect(id){const a=ABILITIES[id];return {
+  dmg:`Golpe fuerte a un enemigo: hace ${a.mult}× tu ataque`+(a.ignoreDef?`, ignorando el ${a.ignoreDef*100}% de su defensa`:"")+(a.crit?", siempre crítico":"")+(a.selfHp?`. Pierdes el ${a.selfHp*100}% de tu vida`:""),
+  aoe:`Daña a los TRES enemigos a la vez (${a.mult}× tu ataque cada uno)`,
+  buffDef:`Sube +${a.amt*100}% la defensa ${a.team?"de todo tu equipo":"de esta criatura"} durante ${a.turns} turnos: aguanta mucho más.`,
+  buffAtk:`Sube +${a.amt*100}% tu ataque para el resto del combate`+(a.defDown?` (a cambio de −${a.defDown*100}% de defensa)`:"")+`. Para pegar más cada turno.`,
+  critDown:`Reduce un ${a.amt*100}% la probabilidad de crítico de un enemigo durante ${a.turns} turnos.`,
+  mark:`Marca a un enemigo: durante ${a.turns} turnos recibirá un +${a.amt*100}% de daño de TODOS los golpes. Úsala y luego concéntrate en ese enemigo para rematarlo.`,
+  heal:`Se cura el ${a.amt*100}% de su vida máxima.`,
+  healTeam:`Cura el ${a.amt*100}% de vida a TODO tu equipo.`,
+  double:`Actúa dos veces este turno: hace dos ataques en lugar de uno.`,
+  dot:`Envenena a un enemigo: pierde el ${Math.round(a.amt*100)}% de su vida máxima cada turno durante ${a.turns} turnos (ignora defensa).`,
+  stun:`Aturde a un enemigo: se salta su próxima acción (${a.turns} turno${a.turns>1?'s':''}).`,
+  shield:`Da un escudo que absorbe daño (${a.amt*100}% de la vida máxima) ${a.team?"a todo tu equipo":"a esta criatura"} antes de tocar el HP.`,
+  drain:`Daña a un enemigo (${a.mult}× tu ataque) y te curas el ${a.drain*100}% del daño hecho.`}[a.kind];}
+function cardHTML(inst,extra){const t=inst.template;return `<div class="card r-${t.rarity}" data-iid="${inst.instance_id}">
+  <div class="lv">L${inst.level}</div>${inst.favorite?'<div class="fav">★</div>':''}${extra||""}
+  ${artTag(t,6)}
+  <div class="nm">${t.name}</div><div class="ty rar-txt ${t.rarity}">${typesLabel(t)}</div></div>`;}
+function statBars(o,level){
+  // Tope teórico por stat = (tope rareza máxima LEGENDARIA) x (arquetipo máx ~1.3),
+  // escalado al MISMO nivel que el valor mostrado -> el nivel se cancela y la barra
+  // refleja la FORMA del aigron (rareza + arquetipo), no su nivel. Así nunca se
+  // llenan todas: ni el legendario perfecto sube unas sin bajar otras.
+  const f=1+0.04*((level||1)-1);
+  const base={hp:1680,atkP:250,atkS:250,defP:163,defS:163,spd:169};
+  const max={};for(const k in base)max[k]=base[k]*f;
+  const row=(l,v,k,c)=>`<div class="stat"><span class="lab">${l}</span><span class="bar"><i class="fill" style="width:${Math.min(100,v/max[k]*100)}%;background:${c}"></i></span><span class="val">${v}</span></div>`;
+  // back-compat por si llegan stats antiguas {atk,def}
+  const atkP=o.atkP!=null?o.atkP:o.atk, atkS=o.atkS!=null?o.atkS:o.atk, defP=o.defP!=null?o.defP:o.def, defS=o.defS!=null?o.defS:o.def;
+  return row("HP",o.hp,"hp","var(--green)")
+    +row("A.Fís",atkP,"atkP","var(--gold)")
+    +row("A.Esp",atkS,"atkS","var(--magenta)")
+    +row("D.Fís",defP,"defP","var(--rar)")
+    +row("D.Esp",defS,"defS","var(--epi)")
+    +row("SPD",o.spd,"spd","var(--cyan)");}
+
+/* ====================== HOME ====================== */
+function dungeonHomeCard(dg){
+  if(!dg||dg.status==='none'){
+    return `<div class="panel" style="border-color:var(--epi)"><div class="row" style="justify-content:space-between;align-items:center">
+      <b style="font-size:14px">🗺️ Mazmorra del día</b><span class="dim" style="font-size:11px">roguelike</span></div>
+      <div class="dim mt8" style="font-size:12px">8 nodos, reliquias, permadeath. Mismo mapa para todos. ¿Hasta dónde llegas hoy?</div>
+      <button class="btn sm mag mt8" style="width:100%" data-act="goDungeon">ENTRAR</button></div>`;
+  }
+  const at=`nodo ${Math.min(dg.depth+1,dg.totalDepth)}/${dg.totalDepth}`;
+  if(dg.status==='active'){
+    return `<div class="panel glow-cyan"><div class="row" style="justify-content:space-between;align-items:center">
+      <b style="font-size:14px">🗺️ Mazmorra · ${at}</b><span style="color:var(--gold);font-size:12px">🪙 ${dg.coins}</span></div>
+      <div class="dim mt8" style="font-size:12px">Tienes una run en marcha · ${dg.relics.length} reliquia(s).</div>
+      <button class="btn sm mt8" style="width:100%" data-act="goDungeon">CONTINUAR</button></div>`;
+  }
+  return `<div class="panel"><div class="row" style="justify-content:space-between;align-items:center">
+      <b style="font-size:14px">🗺️ Mazmorra</b><span class="dim" style="font-size:12px">${dg.status==='cleared'?'🏆 completada':'☠️ terminada'}</span></div>
+      <div class="dim mt8" style="font-size:12px">Llegaste al ${at}. Mapa nuevo mañana.</div>
+      <button class="btn sm ghost mt8" style="width:100%" data-act="goDungeon">VER RANKING</button></div>`;
+}
+async function renderHome(){
+  refreshChips();
+  const claimed=S.daily&&S.daily.claimed;
+  let dg=null; try{ dg=await api('/dungeon'); }catch(e){}
+  const dailyCard=claimed?
+    `<div class="daily panel glow-cyan"><div class="halo"></div>
+       <div class="tc"><b style="font-size:15px">Ya reclamaste hoy</b></div>
+       <div class="subtle tc mt8">Vuelve mañana — habrá un lote nuevo de aigrons.</div>
+       <div class="tc mt8" style="font-size:13px">🔥 Racha diaria: <b style="color:var(--gold)">${S.user.streak}</b> días</div>
+     </div>`:
+    `<div class="daily panel glow-cyan"><div class="halo"></div>
+       <div class="tc"><b style="font-size:14px;color:var(--cyan)">AIGRÓN DEL DÍA</b></div>
+       <canvas class="egg" data-egg="1" data-px="8"></canvas>
+       <div class="subtle tc mb8">Hoy ha nacido un lote único. Reclama el tuyo gratis.</div>
+       <button class="btn mag" data-act="doClaim">ABRIR — GRATIS</button>
+     </div>`;
+  const missions=(S.user.missions)||[];
+  const labels={claim:"Reclama tu aigrón",win:"Gana 3 combates",ability:"Usa 5 habilidades"};
+  const mrow=(m)=>{return `<div class="row" style="align-items:center;justify-content:space-between;font-size:13px;margin:4px 0">
+     <span>${m.done?"✅":"▫️"} ${labels[m.key]||m.key} <span class="dim">(${m.progress}/${m.goal})</span></span>
+     ${m.done&&!m.claimed?`<button class="btn sm gold" style="padding:4px 8px" data-act="claimMission" data-arg="${m.key}">+${m.reward}🪙</button>`
+        :`<span style="color:var(--gold)">${m.claimed?'✔':'+'+m.reward+'🪙'}</span>`}</div>`;};
+  $("#s-home").innerHTML=`
+    <h2 class="title">INICIO <small>Liga ${S.user.league} · ${S.user.leaguePoints} pts</small></h2>
+    ${dailyCard}
+    ${teamCombatHTML()}
+    <div class="panel"><b style="font-size:14px">Misiones diarias</b>
+      ${missions.map(mrow).join("")}
+    </div>
+    ${dungeonHomeCard(dg)}`;
+  renderCanvases($("#s-home"));
+  $("#s-home").querySelectorAll(".card").forEach(c=>c.onclick=()=>openDetail(c.dataset.iid));
+}
+// Bloque "Tu equipo" + botón de combate PvP (en INICIO).
+function teamCombatHTML(){
+  const team=S.team.map(instById).filter(Boolean);
+  return `<div class="panel"><div class="row" style="justify-content:space-between;align-items:center;margin-bottom:8px">
+      <b style="font-size:14px">Tu equipo</b>
+      <button class="btn sm ghost" data-act="editTeam">EDITAR</button></div>
+      <div class="grid">${team.length?team.map(i=>cardHTML(i)).join(""):'<div class="dim">Elige 3 aigrons en tu colección</div>'}</div>
+    </div>
+    <button class="btn mag mb8" data-act="prepBattle" ${team.length<1?'disabled':''}>⚔️ COMBATE PvP EN VIVO — ⚡1</button>`;
+}
+async function doClaim(){
+  try{
+    const r=await api('/daily/claim',{method:'POST'});
+    const t=registerTpl(r.instance.template);
+    await Promise.all([refreshMe(),refreshDaily(),refreshCollection()]);
+    refreshChips();
+    const rays=(t.rarity==="EPICA"||t.rarity==="LEGENDARIA")?'<div class="rays"></div>':'';
+    openOverlay(`<div class="center reveal" style="position:relative">${rays}
+      <div style="position:relative;z-index:2">
+        <div style="font-family:var(--pixel);font-size:11px;color:var(--cyan);margin-bottom:8px">¡HA NACIDO!</div>
+        ${artTag(t,11)}
+        <div style="font-size:20px;font-weight:700;margin-top:6px">${t.name}</div>
+        <div class="mb8">${typePills(t)} <span class="rar-txt ${t.rarity}" style="font-weight:700">${t.rarity}</span></div>
+        <div class="dim" style="font-size:13px;margin-bottom:10px">"${t.lore}"</div>
+        <div style="text-align:left;max-width:220px;margin:0 auto 12px">${statBars(t.base_stats)}</div>
+        <button class="btn" data-act="toCollection">A LA COLECCIÓN</button>
+      </div></div>`);
+  }catch(e){ toast(e.data&&e.data.error==='already_claimed'?'Ya reclamaste hoy':'No se pudo reclamar'); }
+}
+async function claimMission(key){
+  try{ const r=await api('/missions/claim',{method:'POST',body:{key}}); S.user.missions=r.missions; await refreshMe(); refreshChips(); renderHome(); toast('+'+r.reward+'🪙'); }
+  catch(e){ toast('Aún no completada'); }
+}
+
+/* ====================== COLECCIÓN ====================== */
+let collFilter="TODOS";
+async function renderCollection(){
+  refreshChips();
+  const fl=["TODOS","COMUN","RARA","EPICA","LEGENDARIA"];
+  let items=S.collection.slice();
+  if(collFilter!=="TODOS")items=items.filter(i=>i.template.rarity===collFilter);
+  $("#s-collection").innerHTML=`
+    <h2 class="title">COLECCIÓN <small>${S.collection.length} aigrons</small></h2>
+    <div class="filters">${fl.map(f=>`<span class="f ${f===collFilter?'on':''}" data-act="setFilter" data-arg="${f}">${f}</span>`).join("")}</div>
+    ${items.length?`<div class="grid">${items.map(i=>cardHTML(i)).join("")}</div>`:'<div class="dim tc" style="padding:30px">Nada aquí todavía.</div>'}`;
+  renderCanvases($("#s-collection"));
+  $("#s-collection").querySelectorAll(".card").forEach(c=>c.onclick=()=>openDetail(c.dataset.iid));
+}
+function setFilter(f){collFilter=f;renderCollection();}
+function openDetail(iid){
+  const inst=instById(iid);if(!inst)return;const t=inst.template;
+  const cost={dust:10*inst.level,coins:50*inst.level};
+  const inTeam=S.team.includes(iid);
+  const stats=t.stats||t.base_stats;
+  const atMax=inst.level>=ENGINE.LEVEL_MAX;
+  const canLevel=S.user.dust>=cost.dust&&S.user.coins>=cost.coins&&!atMax;
+  openOverlay(`<div class="center">
+    ${artTag(t,9)}
+    <div style="font-size:20px;font-weight:700;margin-top:4px">${t.name} <span class="dim" style="font-size:13px">Nv.${inst.level}</span></div>
+    <div class="mb8">${typePills(t)} <span class="rar-txt ${t.rarity}" style="font-weight:700">${t.rarity}</span>
+      <span class="dim" style="font-size:11px"> · ${ENGINE.isPhysical(t.type)?'⚔️ Físico':'✨ Especial'}</span></div>
+    <div style="text-align:left;margin-bottom:8px">${statBars(stats, t.stats?inst.level:1)}</div>
+    <div class="panel" style="text-align:left;margin-bottom:10px">
+      <div style="font-weight:700;color:var(--gold);font-size:14px">✨ ${ABILITIES[t.ability].name}
+        <span class="dim" style="font-size:11px;font-weight:400">· ⚡${ABILITIES[t.ability].cost} · ${abilityKind(t.ability)}</span></div>
+      <div style="font-size:13px;margin-top:5px;line-height:1.45">${abilityEffect(t.ability)}</div>
+    </div>
+    <div class="row mb8">
+      <button class="btn sm" style="flex:1" data-act="levelUp" data-arg="${iid}" ${canLevel?'':'disabled'}>${atMax?`NIVEL MÁX (${ENGINE.LEVEL_MAX})`:`SUBIR NV (${cost.dust}✨ ${cost.coins}🪙)`}</button>
+    </div>
+    <div class="row mb8">
+      <button class="btn sm ghost" style="flex:1" data-act="toggleFav" data-arg="${iid}">${inst.favorite?'★ Favorito':'☆ Favorito'}</button>
+      <button class="btn sm ghost" style="flex:1" data-act="release" data-arg="${iid}" ${(inst.locked||inTeam)?'disabled':''}>LIBERAR ✨</button>
+    </div>
+    <button class="btn sm mag" style="width:100%" data-act="fusionPick" data-arg="${iid}" ${(inst.locked||inTeam)?'disabled':''}>FUSIONAR 🧬</button>
+    <button class="btn sm ghost mt8" style="width:100%" data-act="close">CERRAR</button>
+  </div>`);
+}
+async function levelUp(iid){
+  try{ await api('/creature/'+iid+'/level-up',{method:'POST'}); await Promise.all([refreshMe(),refreshCollection()]); refreshChips(); openDetail(iid); toast("¡Subió de nivel!"); }
+  catch(e){ const er=e.data&&e.data.error; toast(er==='max_level'?'Nivel máximo':er==='insufficient'?'Te faltan recursos':'No se pudo'); }
+}
+async function toggleFav(iid){
+  try{ await api('/creature/'+iid+'/favorite',{method:'POST'}); await refreshCollection(); openDetail(iid); }catch(e){ toast('Error'); }
+}
+async function release(iid){
+  try{ const r=await api('/creature/'+iid+'/release',{method:'POST'}); await Promise.all([refreshMe(),refreshCollection()]); closeOverlay(); refreshChips(); renderCollection(); toast("+"+r.dust+"✨ polvo"); }
+  catch(e){ const er=e.data&&e.data.error; toast(er==='in_team'?'En equipo':er==='locked'?'Protegido':'No se pudo'); }
+}
+
+/* ---------------- Fusión ---------------- */
+let fusionA=null;
+function fusionPick(iid){
+  fusionA=iid;
+  const others=S.collection.filter(i=>i.instance_id!==iid && !i.locked && !S.team.includes(i.instance_id));
+  const grid=others.map(i=>`<div class="card r-${i.template.rarity}" data-iid="${i.instance_id}">
+     <div class="lv">L${i.level}</div>${artTag(i.template,6)}
+     <div class="nm">${i.template.name}</div></div>`).join("");
+  openOverlay(`<div><div class="center mb8"><b>Fusionar con…</b><div class="dim" style="font-size:12px">Se consumen ambos aigrons + monedas</div></div>
+    ${others.length?`<div class="grid" id="fusgrid" style="max-height:46vh;overflow-y:auto">${grid}</div>`:'<div class="dim tc" style="padding:20px">No tienes otro aigrón libre para fusionar.</div>'}
+    <button class="btn sm ghost mt8" style="width:100%" data-act="close">CANCELAR</button></div>`);
+  $("#fusgrid")&&$("#fusgrid").querySelectorAll(".card").forEach(c=>c.onclick=()=>doFusion(fusionA,c.dataset.iid));
+}
+async function doFusion(a,b){
+  try{
+    const r=await api('/fusion',{method:'POST',body:{a,b}});
+    const t=registerTpl(r.instance.template);
+    await Promise.all([refreshMe(),refreshCollection()]); refreshChips();
+    const rays=(t.rarity==="EPICA"||t.rarity==="LEGENDARIA")?'<div class="rays"></div>':'';
+    openOverlay(`<div class="center reveal" style="position:relative">${rays}<div style="position:relative;z-index:2">
+       <div style="font-family:var(--pixel);font-size:11px;color:var(--magenta);margin-bottom:8px">¡FUSIÓN!</div>
+       ${artTag(t,11)}
+       <div style="font-size:19px;font-weight:700;margin-top:6px">${t.name}</div>
+       <div class="mb8"><span class="rar-txt ${t.rarity}" style="font-weight:700">${t.rarity} · ${typesLabel(t)}</span></div>
+       <div style="text-align:left;max-width:220px;margin:0 auto 12px">${statBars(t.base_stats)}</div>
+       <button class="btn" data-act="toCollection">¡GENIAL!</button></div></div>`);
+  }catch(e){ const er=e.data&&e.data.error; toast(er==='insufficient'?'Te faltan monedas':er==='in_team'?'Hay uno en tu equipo':er==='locked'?'Hay uno protegido':'No se pudo fusionar'); }
+}
+
+/* ====================== COMBATE ====================== */
+let teamSel=[];
+async function renderBattle(){
+  refreshChips();
+  if(CB&&CB.timer)return;
+  const team=S.team.map(instById).filter(Boolean);
+  $("#s-battle").innerHTML=`
+    <h2 class="title">COMBATE <small>Liga ${S.user.league} · ${S.user.leaguePoints} pts</small></h2>
+    <div class="panel"><div class="row" style="justify-content:space-between;align-items:center;margin-bottom:8px">
+        <b style="font-size:14px">Tu equipo</b>
+        <button class="btn sm ghost" data-act="editTeam">EDITAR</button></div>
+      <div class="grid">${team.length?team.map(i=>cardHTML(i)).join(""):'<div class="dim">Elige 3 aigrons</div>'}</div>
+    </div>
+    <button class="btn mag" data-act="prepBattle" ${team.length<1?'disabled':''}>⚔️ COMBATE PvP EN VIVO — ⚡1</button>
+    <div class="panel mt8"><b style="font-size:14px">Estrategia</b>
+      <div class="dim" style="font-size:13px;margin-top:6px">Te emparejas con <b>otro jugador en directo</b> de tu nivel. Eliges <b>capitán</b> y <b>estancia</b>, y cada ronda planificas a tus 3 aigrons (10s): toca una habilidad y luego un <b>rival</b> para apuntar (⬆/⬇ de tipo); <b>🛡️ guardia</b> protege; con energía de sobra, <b>sobrecarga</b> (⚡⚡) pega ×1.5. La mazmorra es PvE; el combate es siempre PvP.</div></div>`;
+  renderCanvases($("#s-battle"));
+  $("#s-battle").querySelectorAll(".card").forEach(c=>c.onclick=()=>openDetail(c.dataset.iid));
+}
+function editTeam(){
+  teamSel=S.team.slice();   // init UNA vez (no en cada re-render)
+  renderTeamPicker();
+}
+function teamPickCard(i){
+  const sel=teamSel.includes(i.instance_id);
+  return `<div class="card r-${i.template.rarity}" data-iid="${i.instance_id}" style="${sel?'outline:3px solid var(--cyan);outline-offset:-3px':''}">
+    ${sel?`<div class="badge">${teamSel.indexOf(i.instance_id)+1}</div>`:''}
+    <div class="lv">L${i.level}</div>${artTag(i.template,6)}
+    <div class="nm">${i.template.name}</div></div>`;
+}
+function renderTeamPicker(){
+  const byId=id=>S.collection.find(c=>c.instance_id===id);
+  const selected=teamSel.map(byId).filter(Boolean);
+  const rest=S.collection.filter(i=>!teamSel.includes(i.instance_id));
+  const empties=Array.from({length:Math.max(0,3-selected.length)},()=>
+    `<div class="card" style="border-style:dashed;opacity:.45;display:flex;align-items:center;justify-content:center;min-height:96px"><span class="dim" style="font-size:11px">vacío</span></div>`).join("");
+  const selGrid=selected.map(teamPickCard).join("")+empties;
+  const restGrid=rest.length?rest.map(teamPickCard).join(""):`<div class="dim tc" style="grid-column:1/-1;padding:16px">No tienes más aigrons.</div>`;
+  openOverlay(`<div>
+    <div class="center mb8"><b>Tu equipo ${selected.length}/3</b>
+      <div class="dim" style="font-size:11px">toca un elegido para quitarlo</div></div>
+    <div class="grid">${selGrid}</div>
+    <div class="center" style="margin:12px 0 6px"><b style="font-size:13px">Cambiar / añadir</b>
+      <div class="dim" style="font-size:11px">toca uno para meterlo al equipo</div></div>
+    <div class="grid" id="restgrid" style="max-height:34vh;overflow-y:auto">${restGrid}</div>
+    <button class="btn mt8" data-act="saveTeam">GUARDAR EQUIPO</button></div>`);
+  $("#modal").querySelectorAll(".card[data-iid]").forEach(c=>c.onclick=()=>{
+    const iid=c.dataset.iid;const k=teamSel.indexOf(iid);
+    if(k>=0)teamSel.splice(k,1);else if(teamSel.length<3)teamSel.push(iid);else{toast("Máx 3");return;}
+    renderTeamPicker();});   // re-render SIN resetear teamSel
+}
+async function saveTeam(){
+  if(!teamSel.length){toast("Elige al menos 1");return;}
+  try{ const r=await api('/team',{method:'PUT',body:{slots:teamSel.slice()}}); S.team=r.slots; closeOverlay(); renderHome(); }
+  catch(e){ toast('No se pudo guardar'); }
+}
+
+let CB=null, prep=null;
+function mkUnit(s,team,i){ return E.unitFromStats(s,team,i); }
+
+/* =========================== PvP EN VIVO (WebSocket) =========================
+   Localmente SIEMPRE: mi equipo = 'A' (abajo), rival = 'B' (arriba) -> reutiliza
+   toda la UI de combate. Solo traduzco uids al hablar con el servidor (si soy 'B'
+   intercambio A<->B). El servidor es autoritativo: manda el log + estado; aquí
+   solo se anima. */
+let PVP=null;
+const pvpSwap=(uid)=> (uid[0]==='A'?'B':'A')+uid.slice(1);
+const toServerUid=(luid)=> (CB.you==='A'?luid:pvpSwap(luid));
+const toLocalUid=(suid)=> (!suid?suid:(CB.you==='A'?suid:pvpSwap(suid)));
+function pvpWsUrl(){
+  const tok=encodeURIComponent(TOKEN||'');
+  if(API_BASE) return API_BASE.replace(/^http/,'ws')+'/pvp?token='+tok;
+  return (location.protocol==='https:'?'wss':'ws')+'://'+location.host+'/pvp?token='+tok;
+}
+function startLivePvp(captain,stance){
+  if(!S.user||S.user.energy<1){toast('Sin energía ⚡');return;}
+  if(!S.team.length){toast('Equipo vacío');return;}
+  if(PVP){return;}
+  let ws; try{ ws=new WebSocket(pvpWsUrl()); }catch(e){ toast('PvP no disponible'); return; }
+  PVP={ws,status:'connecting',captain:captain||S.team[0],stance:stance||'NEUTRAL'};
+  pvpQueueUI('Conectando…');
+  ws.onmessage=(ev)=>{ let m;try{m=JSON.parse(ev.data);}catch(e){return;} pvpOnMessage(m); };
+  ws.onclose=()=>{ const wasPlaying=PVP&&(PVP.status==='match'); PVP=null; if(wasPlaying&&CB&&CB.live&&!CB.ended){ toast('Conexión PvP perdida'); CB=null; closeOverlay(); go('battle'); } };
+  ws.onerror=()=>{};
+}
+function pvpSend(o){ if(PVP&&PVP.ws&&PVP.ws.readyState===1) PVP.ws.send(JSON.stringify(o)); }
+function pvpCancel(){ if(PVP){ pvpSend({t:'leave'}); try{PVP.ws.close();}catch(e){} PVP=null; } closeOverlay(); }
+function pvpQueueUI(msg){
+  openOverlay(`<div class="center">
+    <div style="font-family:var(--pixel);font-size:12px;color:var(--cyan);margin-bottom:12px">PvP EN VIVO</div>
+    <div class="spinner" style="margin:14px auto"></div>
+    <div class="dim" id="pvp-status" style="font-size:13px;margin:10px 0">${msg}</div>
+    <button class="btn sm ghost" data-act="pvpCancel" style="width:100%">CANCELAR</button></div>`);
+}
+function pvpStatus(msg){ const e=$('#pvp-status'); if(e)e.textContent=msg; }
+function pvpOnMessage(m){
+  if(!PVP)return;
+  if(m.t==='hello'){ PVP.status='queue'; pvpSend({t:'queue',captain:PVP.captain,stance:PVP.stance}); pvpStatus('Buscando rival…'); }
+  else if(m.t==='queued'){ pvpStatus('Buscando rival…'); }
+  else if(m.t==='error'){ toast(m.msg==='no_energy'?'Sin energía ⚡':m.msg==='empty_team'?'Equipo vacío':'PvP no disponible'); pvpCancel(); }
+  else if(m.t==='match'){ PVP.status='match'; closeOverlay(); startLiveBattle(m); }
+  else if(m.t==='round'){ pvpRound(m); }
+  else if(m.t==='resolve'){ pvpResolve(m); }
+  else if(m.t==='opponentLeft'){ toast('Tu rival abandonó'); }
+  else if(m.t==='over'){ PVP.status='over'; pvpOver(m); }
+}
+function startLiveBattle(m){
+  go('battle');
+  const A=m.team.map((s,i)=>mkUnit(s,'A',i));      // MI equipo -> local 'A' (abajo)
+  const B=m.opponent.map((s,i)=>mkUnit(s,'B',i));  // rival -> local 'B' (arriba)
+  CB={A,B,seed:0,battleId:m.matchId,pvp:true,live:true,you:m.you,oppName:m.oppName||'Rival',
+      rng:null,turn:0,order:[],oi:0,plan:{},planTurn:0,selecting:null,phase:'wait',speed:1,
+      decisions:[],timer:null,planTimer:null,initA:m.team,initB:m.opponent,ended:false};
+  buildArena();
+  const vs=$(".vs"); if(vs){vs.style.opacity=1;setTimeout(()=>{vs.style.opacity=0;},800);}
+  setBanner(`⚔️ PvP vs <b>${CB.oppName}</b>`);
+}
+function pvpRound(m){
+  if(!CB||!CB.live||CB.ended)return;
+  if(CB.timer){clearInterval(CB.timer);CB.timer=null;}
+  CB.phase='plan'; CB.planTurn=m.round; CB.selecting=null;
+  CB.plan={}; CB.A.forEach(u=>{ if(u.hp>0) CB.plan[u.uid]={action:'basic',target:null,overcharge:false}; });
+  [...CB.A,...CB.B].forEach(x=>x.el&&x.el.classList.remove("acting"));
+  renderPlanner();
+  CB.planEndsAt=m.deadline||(Date.now()+10000);
+  if(CB.planTimer)clearInterval(CB.planTimer);
+  CB.planTimer=setInterval(planTimerTick,100);
+}
+function pvpConfirm(){
+  const decisions=[];
+  Object.keys(CB.plan).forEach(uid=>{ const pl=CB.plan[uid]; let d;
+    if(pl.action==='guard') d={uid,action:'guard'};
+    else if(pl.action==='ability') d={uid,action:'ability',target:pl.target||undefined,overcharge:!!pl.overcharge};
+    else if(pl.action==='attack') d={uid,action:'attack',target:pl.target||undefined};
+    else d={uid,action:'attack'};
+    d.uid=toServerUid(d.uid); if(d.target) d.target=toServerUid(d.target);
+    decisions.push(d);
+  });
+  pvpSend({t:'plan',round:CB.planTurn,decisions});
+  CB.phase='wait';
+  const p=$("#planner"); if(p) p.innerHTML='<div class="dim tc" style="padding:12px">Esperando al rival…</div>';
+  setBanner('Esperando al rival…');
+}
+function pvpResolve(m){
+  if(!CB||!CB.live||CB.ended)return;
+  CB.phase='resolve';
+  liveAnimate(m.log||[], m.state);
+}
+function liveAnimate(log, state){
+  const smap={};
+  if(state){ (state.A||[]).forEach(s=>smap[toLocalUid(s.uid)]=s); (state.B||[]).forEach(s=>smap[toLocalUid(s.uid)]=s); }
+  const byUid=(luid)=> CB.A.find(x=>x.uid===luid)||CB.B.find(x=>x.uid===luid);
+  let i=0;
+  if(CB.timer)clearInterval(CB.timer);
+  CB.timer=setInterval(()=>{
+    if(!CB||CB.ended){ clearInterval(CB.timer); CB.timer=null; return; }
+    if(i>=log.length){
+      [...CB.A,...CB.B].forEach(u=>{ const s=smap[u.uid]; if(s){ u.hp=s.hp; u.shield=s.shield; u.poisonTurns=s.poisonTurns; u.stunTurns=s.stunTurns; u.energy=s.energy; } });
+      refreshArena();
+      if(CB.timer){clearInterval(CB.timer);CB.timer=null;}
+      CB.phase='wait'; // espera al siguiente 'round' o 'over' del servidor
+      return;
+    }
+    const e=log[i++];
+    const actor=byUid(toLocalUid(e.uid));
+    [...CB.A,...CB.B].forEach(x=>x.el&&x.el.classList.remove("acting"));
+    if(actor&&actor.el) actor.el.classList.add("acting");
+    const who=actor&&actor.team==='A'?'var(--cyan)':'var(--magenta)';
+    const nm=actor?actor.name:e.name;
+    if(e.poison&&actor&&actor.el) floatNum(actor,"☠"+e.poison,"var(--epi)");
+    if(e.stunned) setBanner(`<span style="color:${who}">${nm}</span> está aturdido 💫`);
+    else if(e.died) setBanner(`<span style="color:${who}">${nm}</span> cae por el veneno ☠`);
+    else if(e.guard) setBanner(`<span style="color:${who}">${nm}</span> se protege 🛡️`);
+    else if(e.ability) setBanner(`<span style="color:${who}">${nm}</span> usa <b style="color:var(--gold)">${e.ability}</b>${e.overcharge?' ⚡⚡×1.5':''}`);
+    else if(e.hits&&e.hits.length) setBanner(`<span style="color:${who}">${nm}</span> ataca`);
+    (e.hits||[]).forEach(h=>{ const luid=toLocalUid(h.tgt&&h.tgt.uid); const t=byUid(luid); if(!t||!t.el)return;
+      t.el.classList.remove("hit");void t.el.offsetWidth;t.el.classList.add("hit");
+      floatNum(t,(h.shielded?"🛡":"")+(h.guarded?"🛡️":"")+(h.crit?"¡":"")+h.dmg+(h.crit?"!":""),h.crit?"var(--gold)":h.shielded?"#aebfce":h.guarded?"var(--cyan)":h.typeM>1?"var(--magenta)":"#fff");
+      const ss=smap[luid]; if(ss) t.hp=ss.hp;
+    });
+    const sa=actor&&smap[actor.uid]; if(sa) actor.hp=sa.hp;
+    refreshArena();
+  }, Math.round(560/(CB.speed||1)));
+}
+function pvpOver(m){
+  if(CB){ CB.ended=true; if(CB.timer){clearInterval(CB.timer);CB.timer=null;} if(CB.planTimer){clearInterval(CB.planTimer);CB.planTimer=null;} }
+  if(m.leaguePoints!=null){ S.user.leaguePoints=m.leaguePoints; S.user.league=m.league; }
+  if(m.energy!=null) S.user.energy=m.energy;
+  refreshChips();
+  const won=!!m.youWon;
+  openOverlay(`<div class="center">
+    <div style="font-family:var(--pixel);font-size:16px;color:${won?'var(--green)':'var(--red)'};margin:6px 0 10px">${won?'¡VICTORIA!':'DERROTA'}</div>
+    <div class="dim" style="font-size:13px">${m.reason==='opponent_left'?(won?'Tu rival abandonó.':'Abandonaste.'):'Combate PvP en vivo terminado.'}</div>
+    <div style="margin:12px 0;font-size:14px">Liga <b>${m.league}</b> · ${m.leaguePoints} pts</div>
+    <button class="btn" data-act="pvpDone" style="width:100%">CONTINUAR</button></div>`);
+  if(PVP){ try{PVP.ws.close();}catch(e){} PVP=null; }
+}
+function pvpDone(){ closeOverlay(); CB=null; go('home'); }
+
+/* --- Preparación: capitán + estancia (decisión previa) --- */
+function prepBattle(){
+  const team=S.team.map(instById).filter(Boolean);
+  if(!team.length){toast("Equipo vacío");return;}
+  if(S.user.energy<1){toast("Sin energía ⚡ — recarga con el tiempo");return;}
+  prep={captain:team[0].instance_id, stance:'NEUTRAL'};
+  renderPrep(team);
+}
+function renderPrep(team){
+  const capCards=team.map(i=>`<div class="card r-${i.template.rarity}" data-cap="${i.instance_id}" style="${prep.captain===i.instance_id?'outline:3px solid var(--gold);outline-offset:-3px':''}">
+     ${prep.captain===i.instance_id?'<div class="badge" style="background:var(--gold);color:#000">★CAP</div>':''}
+     <div class="lv">L${i.level}</div>${artTag(i.template,6)}<div class="nm">${i.template.name}</div></div>`).join("");
+  const st=(k,l,d)=>`<div class="stance ${prep.stance===k?'on':''}" data-stance="${k}"><b>${l}</b><div class="dim" style="font-size:10px">${d}</div></div>`;
+  openOverlay(`<div>
+    <div class="center mb8"><b>Prepara el combate</b></div>
+    <div class="dim mb8" style="font-size:12px">Capitán: +15% a sus stats y liderazgo (+6% a todo el equipo).</div>
+    <div class="grid mb8" id="capgrid">${capCards}</div>
+    <div class="dim mb8" style="font-size:12px">Estancia del equipo:</div>
+    <div class="stances mb8" id="stancesel">
+      ${st('AGRESIVA','⚔️ Agresiva','+15% ATK<br>−10% DEF')}
+      ${st('NEUTRAL','⚖️ Neutral','equilibrada')}
+      ${st('DEFENSIVA','🛡️ Defensiva','+15% DEF<br>−8% ATK, +1⚡')}
+    </div>
+    <button class="btn mag" data-act="goBattle">⚔️ BUSCAR RIVAL — ⚡1</button>`);
+  $("#capgrid").querySelectorAll("[data-cap]").forEach(c=>c.onclick=()=>{prep.captain=c.dataset.cap;renderPrep(team);});
+  $("#stancesel").querySelectorAll("[data-stance]").forEach(c=>c.onclick=()=>{prep.stance=c.dataset.stance;renderPrep(team);});
+}
+function goBattle(){ const p=prep; closeOverlay(); startLivePvp(p.captain,p.stance); }
+
+function buildArena(){
+  const fHTML=(u)=>`<div class="fighter ${u.team==='B'?'enemy':''}" data-uid="${u.uid}" ${u.team==='B'?`data-act="planEnemy" data-arg="${u.uid}"`:''}>
+     <div class="thint"></div>
+     <div class="flv">Nv${u.level}</div>
+     ${artTag(tpl(u.tplId),5)}
+     <div class="hpbar"><i style="width:100%"></i></div>
+     <div class="hpnum"></div>
+     <div class="fname">${u.name}</div>
+     <div class="energy-pips">${'<span class="pip"></span>'.repeat(6)}</div></div>`;
+  $("#s-battle").innerHTML=`
+    <h2 class="title">COMBATE ${CB.pvp?'<small>PvP</small>':'<small>PvE</small>'}</h2>
+    <div class="arena">
+      <div class="vs">VS</div>
+      <div class="side enemy-side">${CB.B.map(fHTML).join("")}</div>
+      <div style="height:14px"></div>
+      <div class="side player-side">${CB.A.map(fHTML).join("")}</div>
+    </div>
+    <div class="action-banner" id="abanner">¡Empieza el combate!</div>
+    <div id="planner"></div>
+    <div class="combat-ctrl">
+      <button class="cbtn" data-act="flee">🏳 Huir</button>
+    </div>`;
+  renderCanvases($("#s-battle"));
+  [...CB.A,...CB.B].forEach(u=>{u.el=$(`.fighter[data-uid="${u.uid}"]`);u.hpEl=u.el.querySelector(".hpbar i");u.hpNumEl=u.el.querySelector(".hpnum");u.pipsEl=u.el.querySelectorAll(".pip");});
+  refreshArena();
+}
+function floatNum(u,txt,color){const s=document.createElement("span");s.className="floatnum";s.textContent=txt;
+  s.style.color=color;s.style.left="50%";s.style.top="0";s.style.transform="translateX(-50%)";u.el.appendChild(s);setTimeout(()=>s.remove(),1000);}
+const sumHp=arr=>arr.reduce((s,u)=>s+Math.max(0,u.hp),0);
+function refreshArena(){
+  if(!CB)return;
+  [...CB.A,...CB.B].forEach(u=>{
+    if(!u.hpEl)return;
+    u.hpEl.style.width=(Math.max(0,u.hp)/u.hpMax*100)+"%";
+    u.hpEl.style.background=u.hp/u.hpMax<0.3?"var(--red)":u.hp/u.hpMax<0.6?"var(--gold)":"var(--green)";
+    if(u.hpNumEl){
+      const badges=(u.shield>0?" 🛡"+u.shield:"")+(u.poisonTurns>0?" ☠":"")+(u.stunTurns>0?" 💫":"");
+      u.hpNumEl.innerHTML = (u.hp<=0?"☠️":(Math.max(0,Math.round(u.hp))+"/"+u.hpMax))+'<span style="font-size:9px">'+badges+'</span>';
+    }
+    if(u.hp<=0)u.el.classList.add("dead");
+    u.el.classList.toggle("guarding", !!u.guarding && u.hp>0);
+    u.pipsEl.forEach((p,i)=>p.classList.toggle("on",i<u.energy));
+  });
+  // hints de tipo (⬆ fuerte / ⬇ débil) en enemigos al elegir objetivo en la planificación
+  const sel=CB.selecting?CB.A.find(x=>x.uid===CB.selecting):null;
+  CB.B.forEach(u=>{ const h=u.el&&u.el.querySelector(".thint"); if(!h)return;
+    if(sel&&u.hp>0){ const m=ENGINE.typeEff(sel.type,ENGINE.typesOf(u)); h.textContent=m>1?"⬆":m<1?"⬇":"•";
+      h.style.color=m>1?"var(--green)":m<1?"var(--red)":"var(--ink-dim)"; h.style.display="block"; }
+    else h.style.display="none";
+    if(u.el) u.el.classList.toggle("targetable", !!(CB.selecting&&u.hp>0));
+  });
+}
+function setBanner(html){ const b=$("#abanner"); if(b) b.innerHTML=html; }
+/* ===== COMBATE POR RONDAS: planificas (10s) y luego se resuelve ===== */
+function startCombat(){
+  CB.speed=1;
+  const vs=$(".vs"); if(vs){vs.style.opacity=1;setTimeout(()=>{vs.style.opacity=0;},800);}
+  if(!localStorage.getItem('aigrons_combat_tip')){ localStorage.setItem('aigrons_combat_tip','1'); showCombatTip(); return; }
+  planTurn();
+}
+// Fase de PLANIFICACIÓN: eliges acción de tus 3 aigrons para la ronda.
+function planTurn(){
+  if(!CB||CB.ended)return;
+  if(CB.timer){clearInterval(CB.timer);CB.timer=null;}
+  CB.phase='plan'; CB.planTurn=CB.turn+1; CB.selecting=null;
+  CB.plan={}; CB.A.forEach(u=>{ if(u.hp>0) CB.plan[u.uid]={action:'basic',target:null,overcharge:false}; });
+  [...CB.A,...CB.B].forEach(x=>x.el&&x.el.classList.remove("acting"));
+  renderPlanner();
+  CB.planEndsAt=Date.now()+10000;
+  if(CB.planTimer)clearInterval(CB.planTimer);
+  CB.planTimer=setInterval(planTimerTick,100);
+}
+function planTimerTick(){
+  if(!CB||CB.phase!=='plan'){ if(CB&&CB.planTimer){clearInterval(CB.planTimer);CB.planTimer=null;} return; }
+  const left=CB.planEndsAt-Date.now();
+  const bar=$("#plan-bar"); if(bar) bar.style.width=Math.max(0,Math.min(100,left/10000*100))+"%";
+  if(left<=0) confirmPlan();
+}
+function renderPlanner(){
+  const p=$("#planner"); if(!p)return;
+  setBanner(`Ronda ${CB.planTurn} · planifica tus aigrons`);
+  const rows=CB.A.filter(u=>u.hp>0).map(u=>{
+    const ab=ABILITIES[u.ability];
+    const proj=Math.min(COMBAT_ENERGY_MAX,u.energy+1);
+    const ready=proj>=ab.cost, canOc=proj>=ab.cost+2;
+    const pl=CB.plan[u.uid]||{action:'basic'};
+    const tgtName=pl.target?((CB.B.find(x=>x.uid===pl.target)||{}).name||'auto'):'auto';
+    const lbl = pl.action==='guard'?'🛡️ Guardia'
+      : pl.action==='ability'?`✨ ${ab.name}${pl.overcharge?' ⚡⚡':''} → ${tgtName}`
+      : `⚔️ Atacar → ${tgtName}`;
+    return `<div class="plan-unit ${CB.selecting===u.uid?'sel':''}">
+      <div class="pu-spr">${artTag(tpl(u.tplId),4)}</div>
+      <div class="pu-body">
+        <div class="pu-nm"><span class="dim" style="font-size:10px">Nv${u.level}</span> ${u.name} <span class="dim" style="font-size:10px">⚡${proj}/${ab.cost}</span></div>
+        <div class="pu-ab">✨ ${ab.name}: ${abilityShort(u.ability)}</div>
+        <div class="pu-lbl">${lbl}</div>
+      </div>
+      <div class="pu-acts">
+        <button class="pa ${pl.action==='attack'?'on':''}" data-act="planSet" data-arg="${u.uid}:attack" title="Atacar normal">⚔️</button>
+        <button class="pa ${pl.action==='ability'?'on':''} ${ready?'':'dis'}" data-act="planSet" data-arg="${u.uid}:ability" title="${ab.name}: ${abilityEffect(u.ability)}">✨</button>
+        <button class="pa ${pl.action==='guard'?'on':''}" data-act="planSet" data-arg="${u.uid}:guard" title="Guardia: protege al equipo">🛡️</button>
+        ${canOc&&pl.action==='ability'?`<button class="pa oc ${pl.overcharge?'on':''}" data-act="planOc" data-arg="${u.uid}" title="Sobrecarga ×1.5">⚡⚡</button>`:''}
+      </div>
+    </div>`;
+  }).join("");
+  const leftPct=CB.planEndsAt?Math.max(0,Math.min(100,(CB.planEndsAt-Date.now())/10000*100)):100;
+  p.innerHTML=`<div class="plan-head"><b>RONDA ${CB.planTurn}</b><div class="plan-timer"><i id="plan-bar" style="width:${leftPct}%"></i></div></div>
+    ${rows}
+    ${CB.selecting?`<div class="targhint">🎯 Toca un enemigo para <b>${(CB.A.find(x=>x.uid===CB.selecting)||{}).name}</b> · <span data-act="planAuto" style="color:var(--gold);cursor:pointer">auto</span></div>`:'<div class="dim tc" style="font-size:11px;margin:4px 0">Elige acción de cada aigrón. ⚔️/✨ puedes tocar un enemigo para focalizar.</div>'}
+    <button class="btn mag mt8" style="width:100%" data-act="confirmPlan">LISTO ▶</button>`;
+  renderCanvases(p);
+  refreshArena();
+}
+// Habilidades de OBJETIVO ÚNICO (piden rival). El resto (equipo/self/AoE) son
+// automáticas y no deben pedir objetivo.
+const TARGETED_KINDS={dmg:1,dot:1,stun:1,drain:1,mark:1,critDown:1,double:1};
+function abilityNeedsTarget(key){ const a=ABILITIES[key]; return !!(a&&TARGETED_KINDS[a.kind]); }
+function planSet(arg){
+  if(!CB||CB.phase!=='plan')return;
+  const i=arg.indexOf(':'); const uid=arg.slice(0,i), action=arg.slice(i+1);
+  const u=CB.A.find(x=>x.uid===uid); if(!u||u.hp<=0)return;
+  const ab=ABILITIES[u.ability], proj=Math.min(COMBAT_ENERGY_MAX,u.energy+1);
+  if(action==='ability'&&proj<ab.cost){ toast('Sin energía aún para '+ab.name); return; }
+  const pl=CB.plan[uid]; pl.action=action;
+  if(action==='guard'){ pl.target=null; pl.overcharge=false; CB.selecting=null; }
+  else if(action==='ability'&&!abilityNeedsTarget(u.ability)){ pl.target=null; CB.selecting=null; } // equipo/self/AoE: automática
+  else { CB.selecting=uid; } // ataque o habilidad de objetivo único -> elegir rival (opcional)
+  renderPlanner();
+}
+function planOc(uid){
+  if(!CB||CB.phase!=='plan')return; const u=CB.A.find(x=>x.uid===uid); if(!u)return;
+  const ab=ABILITIES[u.ability]; const pl=CB.plan[uid];
+  if(pl.action!=='ability'||Math.min(COMBAT_ENERGY_MAX,u.energy+1)<ab.cost+2)return;
+  pl.overcharge=!pl.overcharge; renderPlanner();
+}
+function planEnemy(uid){
+  if(!CB||CB.phase!=='plan'||!CB.selecting)return;
+  const pl=CB.plan[CB.selecting]; if(pl&&(pl.action==='attack'||pl.action==='ability')) pl.target=uid;
+  CB.selecting=null; renderPlanner();
+}
+function planAuto(){ if(!CB||!CB.selecting)return; const pl=CB.plan[CB.selecting]; if(pl)pl.target=null; CB.selecting=null; renderPlanner(); }
+function confirmPlan(){
+  if(!CB||CB.phase!=='plan')return;
+  if(CB.planTimer){clearInterval(CB.planTimer);CB.planTimer=null;}
+  if(CB.live){ return pvpConfirm(); }
+  Object.keys(CB.plan).forEach(uid=>{ const pl=CB.plan[uid];
+    if(pl.action==='guard') CB.decisions.push({turn:CB.planTurn,uid,action:'guard'});
+    else if(pl.action==='ability') CB.decisions.push({turn:CB.planTurn,uid,action:'ability',target:pl.target||undefined,overcharge:!!pl.overcharge});
+    else if(pl.action==='attack'&&pl.target) CB.decisions.push({turn:CB.planTurn,uid,action:'attack',target:pl.target});
+  });
+  CB.phase='resolve'; CB.selecting=null;
+  const p=$("#planner"); if(p) p.innerHTML='';
+  resolveTurn();
+}
+// Fase de RESOLUCIÓN: anima la ronda (todos actúan por velocidad), luego vuelve a planificar.
+function resolveTurn(){ if(CB.timer)clearInterval(CB.timer); CB.timer=setInterval(resolveTick, Math.round(560/(CB.speed||1))); }
+function resolveTick(){
+  if(!CB||CB.ended)return;
+  if(!CB.A.some(u=>u.hp>0)||!CB.B.some(u=>u.hp>0)){ finishBattle(); return; }
+  if(CB.oi>=CB.order.length){
+    if(CB.turn>=CB.planTurn){ // la ronda planificada terminó -> a planificar de nuevo
+      if(CB.timer){clearInterval(CB.timer);CB.timer=null;}
+      if(CB.turn>=TURNS_MAX){ finishBattle(); return; }
+      planTurn(); return;
+    }
+    CB.turn++; CB.order=E.turnOrder(CB.A,CB.B); CB.oi=0;
+  }
+  let u=null;
+  while(CB.oi<CB.order.length){ const c=CB.order[CB.oi++]; if(c.hp>0){u=c;break;} }
+  if(!u) return;
+  [...CB.A,...CB.B].forEach(x=>x.el&&x.el.classList.remove("acting"));
+  if(u.el) u.el.classList.add("acting");
+  E.decBuffs(u);
+  u.energy=Math.min(COMBAT_ENERGY_MAX,u.energy+1);
+  const st=E.tickStatus(u); // veneno/quemadura + aturdimiento (igual que el motor)
+  const mine=u.team==='A'?CB.A:CB.B, foes=u.team==='A'?CB.B:CB.A;
+  const who=u.team==='A'?'var(--cyan)':'var(--magenta)';
+  let action;
+  if(u.hp<=0){ action={uid:u.uid,name:u.name,ability:null,guard:false,hits:[],poison:st.poison,died:true}; }
+  else if(st.stunned){ action={uid:u.uid,name:u.name,stunned:true,hits:[],poison:st.poison}; }
+  else {
+    let intent;
+    if(u.team==='A'){
+      const pl=CB.plan[u.uid];
+      if(pl&&pl.action==='guard') intent={type:'guard'};
+      else if(pl&&pl.action==='ability'&&u.energy>=ABILITIES[u.ability].cost) intent={type:'ability',target:pl.target,overcharge:!!pl.overcharge};
+      else if(pl&&pl.action==='attack') intent={type:'basic',target:pl.target};
+      else intent={type:'basic'};
+    } else intent=E.aiIntent(CB.rng,u,foes,mine);
+    action=E.performAction(CB.rng,u,intent,mine,foes); action.poison=st.poison;
+  }
+  if(st.poison && u.el) floatNum(u,"☠"+st.poison,"var(--epi)"); // daño de veneno/quemadura
+  if(action.stunned) setBanner(`<span style="color:${who}">${u.name}</span> está aturdido 💫`);
+  else if(action.died) setBanner(`<span style="color:${who}">${u.name}</span> cae por el veneno ☠`);
+  else if(action.guard) setBanner(`<span style="color:${who}">${u.name}</span> se protege 🛡️`);
+  else if(action.ability) setBanner(`<span style="color:${who}">${u.name}</span> usa <b style="color:var(--gold)">${action.ability}</b>${action.overcharge?' ⚡⚡×1.5':''}`);
+  else if(action.hits.length) setBanner(`<span style="color:${who}">${u.name}</span> ataca`);
+  action.hits.forEach(h=>{const t=h.tgt; if(!t.el)return; t.el.classList.remove("hit");void t.el.offsetWidth;t.el.classList.add("hit");
+    floatNum(t,(h.shielded?"🛡":"")+(h.guarded?"🛡️":"")+(h.crit?"¡":"")+h.dmg+(h.crit?"!":""),h.crit?"var(--gold)":h.shielded?"#aebfce":h.guarded?"var(--cyan)":h.typeM>1?"var(--magenta)":"#fff");});
+  refreshArena();
+  if(!CB.A.some(x=>x.hp>0)||!CB.B.some(x=>x.hp>0)) finishBattle();
+}
+function cbSpeed(){ if(!CB)return; CB.speed=CB.speed===1?2:1; const b=$("#cb-speed"); if(b)b.textContent="▶▶ "+CB.speed+"x"; if(CB.phase==='resolve'&&CB.timer)resolveTurn(); }
+function showCombatTip(){
+  openOverlay(`<div>
+    <div class="center" style="font-family:var(--pixel);font-size:12px;color:var(--cyan);margin-bottom:10px">CÓMO LUCHAR</div>
+    <div style="font-size:13px;line-height:1.6">
+      • Combate por <b>rondas</b>. En cada ronda tienes <b>10s</b> para <b>planificar</b> a tus 3 aigrons (o pulsa LISTO).<br>
+      • Por cada uno elige: <b>⚔️ Atacar</b>, <b>✨ Habilidad</b> (si tiene energía) o <b>🛡️ Guardia</b>.<br>
+      • Con ⚔️ o ✨ puedes <b>tocar un enemigo</b> para focalizarlo (mira <span style="color:var(--green)">⬆</span> fuerte / <span style="color:var(--red)">⬇</span> débil por tipo), o se elige solo.<br>
+      • <b>⚡</b> = energía (sube 1/ronda). <b>⚡⚡ Sobrecarga</b>: gasta +2⚡ para pegar ×1.5.<br>
+      • Pulsa <b>LISTO</b> y la ronda se resuelve animada (actúa antes quien tiene más velocidad).
+    </div>
+    <button class="btn mt8" style="width:100%" data-act="combatTipOk">¡ENTENDIDO!</button>
+  </div>`);
+}
+function combatTipOk(){ closeOverlay(); planTurn(); }
+function finishBattle(){
+  if(!CB||CB.ended)return; CB.ended=true;
+  if(CB.timer){clearInterval(CB.timer);CB.timer=null;}
+  if(CB.planTimer){clearInterval(CB.planTimer);CB.planTimer=null;}
+  // Self-check (dev): recomputar con el motor y comparar con la animación.
+  try{
+    const A2=CB.initA.map((s,i)=>E.unitFromStats(s,'A',i));
+    const B2=CB.initB.map((s,i)=>E.unitFromStats(s,'B',i));
+    if(CB.relics){ E.applyRelics(A2,CB.relics); A2.forEach((u,i)=>u.hp=Math.min(u.hpMax, CB.initA[i].hp!=null?CB.initA[i].hp:u.hpMax)); }
+    const rr=E.resolveBattle(A2,B2,CB.seed,CB.decisions);
+    const animWin=CB.A.some(u=>u.hp>0)&&(!CB.B.some(u=>u.hp>0)||sumHp(CB.A)>=sumHp(CB.B));
+    if((rr.winner==='A')!==animWin) console.warn('AIGRONS: animación≠motor', rr.winner, animWin, CB.decisions);
+    // Comparación HP por-unidad (detecta divergencias finas en veneno/aturdir/escudo/drenaje).
+    const cmp=(anim,eng)=>anim.forEach((u,i)=>{ if(Math.round(u.hp)!==Math.round(eng[i].hp)) console.warn('AIGRONS: HP≠motor', u.team, u.name, Math.round(u.hp), Math.round(eng[i].hp), CB.decisions); });
+    cmp(CB.A,A2); cmp(CB.B,B2);
+  }catch(e){}
+  const battleId=CB.battleId, decisions=CB.decisions, mode=CB.mode;
+  setTimeout(()=>{
+    if(mode==='dungeon'){
+      api('/dungeon/battle',{method:'POST',body:{decisions}})
+        .then(r=>{ CB=null; refreshMe().then(refreshChips); D=r.state; showDungeonResult(r); })
+        .catch(err=>{ toast('Error al resolver'); CB=null; go('dungeon'); });
+    } else {
+      api('/battle/resolve',{method:'POST',body:{battleId,decisions}})
+        .then(r=>{ refreshMe().then(refreshChips); showResult(r); })
+        .catch(err=>{ toast('Error al resolver el combate'); CB=null; go('home'); });
+    }
+  },650);
+}
+function showResult(r){
+  const win=r.win;
+  openOverlay(`<div class="center">
+     <div style="font-family:var(--pixel);font-size:16px;color:${win?'var(--gold)':'var(--ink-dim)'};margin-bottom:10px">${win?'¡VICTORIA!':'DERROTA'}</div>
+     <div style="font-size:50px;margin-bottom:8px">${win?'🏆':'💀'}</div>
+     <div class="panel" style="text-align:left">
+       <div>🪙 Monedas <b style="float:right;color:var(--gold)">+${r.coins}</b></div>
+       <div class="mt8">🏅 Puntos de liga <b style="float:right;color:${win?'var(--green)':'var(--red)'}">${r.leaguePoints}</b></div>
+       <div class="mt8">🏆 Liga <b style="float:right;color:var(--cyan)">${r.league}</b></div>
+       ${r.pvp?'<div class="mt8 dim" style="font-size:12px">Combate PvP asíncrono</div>':''}
+     </div>
+     <button class="btn mt8" data-act="continueBattle">CONTINUAR</button>
+   </div>`);
+}
+function flee(){if(CB){if(CB.live){pvpSend({t:'leave'});if(PVP){try{PVP.ws.close();}catch(e){}PVP=null;}}if(CB.timer)clearInterval(CB.timer);if(CB.planTimer)clearInterval(CB.planTimer);}CB=null;go('home');}
+
+/* ====================== MAZMORRA (roguelike) ====================== */
+let D=null;
+function relicChip(id){ const r=ENGINE.RELICS[id]; return r?`<div class="dg-relic" title="${r.name}: ${r.desc}">${r.emoji}</div>`:''; }
+function dgHeader(){
+  const pips=[]; for(let i=0;i<D.totalDepth;i++){ const boss=i===D.totalDepth-1; pips.push(`<span class="dg-pip ${i<D.depth?'done':''} ${boss?'boss':''}"></span>`); }
+  const team=D.team.map(m=>`<div class="dg-mem ${m.dead?'dead':''}">
+     ${artTag(tpl(m.tplId),5)}
+     <div class="hpbar"><i style="width:${m.dead?0:Math.round(m.hp/m.hpMax*100)}%;background:${m.hp/m.hpMax<0.3?'var(--red)':m.hp/m.hpMax<0.6?'var(--gold)':'var(--green)'}"></i></div>
+     <div style="font-size:10px">${m.dead?'☠️':m.hp+'/'+m.hpMax}</div></div>`).join("");
+  return `<div class="dg-bar"><b>Nodo ${Math.min(D.depth+1,D.totalDepth)}/${D.totalDepth}</b>
+       <span class="dim">·</span><span style="color:var(--epi)">${D.diffLabel||''} · enemigos nv${D.diffLevel||'?'}</span>
+       <span class="dim">·</span><span style="color:var(--gold)">🪙 ${D.coins}</span>
+       <span style="margin-left:auto;display:flex;gap:3px">${pips.join("")}</span></div>
+     <div class="dg-team">${team}</div>
+     <div class="dg-relics">${D.relics.length?D.relics.map(relicChip).join(""):'<span class="dim" style="font-size:12px">Sin reliquias aún</span>'}</div>`;
+}
+const NODE_INFO={ COMBATE:{ic:'⚔️',t:'Combate',d:'Enemigos del nivel'}, ELITE:{ic:'💀',t:'Élite',d:'Más difícil, mejor botín'}, JEFE:{ic:'👑',t:'JEFE FINAL',d:'Derrótalo para completar la mazmorra'}, DESCANSO:{ic:'🏕️',t:'Descanso',d:'Cura 40% al equipo'}, TIENDA:{ic:'🛒',t:'Tienda',d:'Compra reliquias o cura'} };
+async function renderDungeon(){
+  refreshChips();
+  try{ D=await api('/dungeon'); }catch(e){ D={status:'none'}; }
+  const el=$("#s-dungeon");
+  if(!D||D.status==='none'){
+    el.innerHTML=`<h2 class="title">MAZMORRA <small>del día</small></h2>
+      <div class="panel"><div class="tc" style="font-size:40px">🗺️</div>
+        <div class="tc mb8"><b>Mazmorra del Día</b></div>
+        <div class="dim" style="font-size:13px">Recorre ${ENGINE.DUNGEON_DEPTH} nodos con tu equipo. El HP <b>se arrastra</b>, recoges <b>reliquias</b> y si caes acaba la run. <b>Elige dificultad</b>: el nivel de los enemigos lo fija ella, no el tuyo. Runs ilimitadas.</div></div>
+      ${difficultyPicker()}
+      ${dgRankSection()}`;
+    loadDgRank(); return;
+  }
+  if(D.status==='cleared'||D.status==='dead'){
+    el.innerHTML=`<h2 class="title">MAZMORRA <small>${D.diffLabel||''}</small></h2>
+      <div class="panel tc">
+        <div style="font-size:40px">${D.status==='cleared'?'🏆':'☠️'}</div>
+        <div class="mb8"><b>${D.status==='cleared'?'¡MAZMORRA COMPLETADA!':'Run terminada'}</b></div>
+        <div class="dim" style="font-size:13px">Llegaste al nodo <b style="color:var(--cyan)">${D.depth}/${D.totalDepth}</b> en <b>${D.diffLabel}</b>. Reintenta o cambia de dificultad.</div></div>
+      ${dgHeader()}
+      ${difficultyPicker()}
+      ${dgRankSection()}`;
+    renderCanvases(el); loadDgRank(); return;
+  }
+  let body='';
+  if(D.stage==='choosing'){
+    body=`<div class="dim mb8" style="font-size:13px">Elige tu camino:</div>`+
+      D.options.map((o,i)=>{const n=NODE_INFO[o.type]||{ic:'?',t:o.type,d:''};
+        return `<div class="node-opt ${o.type}" data-act="dgChoose" data-arg="${i}">
+          <span class="ni2">${n.ic}</span><div><b>${n.t}</b><div class="dim" style="font-size:12px">${n.d}</div></div></div>`;}).join("");
+  } else if(D.stage==='draft'){
+    body=`<div class="dim mb8" style="font-size:13px">¡Nodo superado! Elige una reliquia:</div>`+
+      D.draft.map((r,i)=>`<div class="relic-card" data-act="dgDraft" data-arg="${i}">
+        <span class="re">${r.emoji}</span><div><b>${r.name}</b><div class="dim" style="font-size:12px">${r.desc}</div></div></div>`).join("")+
+      `<button class="btn sm ghost mt8" style="width:100%" data-act="dgSkipDraft">SALTAR (no coger)</button>`;
+  } else if(D.stage==='shop'){
+    body=`<div class="dim mb8" style="font-size:13px">🛒 Tienda · 🪙 ${D.coins}</div>`+
+      D.shop.relics.map((r,i)=>`<div class="relic-card" data-act="dgBuy" data-arg="${i}">
+        <span class="re">${r.emoji}</span><div style="flex:1"><b>${r.name}</b><div class="dim" style="font-size:12px">${r.desc}</div></div>
+        <span style="color:var(--gold)">${D.shop.relicCost}🪙</span></div>`).join("")+
+      `<div class="relic-card" data-act="dgHeal"><span class="re">💊</span><div style="flex:1"><b>Curar equipo 50%</b></div><span style="color:var(--gold)">${D.shop.healCost}🪙</span></div>
+       <button class="btn mt8" style="width:100%" data-act="dgLeaveShop">SEGUIR</button>`;
+  } else if(D.stage==='combat'){
+    body=`<div class="panel tc"><b>${D.battle&&D.battle.kind==='JEFE'?'👑 ¡JEFE!':D.battle&&D.battle.kind==='ELITE'?'💀 ¡Élite!':'⚔️ ¡Combate!'}</b>
+       <div class="dim mb8" style="font-size:13px">Tu equipo conserva el HP de antes.</div>
+       <button class="btn mag" data-act="dgFight">LUCHAR</button></div>`;
+  }
+  el.innerHTML=`<h2 class="title">MAZMORRA <small>nodo ${Math.min(D.depth+1,D.totalDepth)}/${D.totalDepth}</small></h2>${dgHeader()}${body}`;
+  renderCanvases(el);
+}
+const DG_ORDER=['FACIL','NORMAL','DIFICIL','EXPERTO','PESADILLA'];
+let dgDiff='NORMAL';
+function difficultyPicker(){
+  const cards=DG_ORDER.map(id=>{const d=ENGINE.DUNGEON_DIFFICULTIES[id];
+    return `<div class="relic-card" style="align-items:center">
+      <div style="flex:1"><b>${d.label}</b><div class="dim" style="font-size:11px">Enemigos nv${d.level} · recompensa ×${d.coinMult}</div></div>
+      <button class="btn sm" data-act="dgStart" data-arg="${id}">JUGAR</button></div>`;}).join("");
+  return `<div class="panel"><b style="font-size:13px">Elige dificultad</b><div class="mt8">${cards}</div></div>`;
+}
+function dgRankSection(){
+  const tabs=DG_ORDER.map(id=>`<button class="f ${dgDiff===id?'on':''}" data-act="dgRankTab" data-arg="${id}">${ENGINE.DUNGEON_DIFFICULTIES[id].label}</button>`).join("");
+  return `<div class="panel"><b style="font-size:13px">Ranking de hoy</b>
+    <div class="filters mt8">${tabs}</div>
+    <div id="dg-rank" class="mt8 dim" style="font-size:12px">Cargando…</div></div>`;
+}
+function dgRankTab(id){ dgDiff=id; renderDungeon(); }
+async function loadDgRank(){
+  try{ const r=await api('/dungeon/ranking?difficulty='+dgDiff); const box=$("#dg-rank"); if(!box)return;
+    const rows=r.rows||[];
+    box.innerHTML=rows.length?rows.slice(0,10).map(x=>`<div class="rank-row ${x.me?'me':''}" style="padding:5px 4px"><span class="pos">${x.pos}</span><span class="nm">${x.name}</span><span style="color:var(--gold)">${x.cleared?'🏆 ':''}nodo ${x.depth}</span></div>`).join(""):'Nadie ha entrado aún en esta dificultad.';
+  }catch(e){}
+}
+async function dgStart(diff){ try{ dgDiff=ENGINE.DUNGEON_DIFFICULTIES[diff]?diff:dgDiff; D=await api('/dungeon/start',{method:'POST',body:{difficulty:dgDiff}}); renderDungeon(); }catch(e){ toast(e.data&&e.data.error==='empty_team'?'Configura tu equipo en INICIO':'No se pudo entrar'); } }
+async function dgChoose(i){ try{ D=await api('/dungeon/choose',{method:'POST',body:{choice:+i}}); renderDungeon(); }catch(e){ toast('No se pudo'); } }
+async function dgDraft(i){ try{ D=await api('/dungeon/draft',{method:'POST',body:{choice:+i}}); renderDungeon(); }catch(e){ toast('No se pudo'); } }
+async function dgSkipDraft(){ try{ D=await api('/dungeon/draft',{method:'POST',body:{skip:true}}); renderDungeon(); }catch(e){} }
+async function dgBuy(i){ try{ D=await api('/dungeon/shop',{method:'POST',body:{action:'buy',arg:+i}}); renderDungeon(); }catch(e){ toast(e.data&&e.data.error==='insufficient'?'Te faltan monedas':'No se pudo'); } }
+async function dgHeal(){ try{ D=await api('/dungeon/shop',{method:'POST',body:{action:'heal'}}); renderDungeon(); }catch(e){ toast(e.data&&e.data.error==='insufficient'?'Te faltan monedas':'No se pudo'); } }
+async function dgLeaveShop(){ try{ D=await api('/dungeon/shop',{method:'POST',body:{action:'leave'}}); renderDungeon(); }catch(e){} }
+function dgFight(){
+  const b=D.battle; if(!b){ renderDungeon(); return; }
+  const A=b.team.map((s,i)=>E.unitFromStats(s,'A',i)); E.applyRelics(A,b.relics); A.forEach((u,i)=>u.hp=Math.min(u.hpMax,b.team[i].hp));
+  const B=b.enemy.map((s,i)=>E.unitFromStats(s,'B',i));
+  CB={A,B,seed:b.battleSeed|0,mode:'dungeon',pvp:false,rng:mulberry32(b.battleSeed>>>0),
+      turn:0,order:[],oi:0,plan:{},planTurn:0,selecting:null,phase:'plan',speed:1,decisions:[],timer:null,planTimer:null,
+      initA:b.team,initB:b.enemy,relics:b.relics,ended:false};
+  document.querySelectorAll(".screen").forEach(s=>s.classList.remove("active"));
+  $("#s-battle").classList.add("active");
+  document.querySelectorAll(".nav button").forEach(x=>x.classList.toggle("on",x.dataset.screen==='dungeon'));
+  buildArena();
+  startCombat();
+}
+function showDungeonResult(r){
+  const win=r.win; let extra='';
+  if(r.cleared) extra='<div style="color:var(--gold);margin-top:6px">🏆 ¡Mazmorra completada!</div>';
+  else if(r.dead) extra='<div style="color:var(--red);margin-top:6px">☠️ Tu equipo cayó.</div>';
+  if(r.accountReward) extra+=`<div class="mt8">🪙 Recompensa a tu cuenta: <b style="color:var(--gold)">+${r.accountReward}</b></div>`;
+  else if(r.noReward==='no_best'&&(r.cleared||r.dead)) extra+=`<div class="dim mt8" style="font-size:12px">Sin recompensa extra: no superaste tu mejor profundidad de hoy en esta dificultad.</div>`;
+  openOverlay(`<div class="center">
+     <div style="font-family:var(--pixel);font-size:15px;color:${win?'var(--gold)':'var(--ink-dim)'};margin-bottom:8px">${win?'¡NODO SUPERADO!':'DERROTA'}</div>
+     <div style="font-size:44px">${win?'⚔️':'☠️'}</div>
+     ${win&&r.coins?`<div class="mt8">🪙 +${r.coins} monedas de mazmorra</div>`:''}
+     ${extra}
+     <button class="btn mt8" data-act="dgContinue">CONTINUAR</button></div>`);
+}
+function dgContinue(){ closeOverlay(); go('dungeon'); }
+
+/* ====================== RANKING ====================== */
+let rankTab="diario";
+async function renderRanking(){
+  refreshChips();
+  let rows=[];
+  try{ rows=await api(rankTab==="diario"?'/rankings/daily':'/rankings/league'); }catch(e){}
+  const board=rows.length?rows.map(r=>`<div class="rank-row ${r.me?'me':''}">
+     <span class="pos">${r.pos}</span><span class="nm">${r.name}</span>
+     <span style="color:var(--gold);font-weight:700">${r.score}${rankTab==='diario'?' ✕':' pts'}</span></div>`).join("")
+     :'<div class="dim tc" style="padding:24px">Aún no hay datos. ¡Juega combates!</div>';
+  $("#s-ranking").innerHTML=`
+    <h2 class="title">RANKING</h2>
+    <div class="tabs">
+      <div class="t ${rankTab==='diario'?'on':''}" data-act="setRank" data-arg="diario">DIARIO</div>
+      <div class="t ${rankTab==='liga'?'on':''}" data-act="setRank" data-arg="liga">LIGA ${S.user.league}</div></div>
+    ${rankTab==='diario'?'<div class="dim mb8" style="font-size:13px">Con el lote de HOY (igual para todos), ¿quién ganó más combates?</div>':`<div class="dim mb8" style="font-size:13px">Tus puntos: <b style="color:var(--cyan)">${S.user.leaguePoints}</b>. Sube de liga ganando combates.</div>`}
+    <div class="panel" style="padding:4px 8px">${board}</div>`;
+}
+function setRank(t){rankTab=t;renderRanking();}
+
+/* ====================== TIENDA ====================== */
+async function renderShop(){
+  refreshChips();
+  const item=(ico,t,d,btn,act,arg,extra,disabled)=>`<div class="panel shop-item">
+     <div class="ico">${ico}</div><div class="meta"><div class="t">${t}</div><div class="d">${d}</div></div>
+     <button class="btn sm ${extra||''}" ${disabled?'disabled':(act?`data-act="${act}" ${arg?`data-arg="${arg}"`:''}`:'disabled')}>${btn}</button></div>`;
+  $("#s-shop").innerHTML=`
+    <h2 class="title">TIENDA <small class="dim">sin sorpresas tóxicas</small></h2>
+    ${item("🥚","Tirada extra del lote de hoy","Aigrón aleatorio · 100🪙","TIRAR","shopRoll","", "")}
+    ${item("💎","Pack de gemas","Moneda premium","COMPRAR","purchase","gems_small","mag")}
+    ${item("🎟️","Pase de temporada","30 días de recompensas","COMPRAR","purchase","pass","gold")}
+    ${item("⚡","Recargar energía","Energía al máximo","COMPRAR","purchase","energy_refill","")}
+    <div class="dim tc mt8" style="font-size:12px">El dinero acelera tu colección, nunca compra victorias. Las compras reales se validan con el recibo de la tienda.</div>`;
+}
+async function shopRoll(){
+  try{
+    const r=await api('/shop/roll',{method:'POST'});
+    const t=registerTpl(r.template);
+    await Promise.all([refreshMe(),refreshCollection()]); refreshChips();
+    const rays=(t.rarity==="EPICA"||t.rarity==="LEGENDARIA")?'<div class="rays"></div>':'';
+    openOverlay(`<div class="center reveal" style="position:relative">${rays}<div style="position:relative;z-index:2">
+       ${artTag(t,10)}
+       <div style="font-size:19px;font-weight:700;margin-top:6px">${t.name}</div>
+       <div class="mb8"><span class="rar-txt ${t.rarity}" style="font-weight:700">${t.rarity} · ${typesLabel(t)}</span></div>
+       <button class="btn" data-act="toCollection">¡GENIAL!</button></div></div>`);
+  }catch(e){ const er=e.data&&e.data.error; toast(er==='daily_cap'?'Límite diario (10)':er==='insufficient'?'Te faltan monedas':'No se pudo'); }
+}
+async function purchase(sku){
+  try{ const u=await api('/shop/purchase',{method:'POST',body:{sku}}); S.user=Object.assign(S.user,u); refreshChips(); renderShop(); toast('¡Compra aplicada!'); }
+  catch(e){ if(e.status===501) toast('Requiere validación de recibo de tienda'); else toast('No disponible'); }
+}
+
+/* ====================== NAVEGACIÓN + INIT ====================== */
+const RENDER={home:renderHome,battle:renderBattle,dungeon:renderDungeon,collection:renderCollection,ranking:renderRanking,shop:renderShop};
+function go(screen){
+  if(CB&&CB.timer&&screen!=="battle"){clearInterval(CB.timer);CB=null;}
+  document.querySelectorAll(".screen").forEach(s=>s.classList.remove("active"));
+  $("#s-"+screen).classList.add("active");
+  document.querySelectorAll(".nav button").forEach(b=>b.classList.toggle("on",b.dataset.screen===screen));
+  RENDER[screen]();
+}
+document.querySelectorAll(".nav button").forEach(b=>b.onclick=()=>go(b.dataset.screen));
+const ACTIONS={
+  doClaim:()=>doClaim(),
+  claimMission:(a)=>claimMission(a),
+  toCollection:()=>{closeOverlay();go("collection");},
+  close:()=>closeOverlay(),
+  setFilter:(a)=>setFilter(a),
+  levelUp:(a)=>levelUp(a),
+  toggleFav:(a)=>toggleFav(a),
+  release:(a)=>release(a),
+  fusionPick:(a)=>fusionPick(a),
+  editTeam:()=>editTeam(),
+  prepBattle:()=>prepBattle(),
+  livePvp:()=>startLivePvp(), pvpCancel:()=>pvpCancel(), pvpDone:()=>pvpDone(),
+  goBattle:()=>goBattle(),
+  saveTeam:()=>saveTeam(),
+  planSet:(a)=>planSet(a),
+  planOc:(a)=>planOc(a),
+  planEnemy:(a)=>planEnemy(a),
+  planAuto:()=>planAuto(),
+  confirmPlan:()=>confirmPlan(),
+  cbSpeed:()=>cbSpeed(), combatTipOk:()=>combatTipOk(),
+  flee:()=>flee(),
+  continueBattle:()=>{closeOverlay();go('home');},
+  setRank:(a)=>setRank(a),
+  shopRoll:()=>shopRoll(),
+  purchase:(a)=>purchase(a),
+  openTutorial:()=>openTutorial(),
+  tutNext:()=>tutNext(), tutPrev:()=>tutPrev(), tutDone:()=>tutDone(),
+  logout:()=>logout(),
+  dgStart:(a)=>dgStart(a), dgRankTab:(a)=>dgRankTab(a), dgChoose:(a)=>dgChoose(a), dgDraft:(a)=>dgDraft(a), dgSkipDraft:()=>dgSkipDraft(),
+  dgBuy:(a)=>dgBuy(a), dgHeal:()=>dgHeal(), dgLeaveShop:()=>dgLeaveShop(), dgFight:()=>dgFight(), dgContinue:()=>dgContinue(),
+  goDungeon:()=>go('dungeon')
+};
+document.getElementById("app").addEventListener("click",e=>{
+  const el=e.target.closest("[data-act]"); if(!el) return;
+  const fn=ACTIONS[el.dataset.act]; if(fn) fn(el.dataset.arg, el);
+});
+
+/* ====================== TUTORIAL (primer login) ====================== */
+const TUTORIAL=[
+  {ic:'🥚', t:'Bienvenido a AIGRONS', h:`Cada día nace un <b>lote nuevo</b> de criaturas únicas. <b>Reclama una gratis</b>, combate para ganar más, colecciónalas y compite en el <b>ranking diario</b> — el mismo lote para todos, así que es justo.`},
+  {ic:'🎁', t:'Tu aigrón diario', h:`En <b>Inicio</b>, toca <b>ABRIR — GRATIS</b> una vez al día. Entra cada día para subir tu <b>racha</b> y completa <b>misiones</b> para ganar monedas.`},
+  {ic:'📖', t:'Colección', h:`Toca un aigrón para <b>subir de nivel</b>, marcarlo <b>favorito</b>, <b>fusionar</b> dos en uno nuevo, o <b>liberar</b> duplicados a cambio de polvo.`},
+  {ic:'🛡️', t:'Tu equipo', h:`En <b>Combate → EDITAR</b> elige <b>3 aigrons</b>. Los <b>tipos</b> mandan: cada uno es fuerte contra unos y débil contra otros (piedra-papel-tijera).`},
+  {ic:'🎯', t:'Combate · preparación', h:`Antes de luchar eliges:<br>• <b>Capitán</b>: +15% a sus stats y +6% a todo el equipo.<br>• <b>Estancia</b>: ⚔️ Agresiva (+ATK, −DEF), 🛡️ Defensiva (+DEF, +1⚡ inicial) o ⚖️ Neutral.<br>Cada combate gasta <b>1⚡</b> (se recarga sola con el tiempo).`},
+  {ic:'🕹️', t:'Combate · tu turno', h:`El 3v3 es <b>automático</b> (actúa primero quien tiene más velocidad). Tú decides cada turno:<br>• Toca una <b>habilidad</b> cuando su ⚡ esté cargada → luego toca un <b>enemigo</b> para apuntar (mira <span style="color:var(--green)">⬆</span> fuerte / <span style="color:var(--red)">⬇</span> débil por tipo).<br>• <b>🛡 Guardia</b>: esa criatura protege al equipo un turno (−40% daño recibido).<br>• <b>Sobrecarga ⚡⚡</b>: si te sobra energía, el golpe pega ×1.5.`},
+  {ic:'🏆', t:'¡A jugar!', h:`Gana combates para subir de <b>liga</b> y escalar el <b>ranking diario</b>. La tienda acelera tu colección pero <b>nunca</b> compra victorias. ¡Vuelve mañana por las criaturas nuevas!`},
+];
+let tutI=0;
+function showTutorial(i){ tutI=i||0; tutRender(); }
+function tutRender(){
+  const s=TUTORIAL[tutI], last=tutI===TUTORIAL.length-1, first=tutI===0;
+  const dots=TUTORIAL.map((_,k)=>`<span class="tut-dot ${k===tutI?'on':''}"></span>`).join("");
+  openOverlay(`<div class="center">
+    <div style="font-size:46px;margin-bottom:4px">${s.ic}</div>
+    <div style="font-family:var(--pixel);font-size:12px;color:var(--cyan);margin-bottom:10px">${s.t}</div>
+    <div style="font-size:14px;line-height:1.55;text-align:left;margin-bottom:12px">${s.h}</div>
+    <div class="tut-dots mb8">${dots}</div>
+    <div class="row">
+      ${first?'<button class="btn sm ghost" style="flex:1" data-act="tutDone">SALTAR</button>'
+             :'<button class="btn sm ghost" style="flex:1" data-act="tutPrev">ATRÁS</button>'}
+      <button class="btn sm ${last?'gold':'mag'}" style="flex:1" data-act="${last?'tutDone':'tutNext'}">${last?'¡EMPEZAR!':'SIGUIENTE'}</button>
+    </div></div>`);
+}
+function tutNext(){ if(tutI<TUTORIAL.length-1){tutI++;tutRender();} else tutDone(); }
+function tutPrev(){ if(tutI>0){tutI--;tutRender();} }
+function tutDone(){ localStorage.setItem('aigrons_tut','1'); closeOverlay(); }
+function openTutorial(){ showTutorial(0); }
+function maybeTutorial(){ if(!localStorage.getItem('aigrons_tut')){ localStorage.setItem('aigrons_tut','1'); showTutorial(0); } }
+
+/* ---------------- Arranque ---------------- */
+function bootMsg(msg,retry){ $("#boot-msg").textContent=msg; $("#boot-spin").style.display=retry?'none':'block'; $("#boot-retry").style.display=retry?'inline-block':'none'; }
+function hideBoot(){ $("#boot").classList.add("hide"); }
+function showBoot(){ $("#boot").classList.remove("hide"); }
+function showLoadingSec(loading){ const l=$("#boot-loading"),g=$("#boot-login"); if(l)l.style.display=loading?'block':'none'; if(g)g.style.display=loading?'none':'block'; }
+function loginErr(msg){ const e=$("#login-err"); if(e)e.textContent=msg||''; }
+function gisReady(){ return new Promise(res=>{ let n=0; const t=setInterval(()=>{ if(window.google&&google.accounts&&google.accounts.id){clearInterval(t);res(true);} else if(++n>50){clearInterval(t);res(false);} },100); }); }
+// Pantalla de login (obligatoria). Google si está configurado; invitado solo en dev.
+async function showLogin(){
+  showBoot(); showLoadingSec(false); loginErr('');
+  let cfg; try{ cfg=await api('/auth/config'); }catch(e){ loginErr('No se pudo conectar con el servidor.'); showLoadingSec(true); bootMsg('Sin conexión.',true); return; }
+  const devBox=$("#login-dev"); devBox.innerHTML='';
+  if(cfg.allowDev){ devBox.innerHTML=(cfg.googleClientId?'<div class="dim" style="font-size:11px;margin:8px 0">ó</div>':'')+'<button class="btn sm ghost" id="devbtn" style="width:100%">👤 Entrar como invitado</button>'; $("#devbtn").onclick=devLogin; }
+  const gbtn=$("#gbtn"); gbtn.innerHTML='';
+  if(cfg.googleClientId){
+    const ok=await gisReady();
+    if(ok){
+      google.accounts.id.initialize({ client_id:cfg.googleClientId, callback:onGoogleCredential });
+      google.accounts.id.renderButton(gbtn,{ theme:'filled_black', size:'large', shape:'pill', text:'continue_with', width:260 });
+    } else { gbtn.innerHTML='<div class="dim" style="font-size:12px">No se pudo cargar Google Sign-In.</div>'; }
+  } else if(!cfg.allowDev){
+    loginErr('Login no configurado (falta AUTH_GOOGLE_CLIENT_ID).');
+  }
+}
+function onGoogleCredential(resp){
+  if(!resp||!resp.credential){ loginErr('Inicio de sesión cancelado.'); return; }
+  loginErr(''); showLoadingSec(true); bootMsg('Entrando…',false);
+  api('/auth/login',{method:'POST',body:{provider:'google',idToken:resp.credential}})
+    .then(r=>{ TOKEN=r.token; localStorage.setItem('aigrons_token',TOKEN); afterAuth(); })
+    .catch(()=>{ showLoadingSec(false); loginErr('No se pudo iniciar sesión con Google.'); });
+}
+function devLogin(){ showLoadingSec(true); bootMsg('Entrando…',false); login().then(afterAuth).catch(()=>{ showLoadingSec(false); loginErr('No se pudo entrar.'); }); }
+async function afterAuth(){
+  try{ await refreshMe(); }
+  catch(e){ if(e.status===401){ TOKEN=''; localStorage.removeItem('aigrons_token'); return showLogin(); } throw e; }
+  await Promise.all([refreshDaily(),refreshCollection(),refreshTeam()]);
+  hideBoot(); go("home"); maybeTutorial();
+}
+async function boot(){
+  showBoot(); showLoadingSec(true); bootMsg('Conectando…',false);
+  if(!TOKEN){ return showLogin(); }
+  try{ await afterAuth(); }
+  catch(e){ bootMsg('No se pudo conectar con el servidor. Asegúrate de que la API está arrancada.',true); }
+}
+function logout(){ TOKEN=''; localStorage.removeItem('aigrons_token'); try{ if(window.google&&google.accounts)google.accounts.id.disableAutoSelect(); }catch(e){} S.user=null; CB=null; showLogin(); }
+window.__retryBoot=boot;
+// Listener en JS (no atributo onclick inline): permite una CSP sin 'unsafe-inline'.
+$("#boot-retry").onclick=boot;
+// PWA: registra el service worker (instalable en móvil). No bloquea si falla.
+if('serviceWorker' in navigator){ window.addEventListener('load',()=>navigator.serviceWorker.register('/sw.js').catch(()=>{})); }
+// Refresca energía/estado periódicamente (servidor autoritativo) fuera de combate.
+setInterval(()=>{ if(S.user && !(CB&&CB.timer)){ refreshMe().then(refreshChips).catch(()=>{}); } },30000);
+boot();

@@ -69,7 +69,6 @@ test("balance: combates a nivel alto y dispares terminan limpio", () => {
 test("balance: sustain máximo vs agresión -> el combate termina y decide", () => {
   // PLANTA/HONGO/MAREA = curas/regen/drenaje/escudos. VOLCAN/BESTIA = puro daño.
   const sustain = teamFrom([7, 19, 13], "A"); // HONGO/PLANTA-ish por id determinista
-  const aggro = teamFrom([2, 5, 9], "B");
   const r = E.resolveBattle(
     teamFrom([7, 19, 13], "A"),
     teamFrom([2, 5, 9], "B"),
@@ -280,7 +279,6 @@ test("balance: arquetipos por tipo con presupuesto igual (5.00) y acotados", () 
 // El bias se aplica de verdad en la generación y respeta el arquetipo (la forma
 // relativa entre dos tipos opuestos se invierte como se espera).
 test("balance: el bias diferencia tipos en la generación", () => {
-  const rg = E.RANGES.EPICA;
   const flat = () => ({ hp: 1000, atkP: 140, atkS: 140, defP: 80, defS: 80, spd: 100 });
   const pluma = E.applyTypeBias(flat(), "PLUMA");   // veloz/frágil
   const metal = E.applyTypeBias(flat(), "METAL");   // lento/blindado

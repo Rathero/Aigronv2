@@ -92,13 +92,19 @@ aigrons/
 ├── README.md                       # este documento
 ├── Dockerfile                      # imagen de producción (API + frontend)
 ├── docker-compose.prod.yml         # stack de producción (API + PostgreSQL)
+├── eslint.config.js                # lint de todo el repo (cd server && npm run lint)
+├── .github/workflows/ci.yml        # CI: lint + tests en cada push/PR
 ├── docs/
 │   └── criaturas-imposibles.md     # DISEÑO COMPLETO: fórmulas, prompts IA, esquema, costes, roadmap
 ├── web/
 │   ├── engine.js                   # MOTOR COMPARTIDO (constantes+generación+combate) ⭐ fuente única
-│   └── index.html                  # frontend ONLINE (vanilla JS + canvas, habla con la API)
+│   ├── index.html                  # frontend ONLINE (estructura; el JS/CSS van aparte)
+│   ├── app.js                      # toda la lógica del cliente (vanilla JS + canvas)
+│   ├── styles.css                  # estilos (pixel-art neón)
+│   └── sw.js · manifest.webmanifest · icon.svg   # PWA
 └── server/
-    ├── db/schema.sql               # esquema PostgreSQL
+    ├── db/schema.sql               # esquema PostgreSQL (idempotente)
+    ├── db/migrations/              # migraciones numeradas one-shot (ver su README)
     ├── src/
     │   ├── config.js · combat.js · generator.js   # re-exportan web/engine.js (cero duplicación)
     │   ├── db.js                   # pool de PostgreSQL
@@ -110,7 +116,7 @@ aigrons/
     │   └── jobs/generateDailyBatch.js   # genera+inserta el lote de un día (usa el seam IA)
     ├── test/engine.test.js         # tests (npm test): determinismo, paridad, rangos, ligas
     ├── scripts/
-    │   ├── migrate.js              # aplica db/schema.sql
+    │   ├── migrate.js              # aplica db/schema.sql + db/migrations/ pendientes
     │   ├── generate-today.js       # CLI para generar el lote de hoy/una fecha
     │   └── smoke.js                # prueba de humo de integración del bucle completo
     ├── docker-compose.yml          # PostgreSQL + Redis local (desarrollo)
@@ -177,9 +183,10 @@ curl -s -X POST localhost:3000/daily/claim -H "authorization: Bearer $TOKEN"
 curl -s localhost:3000/collection          -H "authorization: Bearer $TOKEN"
 ```
 
-### Tests
+### Tests y lint
 ```bash
 cd server && npm test          # determinismo de combate, paridad cliente/servidor, rangos, ligas
+cd server && npm run lint      # ESLint de server/ y web/ (mismo chequeo que la CI)
 ```
 
 ### Despliegue en producción (Docker)
@@ -332,10 +339,13 @@ test de paridad en `npm test`.
 - PWA (manifest + service worker) y/o Capacitor para iOS/Android desde `web/`.
 - Push diario "tu aigrón de hoy te espera".
 
-### P3 — Calidad
-- Tests: unidad para `combat.js` (determinismo, terminación), generación (rangos, curva),
-  e integración de endpoints. CI básica.
-- Rate limiting (Redis), logs, métricas (retención D1/D7, win-rate por tipo para balance).
+### P3 — Calidad (parcial)
+- ✅ CI básica (`.github/workflows/ci.yml`: lint + tests en cada push/PR).
+- ✅ Lint (`cd server && npm run lint`, ESLint con config en la raíz).
+- ✅ Rate limiting con Redis opcional (define `REDIS_URL`; sin él, memoria local).
+- ✅ Endpoints con escrituras atómicas (claim/roll/level-up/resolve: sin carreras).
+- Pendiente: tests de integración de endpoints, métricas (retención D1/D7, win-rate
+  por tipo para balance).
 
 ---
 

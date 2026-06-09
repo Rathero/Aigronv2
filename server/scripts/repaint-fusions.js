@@ -8,7 +8,6 @@ require("dotenv").config({ path: require("path").join(__dirname, "..", ".env") }
 const fs = require("fs");
 const path = require("path");
 const db = require("./../src/db");
-const E = require("./../src/config");
 const { getImageProvider, buildImagePrompt } = require("./../src/ai/imageProvider");
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));

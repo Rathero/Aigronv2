@@ -33,7 +33,9 @@ app.use(
       directives: {
         defaultSrc: ["'self'"],
         // Google Sign-In (GIS): script + iframe + estilos + conexión a accounts.google.com.
-        scriptSrc: ["'self'", "'unsafe-inline'", "https://accounts.google.com/gsi/client"],
+        // Sin 'unsafe-inline': todo el JS del frontend vive en ficheros propios
+        // (web/app.js, web/engine.js), lo que bloquea XSS por script inyectado.
+        scriptSrc: ["'self'", "https://accounts.google.com/gsi/client"],
         styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com", "https://accounts.google.com/gsi/style"],
         fontSrc: ["'self'", "https://fonts.gstatic.com"],
         imgSrc: ["'self'", "data:", "https:"],
@@ -52,8 +54,25 @@ app.use(cors({ origin: CORS_ORIGIN }));
 app.use(express.json({ limit: "256kb" }));
 
 // Rate limiting: general + login estricto (anti fuerza bruta).
-const generalLimiter = rateLimit({ windowMs: 60 * 1000, max: 120, standardHeaders: true, legacyHeaders: false });
-const loginLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 30, standardHeaders: true, legacyHeaders: false });
+// Con REDIS_URL definido usa un store compartido (necesario con >1 instancia
+// detrás del proxy: el contador en memoria por proceso deja de proteger).
+// Sin REDIS_URL (o sin las dependencias opcionales) cae al store en memoria.
+function buildRedisStore(prefix) {
+  if (!process.env.REDIS_URL) return undefined;
+  try {
+    const { RedisStore } = require("rate-limit-redis");
+    const { createClient } = require("redis");
+    const client = createClient({ url: process.env.REDIS_URL });
+    client.on("error", (e) => console.error("[redis] error:", e.message));
+    client.connect().catch((e) => console.error("[redis] no se pudo conectar:", e.message));
+    return new RedisStore({ prefix, sendCommand: (...args) => client.sendCommand(args) });
+  } catch (e) {
+    console.warn("[rate-limit] REDIS_URL definido pero faltan dependencias (redis/rate-limit-redis); usando memoria:", e.message);
+    return undefined;
+  }
+}
+const generalLimiter = rateLimit({ windowMs: 60 * 1000, max: 120, standardHeaders: true, legacyHeaders: false, store: buildRedisStore("rl:gen:") });
+const loginLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 30, standardHeaders: true, legacyHeaders: false, store: buildRedisStore("rl:login:") });
 app.use("/auth/", loginLimiter);
 app.use(generalLimiter);
 
@@ -188,10 +207,12 @@ app.post("/auth/login", wrap(async (req, res) => {
   } catch (e) {
     return res.status(401).json({ error: "auth_failed", detail: e.message });
   }
+  // En conflicto NO se pisa display_name: el nombre del usuario es suyo una vez
+  // creado (un login posterior no debe machacar un nombre personalizado).
   const up = await db.query(
     `INSERT INTO users (display_name, auth_provider, auth_subject)
      VALUES ($1,$2,$3)
-     ON CONFLICT (auth_subject) DO UPDATE SET display_name = EXCLUDED.display_name
+     ON CONFLICT (auth_subject) DO UPDATE SET auth_provider = EXCLUDED.auth_provider
      RETURNING *`,
     [identity.displayName, provider, identity.subject]
   );
@@ -230,16 +251,30 @@ app.get("/daily", authMiddleware, wrap(async (req, res) => {
 
 app.post("/daily/claim", authMiddleware, wrap(async (req, res) => {
   const u = await getUser(req.userId);
-  if (userPublic(u).claimedToday) return res.status(400).json({ error: "already_claimed" });
-  const list = await todayTemplates();
-  const t = list[Math.floor(Math.random() * list.length)];
-  const ins = await db.query(
-    "INSERT INTO creature_instances (user_id, template_id) VALUES ($1,$2) RETURNING instance_id, level",
-    [u.id, t.id]
-  );
+  const list = await todayTemplates(); // antes de marcar el reclamo: si falla, no se pierde la tirada
+  // Marca el reclamo de forma ATÓMICA (un solo UPDATE condicional): dos
+  // peticiones concurrentes no pueden reclamar dos veces el mismo día.
   const streak = u.last_claim_date && C.todayStr(new Date(u.last_claim_date)) === yesterdayStr() ? u.daily_streak + 1 : 1;
-  await db.query("UPDATE users SET last_claim_date=$1, daily_streak=$2, coins=coins+30 WHERE id=$3",
-    [C.todayStr(), streak, u.id]);
+  const claim = await db.query(
+    `UPDATE users SET last_claim_date=$1, daily_streak=$2, coins=coins+30
+      WHERE id=$3 AND (last_claim_date IS NULL OR last_claim_date <> $1)
+      RETURNING id`,
+    [C.todayStr(), streak, u.id]
+  );
+  if (!claim.rowCount) return res.status(400).json({ error: "already_claimed" });
+  const t = list[Math.floor(Math.random() * list.length)];
+  let ins;
+  try {
+    ins = await db.query(
+      "INSERT INTO creature_instances (user_id, template_id) VALUES ($1,$2) RETURNING instance_id, level",
+      [u.id, t.id]
+    );
+  } catch (e) {
+    // Devuelve el reclamo si la criatura no llegó a crearse (el usuario podrá reintentar).
+    await db.query("UPDATE users SET last_claim_date=$1, daily_streak=$2, coins=coins-30 WHERE id=$3",
+      [u.last_claim_date, u.daily_streak, u.id]).catch(() => {});
+    throw e;
+  }
   await bumpMission(u.id, "claims", 1);
   res.json({ instance: { instance_id: ins.rows[0].instance_id, level: ins.rows[0].level, template: t }, streak });
 }));
@@ -294,11 +329,23 @@ app.post("/creature/:id/level-up", authMiddleware, wrap(async (req, res) => {
   if (!inst) return res.status(404).json({ error: "not_found" });
   if (inst.level >= C.LEVEL_MAX) return res.status(400).json({ error: "max_level" });
   const cost = C.levelCost(inst.level);
-  const u = await getUser(req.userId);
-  if (u.dust < cost.dust || u.coins < cost.coins) return res.status(402).json({ error: "insufficient" });
-  await db.query("UPDATE users SET dust=dust-$1, coins=coins-$2 WHERE id=$3", [cost.dust, cost.coins, u.id]);
-  await db.query("UPDATE creature_instances SET level=level+1 WHERE instance_id=$1", [inst.instance_id]);
-  res.json({ level: inst.level + 1, cost });
+  // Cobro atómico: el UPDATE condicional evita saldos negativos con peticiones
+  // concurrentes (antes: leer saldo -> comprobar -> restar, con carrera).
+  const pay = await db.query(
+    "UPDATE users SET dust=dust-$1, coins=coins-$2 WHERE id=$3 AND dust>=$1 AND coins>=$2 RETURNING id",
+    [cost.dust, cost.coins, req.userId]
+  );
+  if (!pay.rowCount) return res.status(402).json({ error: "insufficient" });
+  // Sube solo si sigue por debajo del máximo (carrera entre dos level-up).
+  const up = await db.query(
+    "UPDATE creature_instances SET level=level+1 WHERE instance_id=$1 AND level<$2 RETURNING level",
+    [inst.instance_id, C.LEVEL_MAX]
+  );
+  if (!up.rowCount) { // devolver el cobro si otra petición llegó antes al máximo
+    await db.query("UPDATE users SET dust=dust+$1, coins=coins+$2 WHERE id=$3", [cost.dust, cost.coins, req.userId]);
+    return res.status(400).json({ error: "max_level" });
+  }
+  res.json({ level: up.rows[0].level, cost });
 }));
 
 app.post("/creature/:id/release", authMiddleware, wrap(async (req, res) => {
@@ -309,7 +356,13 @@ app.post("/creature/:id/release", authMiddleware, wrap(async (req, res) => {
   const team = await db.query("SELECT 1 FROM teams WHERE user_id=$1 AND (slot1=$2 OR slot2=$2 OR slot3=$2)", [req.userId, inst.instance_id]);
   if (team.rowCount) return res.status(400).json({ error: "in_team" });
   const dust = C.RELEASE_DUST[inst.rarity] || 5;
-  await db.query("DELETE FROM creature_instances WHERE instance_id=$1", [inst.instance_id]);
+  // El DELETE condicionado a locked=false es la barrera atómica: si dos
+  // peticiones liberan a la vez, solo la que borra la fila cobra el polvo.
+  const del = await db.query(
+    "DELETE FROM creature_instances WHERE instance_id=$1 AND user_id=$2 AND locked=false RETURNING instance_id",
+    [inst.instance_id, req.userId]
+  );
+  if (!del.rowCount) return res.status(400).json({ error: "locked" });
   await db.query("UPDATE users SET dust=dust+$1 WHERE id=$2", [dust, req.userId]);
   res.json({ dust });
 }));
@@ -338,11 +391,14 @@ app.put("/team", authMiddleware, wrap(async (req, res) => {
   const snapshot = own.rows
     .filter((x) => ordered.includes(x.instance_id))
     .map((x) => ({ template_id: x.template_id, level: x.level }));
+  // avg_level materializado: el matchmaking de /battle/find filtra por esta
+  // columna indexada en vez de calcular avg() sobre el JSONB de TODOS los equipos.
+  const avgLevel = snapshot.length ? snapshot.reduce((a, s) => a + s.level, 0) / snapshot.length : null;
   await db.query(
-    `INSERT INTO teams (user_id, slot1, slot2, slot3, snapshot, updated_at)
-     VALUES ($1,$2,$3,$4,$5, now())
-     ON CONFLICT (user_id) DO UPDATE SET slot1=$2, slot2=$3, slot3=$4, snapshot=$5, updated_at=now()`,
-    [req.userId, ordered[0] || null, ordered[1] || null, ordered[2] || null, JSON.stringify(snapshot)]
+    `INSERT INTO teams (user_id, slot1, slot2, slot3, snapshot, avg_level, updated_at)
+     VALUES ($1,$2,$3,$4,$5,$6, now())
+     ON CONFLICT (user_id) DO UPDATE SET slot1=$2, slot2=$3, slot3=$4, snapshot=$5, avg_level=$6, updated_at=now()`,
+    [req.userId, ordered[0] || null, ordered[1] || null, ordered[2] || null, JSON.stringify(snapshot), avgLevel]
   );
   res.json({ slots: ordered });
 }));
@@ -388,10 +444,13 @@ app.post("/battle/find", authMiddleware, wrap(async (req, res) => {
   // al nivel del atacante -> combate siempre justo).
   let B = [];
   let defenderId = null;
+  // COALESCE: equipos guardados antes de existir avg_level siguen siendo
+  // candidatos (se calcula al vuelo solo para ellos hasta que re-guarden).
   const rival = await db.query(
     `WITH cand AS (
        SELECT t.user_id, t.snapshot, u.league_points,
-              (SELECT avg((e->>'level')::numeric) FROM jsonb_array_elements(t.snapshot) e) AS lvl
+              COALESCE(t.avg_level,
+                       (SELECT avg((e->>'level')::numeric) FROM jsonb_array_elements(t.snapshot) e)) AS lvl
          FROM teams t JOIN users u ON u.id = t.user_id
         WHERE t.user_id <> $1 AND t.snapshot IS NOT NULL AND jsonb_array_length(t.snapshot) > 0
      )
@@ -438,16 +497,19 @@ app.post("/battle/resolve", authMiddleware, wrap(async (req, res) => {
       overcharge: !!d.overcharge,
     }));
 
+  let u = await getUser(req.userId);
+  u = await syncEnergy(u);
+  if (u.energy < 1) return res.status(402).json({ error: "no_energy" });
+
+  // Consume la oferta ANTES de resolver y pagar: el UPDATE condicional es la
+  // barrera atómica (dos /resolve concurrentes con el mismo battleId -> solo
+  // uno cobra). Antes se marcaba consumida después, con carrera explotable.
   const off = await db.query(
-    "SELECT * FROM battle_offers WHERE id=$1 AND attacker_id=$2 AND consumed=false",
+    "UPDATE battle_offers SET consumed=true WHERE id=$1 AND attacker_id=$2 AND consumed=false RETURNING *",
     [battleId, req.userId]
   );
   if (!off.rowCount) return res.status(404).json({ error: "offer_not_found" });
   const offer = off.rows[0];
-
-  let u = await getUser(req.userId);
-  u = await syncEnergy(u);
-  if (u.energy < 1) return res.status(402).json({ error: "no_energy" });
 
   // Reconstruye AMBOS equipos desde la oferta congelada (igual que vio el cliente).
   const frozen = offer.opponent; // { team:[...], opponent:[...] }
@@ -457,9 +519,6 @@ app.post("/battle/resolve", authMiddleware, wrap(async (req, res) => {
   const result = combat.resolveBattle(A, B, offer.seed | 0, safeDecisions);
   const win = result.winner === "A";
   const abilitiesUsed = result.log.filter((e) => e.ability && e.uid[0] === "A").length;
-
-  // Marca la oferta consumida (atómico: una oferta = un combate).
-  await db.query("UPDATE battle_offers SET consumed=true WHERE id=$1", [battleId]);
 
   const award = await awardBattleResult({ user: u, win, abilitiesUsed, defenderId: offer.defender_id, seed: offer.seed | 0 });
 
@@ -473,14 +532,22 @@ app.post("/battle/resolve", authMiddleware, wrap(async (req, res) => {
 async function awardBattleResult({ user, win, abilitiesUsed = 0, defenderId = null, seed = 0 }) {
   const coins = win ? 40 : 8;
   const lpDelta = win ? 12 : -6;
-  const newLp = Math.max(0, user.league_points + lpDelta);
-  const league = C.computeLeague(newLp);
-  const newEnergy = Math.max(0, user.energy - 1);
-  const energyAt = newEnergy < C.ENERGY_MAX ? new Date() : user.energy_updated_at;
-  await db.query(
-    "UPDATE users SET energy=$1, energy_updated_at=$2, coins=coins+$3, league_points=$4, league=$5 WHERE id=$6",
-    [newEnergy, energyAt, coins, newLp, league, user.id]
+  // Deltas atómicos en SQL (no valores absolutos leídos antes): dos combates
+  // concurrentes del mismo usuario no se pisan ni duplican recompensas.
+  const upd = await db.query(
+    `UPDATE users SET
+       coins = coins + $1,
+       league_points = GREATEST(league_points + $2, 0),
+       energy_updated_at = CASE WHEN GREATEST(energy - 1, 0) < $3 THEN now() ELSE energy_updated_at END,
+       energy = GREATEST(energy - 1, 0)
+     WHERE id = $4
+     RETURNING energy, league_points`,
+    [coins, lpDelta, C.ENERGY_MAX, user.id]
   );
+  const newEnergy = upd.rows[0].energy;
+  const newLp = upd.rows[0].league_points;
+  const league = C.computeLeague(newLp);
+  await db.query("UPDATE users SET league=$1 WHERE id=$2", [league, user.id]);
   await db.query("INSERT INTO battles (attacker_id, defender_id, seed, result, daily_date) VALUES ($1,$2,$3,$4,$5)",
     [user.id, defenderId, seed | 0, win ? "WIN" : "LOSS", C.todayStr()]);
   if (win) {
@@ -512,17 +579,35 @@ app.get("/rankings/league", authMiddleware, wrap(async (req, res) => {
 
 // ----------------------------------- SHOP ------------------------------------
 app.post("/shop/roll", authMiddleware, wrap(async (req, res) => {
-  let u = await getUser(req.userId);
-  if (!u.rolls_date || C.todayStr(new Date(u.rolls_date)) !== C.todayStr()) {
-    await db.query("UPDATE users SET rolls_today=0, rolls_date=$1 WHERE id=$2", [C.todayStr(), u.id]);
-    u.rolls_today = 0;
+  const today = C.todayStr();
+  const u = await getUser(req.userId);
+  if (!u.rolls_date || C.todayStr(new Date(u.rolls_date)) !== today) {
+    // Reset diario (idempotente: ejecutarlo dos veces no hace daño).
+    await db.query("UPDATE users SET rolls_today=0, rolls_date=$1 WHERE id=$2", [today, u.id]);
   }
-  if (u.rolls_today >= 10) return res.status(429).json({ error: "daily_cap" });
-  if (u.coins < 100) return res.status(402).json({ error: "insufficient" });
+  // Cobro + contador ATÓMICOS antes de crear la criatura: con peticiones
+  // concurrentes no se supera el techo de 10/día ni el saldo queda negativo.
+  const pay = await db.query(
+    `UPDATE users SET coins=coins-100, rolls_today=rolls_today+1
+      WHERE id=$1 AND rolls_date=$2 AND rolls_today<10 AND coins>=100
+      RETURNING rolls_today`,
+    [u.id, today]
+  );
+  if (!pay.rowCount) {
+    const now = await getUser(req.userId);
+    if (now.rolls_today >= 10) return res.status(429).json({ error: "daily_cap" });
+    return res.status(402).json({ error: "insufficient" });
+  }
   const list = await todayTemplates();
   const t = list[Math.floor(Math.random() * list.length)];
-  const ins = await db.query("INSERT INTO creature_instances (user_id, template_id) VALUES ($1,$2) RETURNING instance_id", [u.id, t.id]);
-  await db.query("UPDATE users SET coins=coins-100, rolls_today=rolls_today+1 WHERE id=$1", [u.id]);
+  let ins;
+  try {
+    ins = await db.query("INSERT INTO creature_instances (user_id, template_id) VALUES ($1,$2) RETURNING instance_id", [u.id, t.id]);
+  } catch (e) {
+    // Reembolsa si la criatura no llegó a crearse.
+    await db.query("UPDATE users SET coins=coins+100, rolls_today=GREATEST(rolls_today-1,0) WHERE id=$1", [u.id]).catch(() => {});
+    throw e;
+  }
   res.json({ instance_id: ins.rows[0].instance_id, template: t });
 }));
 
@@ -597,9 +682,13 @@ app.get("/health", wrap(async (req, res) => {
 
 // --------------------------- manejo de errores -------------------------------
 app.use((req, res) => res.status(404).json({ error: "not_found" }));
+// Aridad 4 obligatoria: así detecta Express que es el manejador de errores.
 app.use((err, req, res, next) => {
-  console.error("[error]", err.message);
-  res.status(500).json({ error: "server_error" });
+  // Stack completo + ruta en el log (depurable); al cliente solo un id opaco
+  // para correlacionar reportes con el log sin filtrar detalles internos.
+  const errorId = Math.random().toString(36).slice(2, 10);
+  console.error(`[error ${errorId}] ${req.method} ${req.originalUrl}\n${err.stack || err.message}`);
+  res.status(500).json({ error: "server_error", errorId });
 });
 
 // --------------------------------- arranque ----------------------------------

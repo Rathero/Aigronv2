@@ -71,8 +71,14 @@ CREATE TABLE IF NOT EXISTS teams (
   slot2      UUID REFERENCES creature_instances(instance_id) ON DELETE SET NULL,
   slot3      UUID REFERENCES creature_instances(instance_id) ON DELETE SET NULL,
   snapshot   JSONB,
+  avg_level  NUMERIC,   -- nivel medio del snapshot, materializado para el matchmaking
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+-- Migración para BD existentes: materializa avg_level (lo mantiene PUT /team).
+ALTER TABLE teams ADD COLUMN IF NOT EXISTS avg_level NUMERIC;
+UPDATE teams SET avg_level = (SELECT avg((e->>'level')::numeric) FROM jsonb_array_elements(snapshot) e)
+ WHERE avg_level IS NULL AND snapshot IS NOT NULL AND jsonb_array_length(snapshot) > 0;
+CREATE INDEX IF NOT EXISTS idx_teams_avg_level ON teams(avg_level);
 
 CREATE TABLE IF NOT EXISTS battles (
   id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -84,6 +90,7 @@ CREATE TABLE IF NOT EXISTS battles (
   created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_battles_daily ON battles(daily_date, attacker_id);
+CREATE INDEX IF NOT EXISTS idx_battles_attacker ON battles(attacker_id, daily_date);
 
 CREATE TABLE IF NOT EXISTS daily_scores (
   daily_date DATE NOT NULL,
@@ -91,6 +98,10 @@ CREATE TABLE IF NOT EXISTS daily_scores (
   wins       INT  NOT NULL DEFAULT 0,
   PRIMARY KEY (daily_date, user_id)
 );
+-- Ranking diario: top por victorias sin ordenar toda la tabla.
+CREATE INDEX IF NOT EXISTS idx_daily_scores_top ON daily_scores(daily_date, wins DESC);
+-- Ranking de liga: top por puntos sin escanear users completa.
+CREATE INDEX IF NOT EXISTS idx_users_league_points ON users(league_points DESC);
 
 -- Oferta de combate pendiente: el servidor decide el rival en /battle/find y lo
 -- "congela" aquí (snapshot + seed) para recalcular de forma segura en /resolve.

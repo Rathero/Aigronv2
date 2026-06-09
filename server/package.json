@@ -12,6 +12,7 @@
     "migrate": "node scripts/migrate.js",
     "generate": "node scripts/generate-today.js",
     "test": "node --test",
+    "lint": "cd .. && eslint server/src server/scripts server/test web",
     "db:up": "docker compose up -d",
     "db:down": "docker compose down"
   },
@@ -27,6 +28,13 @@
     "ws": "^8.21.0"
   },
   "optionalDependencies": {
-    "openai": "^4.56.0"
+    "openai": "^4.56.0",
+    "rate-limit-redis": "^4.3.1",
+    "redis": "^6.0.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.4.1",
+    "globals": "^17.6.0"
   }
 }
