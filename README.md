@@ -223,10 +223,10 @@ Todas requieren `Authorization: Bearer <token>` salvo `/auth/login`.
 | GET/PUT | `/team` | Lee / guarda el equipo de 3 (genera `snapshot`) |
 | POST | `/battle/find` | Empareja rival (snapshot PvP o bot); body opcional `{captain, stance}` (capitán+estancia, horneados); congela la oferta → `{battleId, seed, opponent, team, pvp}` |
 | POST | `/battle/resolve` | Recalcula combate con `{battleId, decisions}` y paga recompensas (gasta 1⚡, oferta de un solo uso) |
-| GET  | `/rankings/daily` | Top del día por victorias (lote compartido) |
-| GET  | `/rankings/league` | Top por puntos de liga |
+| GET  | `/rankings/daily` | Top del día por victorias → `{rows, me}` (tu posición aunque no estés en el top) |
+| GET  | `/rankings/league` | Top global por puntos de liga → `{rows, me}` |
 | POST | `/shop/roll` | Tirada extra (100🪙, techo 10/día) |
-| POST | `/shop/purchase` | Compra de gemas/pase/energía (valida recibo en prod; stub con `ALLOW_STUB_PURCHASES`) |
+| POST | `/shop/purchase` | Gemas/pase: recibo real (stub con `ALLOW_STUB_PURCHASES`). `energy_refill` se paga con 20💎 (virtual, sin recibo) |
 | GET  | `/missions` · POST `/missions/claim` | Misiones diarias server-side y reclamo de recompensa |
 | POST | `/fusion` | Fusiona 2 instancias → criatura nueva (caché por par, doc §3.7) |
 | POST | `/dungeon/start` · GET `/dungeon` | Mazmorra del día (roguelike): inicia/reanuda y consulta la run |

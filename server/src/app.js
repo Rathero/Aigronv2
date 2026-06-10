@@ -132,6 +132,9 @@ function userPublic(u) {
       : null,
     league: u.league, leaguePoints: u.league_points,
     streak: u.daily_streak,
+    // Tiradas de tienda de HOY (techo diario): el cliente muestra cuántas quedan.
+    rollsToday: u.rolls_date && C.todayStr(new Date(u.rolls_date)) === C.todayStr() ? u.rolls_today : 0,
+    rollsMax: 10,
     claimedToday: !!(u.last_claim_date && C.todayStr(new Date(u.last_claim_date)) === C.todayStr()),
   };
 }
@@ -324,6 +327,7 @@ app.get("/collection", authMiddleware, wrap(async (req, res) => {
     const b = tplBaseStats(x);
     return {
       instance_id: x.instance_id, level: x.level, favorite: x.favorite, locked: x.locked,
+      obtained_at: x.obtained_at, // para el badge NUEVO (obtenido hoy) del cliente
       template: {
         id: x.template_id, name: x.name, type: x.type, types: tplTypes(x), rarity: x.rarity, ability: x.ability_id,
         lore: x.lore, art_seed: x.art_seed, image_url: x.image_url, image_thumb_url: x.image_thumb_url,
@@ -575,6 +579,8 @@ async function awardBattleResult({ user, win, abilitiesUsed = 0, defenderId = nu
 }
 
 // --------------------------------- RANKINGS ----------------------------------
+// Ambos rankings devuelven { rows, me }: `me` trae tu posición real aunque no
+// estés en el top 50 (el cliente la ancla abajo — es lo que el jugador busca).
 app.get("/rankings/daily", authMiddleware, wrap(async (req, res) => {
   const r = await db.query(
     `SELECT u.display_name AS name, ds.wins, ds.user_id
@@ -582,11 +588,27 @@ app.get("/rankings/daily", authMiddleware, wrap(async (req, res) => {
       WHERE ds.daily_date=$1 ORDER BY ds.wins DESC LIMIT 50`,
     [C.todayStr()]
   );
-  res.json(r.rows.map((x, i) => ({ pos: i + 1, name: x.name, score: x.wins, me: x.user_id === req.userId })));
+  const rows = r.rows.map((x, i) => ({ pos: i + 1, name: x.name, score: x.wins, me: x.user_id === req.userId }));
+  let me = rows.find((x) => x.me) || null;
+  if (!me) {
+    const mine = await db.query("SELECT wins FROM daily_scores WHERE daily_date=$1 AND user_id=$2", [C.todayStr(), req.userId]);
+    if (mine.rowCount) {
+      const pos = await db.query("SELECT COUNT(*)::int AS n FROM daily_scores WHERE daily_date=$1 AND wins > $2", [C.todayStr(), mine.rows[0].wins]);
+      me = { pos: pos.rows[0].n + 1, score: mine.rows[0].wins };
+    }
+  }
+  res.json({ rows, me });
 }));
 app.get("/rankings/league", authMiddleware, wrap(async (req, res) => {
   const r = await db.query("SELECT id, display_name AS name, league, league_points FROM users ORDER BY league_points DESC LIMIT 50");
-  res.json(r.rows.map((x, i) => ({ pos: i + 1, name: x.name, league: x.league, score: x.league_points, me: x.id === req.userId })));
+  const rows = r.rows.map((x, i) => ({ pos: i + 1, name: x.name, league: x.league, score: x.league_points, me: x.id === req.userId }));
+  let me = rows.find((x) => x.me) || null;
+  if (!me) {
+    const u = await getUser(req.userId);
+    const pos = await db.query("SELECT COUNT(*)::int AS n FROM users WHERE league_points > $1", [u.league_points]);
+    me = { pos: pos.rows[0].n + 1, score: u.league_points, league: u.league };
+  }
+  res.json({ rows, me });
 }));
 
 // ----------------------------------- SHOP ------------------------------------
@@ -623,18 +645,32 @@ app.post("/shop/roll", authMiddleware, wrap(async (req, res) => {
   res.json({ instance_id: ins.rows[0].instance_id, template: t });
 }));
 
-// Compra de gemas / cosméticos. En producción valida el recibo de tienda
-// (App Store / Google Play) antes de conceder. Aquí: stub controlado por env.
+// Compra de gemas / pase (dinero real): en producción valida el recibo de
+// tienda (App Store / Google Play) antes de conceder; aquí stub por env.
+// La recarga de energía se paga con GEMAS (moneda virtual, sin recibo): es el
+// primer uso real de las gemas dentro del juego.
+const GEMS_ENERGY_REFILL = 20;
 app.post("/shop/purchase", authMiddleware, wrap(async (req, res) => {
   const { sku } = req.body || {};
-  const CATALOG = { gems_small: { gems: 50 }, pass: { gems: 20, pass: true }, energy_refill: { energy: C.ENERGY_MAX } };
+  if (sku === "energy_refill") {
+    // Cobro atómico en gemas (sin carrera: el UPDATE condicional es la barrera).
+    const r = await db.query(
+      "UPDATE users SET gems=gems-$1, energy=$2, energy_updated_at=now() WHERE id=$3 AND gems>=$1 AND energy<$2 RETURNING id",
+      [GEMS_ENERGY_REFILL, C.ENERGY_MAX, req.userId]
+    );
+    if (!r.rowCount) {
+      const u0 = await getUser(req.userId);
+      return res.status(402).json({ error: u0.energy >= C.ENERGY_MAX ? "energy_full" : "insufficient_gems" });
+    }
+    return res.json(userPublic(await getUser(req.userId)));
+  }
+  const CATALOG = { gems_small: { gems: 50 }, pass: { gems: 20, pass: true } };
   const item = CATALOG[sku];
   if (!item) return res.status(400).json({ error: "bad_sku" });
   if (process.env.ALLOW_STUB_PURCHASES !== "true") {
     return res.status(501).json({ error: "receipt_validation_required" });
   }
   if (item.gems) await db.query("UPDATE users SET gems=gems+$1 WHERE id=$2", [item.gems, req.userId]);
-  if (item.energy) await db.query("UPDATE users SET energy=$1, energy_updated_at=now() WHERE id=$2", [item.energy, req.userId]);
   const u = await getUser(req.userId);
   res.json(userPublic(u));
 }));

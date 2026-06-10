@@ -367,20 +367,36 @@ async function claimMission(key){
 }
 
 /* ====================== COLECCIÓN ====================== */
-let collFilter="TODOS";
+let collFilter="TODOS", collSort="RECIENTE";
+const RARITY_ORDER={LEGENDARIA:0,EPICA:1,RARA:2,COMUN:3};
+const isNewToday=(i)=>i.obtained_at&&new Date(i.obtained_at).toDateString()===new Date().toDateString();
 async function renderCollection(){
   refreshChips();
   const fl=["TODOS","COMUN","RARA","EPICA","LEGENDARIA"];
+  // Contador por rareza en cada filtro: comunica cuánto tienes de cada tipo.
+  const counts={}; S.collection.forEach(i=>{counts[i.template.rarity]=(counts[i.template.rarity]||0)+1;});
+  const fLabel=f=>f==="TODOS"?`TODOS · ${S.collection.length}`:`${f} · ${counts[f]||0}`;
   let items=S.collection.slice();
   if(collFilter!=="TODOS")items=items.filter(i=>i.template.rarity===collFilter);
+  // Ordenación: RECIENTE (orden del servidor), NIVEL desc, RAREZA (leg→común, luego nivel).
+  if(collSort==="NIVEL")items.sort((a,b)=>b.level-a.level);
+  else if(collSort==="RAREZA")items.sort((a,b)=>(RARITY_ORDER[a.template.rarity]-RARITY_ORDER[b.template.rarity])||(b.level-a.level));
+  const sorts=["RECIENTE","NIVEL","RAREZA"];
+  // Badges de contexto: EQ (está en tu equipo) y NUEVO (obtenido hoy).
+  const extraFor=(i)=>{const tags=[];
+    if(S.team.includes(i.instance_id))tags.push('<div class="tag-eq">EQ</div>');
+    if(isNewToday(i))tags.push('<div class="tag-new">NUEVO</div>');
+    return tags.join("");};
   $("#s-collection").innerHTML=`
     <h2 class="title">COLECCIÓN <small>${S.collection.length} aigrons</small></h2>
-    <div class="filters">${fl.map(f=>`<span class="f ${f===collFilter?'on':''}" data-act="setFilter" data-arg="${f}">${f}</span>`).join("")}</div>
-    ${items.length?`<div class="grid">${items.map(i=>cardHTML(i)).join("")}</div>`:'<div class="dim tc" style="padding:30px">Nada aquí todavía.</div>'}`;
+    <div class="filters">${fl.map(f=>`<span class="f ${f===collFilter?'on':''}" data-act="setFilter" data-arg="${f}">${fLabel(f)}</span>`).join("")}</div>
+    <div class="filters" style="margin-top:-4px">${sorts.map(s=>`<span class="f sortf ${s===collSort?'on':''}" data-act="setSort" data-arg="${s}">${s==='RECIENTE'?'🕐':s==='NIVEL'?'⬆':'★'} ${s}</span>`).join("")}</div>
+    ${items.length?`<div class="grid">${items.map(i=>cardHTML(i,extraFor(i))).join("")}</div>`:'<div class="dim tc" style="padding:30px">Nada aquí todavía.</div>'}`;
   renderCanvases($("#s-collection"));
   $("#s-collection").querySelectorAll(".card").forEach(c=>c.onclick=()=>openDetail(c.dataset.iid));
 }
 function setFilter(f){collFilter=f;renderCollection();}
+function setSort(s){collSort=s;renderCollection();}
 function openDetail(iid){
   const inst=instById(iid);if(!inst)return;const t=inst.template;
   const cost={dust:10*inst.level,coins:50*inst.level};
@@ -388,6 +404,19 @@ function openDetail(iid){
   const stats=t.stats||t.base_stats;
   const atMax=inst.level>=ENGINE.LEVEL_MAX;
   const canLevel=S.user.dust>=cost.dust&&S.user.coins>=cost.coins&&!atMax;
+  // Qué GANAS al subir de nivel (antes de pagar): deltas de stats escalados.
+  let gainTxt='';
+  if(!atMax){
+    const b=t.base_stats, sc=l=>k=>ENGINE.scaled(b[k],l);
+    const now=sc(inst.level), next=sc(inst.level+1);
+    const dHp=next('hp')-now('hp'), dAtk=Math.max(next('atkP')-now('atkP'),next('atkS')-now('atkS')), dSpd=next('spd')-now('spd');
+    gainTxt=`<div class="dim" style="font-size:11px;margin-top:4px">Al subir: <b style="color:var(--green)">+${dHp} HP</b> · <b style="color:var(--green)">+${dAtk} ATQ</b> · <b style="color:var(--green)">+${dSpd} SPD</b></div>`;
+  }
+  // Si no alcanza, di POR QUÉ (qué falta) en vez de solo apagar el botón.
+  const missing=[];
+  if(!atMax&&S.user.dust<cost.dust)missing.push(`${cost.dust-S.user.dust}✨`);
+  if(!atMax&&S.user.coins<cost.coins)missing.push(`${cost.coins-S.user.coins}🪙`);
+  const releaseDust=ENGINE.RELEASE_DUST[t.rarity]||5;
   openOverlay(`<div class="center">
     ${artTag(t,9)}
     <div style="font-size:20px;font-weight:700;margin-top:4px">${t.name} <span class="dim" style="font-size:13px">Nv.${inst.level}</span></div>
@@ -398,15 +427,17 @@ function openDetail(iid){
       <div style="font-weight:700;color:var(--gold);font-size:14px">✨ ${ABILITIES[t.ability].name}
         <span class="dim" style="font-size:11px;font-weight:400">· ⚡${ABILITIES[t.ability].cost} · ${abilityKind(t.ability)}</span></div>
       <div style="font-size:13px;margin-top:5px;line-height:1.45">${abilityEffect(t.ability)}</div>
+      ${t.lore?`<div class="dim" style="font-size:12px;margin-top:7px;font-style:italic;border-top:1px solid var(--line);padding-top:6px">"${t.lore}"</div>`:''}
     </div>
-    <div class="row mb8">
-      <button class="btn sm" style="flex:1" data-act="levelUp" data-arg="${iid}" ${canLevel?'':'disabled'}>${atMax?`NIVEL MÁX (${ENGINE.LEVEL_MAX})`:`SUBIR NV (${cost.dust}✨ ${cost.coins}🪙)`}</button>
+    <div class="mb8">
+      <button class="btn sm" style="width:100%" data-act="levelUp" data-arg="${iid}" ${canLevel?'':'disabled'}>${atMax?`NIVEL MÁX (${ENGINE.LEVEL_MAX})`:`SUBIR NV (${cost.dust}✨ ${cost.coins}🪙)`}</button>
+      ${missing.length?`<div style="font-size:11px;color:var(--red);margin-top:4px">Te faltan ${missing.join(' y ')}</div>`:gainTxt}
     </div>
     <div class="row mb8">
       <button class="btn sm ghost" style="flex:1" data-act="toggleFav" data-arg="${iid}">${inst.favorite?'★ Favorito':'☆ Favorito'}</button>
-      <button class="btn sm ghost" style="flex:1" data-act="release" data-arg="${iid}" ${(inst.locked||inTeam)?'disabled':''}>LIBERAR ✨</button>
+      <button class="btn sm ghost" style="flex:1" data-act="release" data-arg="${iid}" ${(inst.locked||inTeam)?'disabled':''}>LIBERAR +${releaseDust}✨</button>
     </div>
-    <button class="btn sm mag" style="width:100%" data-act="fusionPick" data-arg="${iid}" ${(inst.locked||inTeam)?'disabled':''}>FUSIONAR 🧬</button>
+    <button class="btn sm gold" style="width:100%" data-act="fusionPick" data-arg="${iid}" ${(inst.locked||inTeam)?'disabled':''}>FUSIONAR 🧬</button>
     <button class="btn sm ghost mt8" style="width:100%" data-act="close">CERRAR</button>
   </div>`);
 }
@@ -489,14 +520,22 @@ function renderTeamPicker(){
     `<div class="card" style="border-style:dashed;opacity:.45;display:flex;align-items:center;justify-content:center;min-height:96px"><span class="dim" style="font-size:11px">vacío</span></div>`).join("");
   const selGrid=selected.map(teamPickCard).join("")+empties;
   const restGrid=rest.length?rest.map(teamPickCard).join(""):`<div class="dim tc" style="grid-column:1/-1;padding:16px">No tienes más aigrons.</div>`;
+  // Feedback en vivo mientras eliges: PODER total + tipos cubiertos (sinergia).
+  const power=teamPower(selected);
+  const types=[...new Set(selected.flatMap(i=>(i.template.types||[i.template.type])))];
+  const liveInfo=selected.length?`<div class="dim" style="font-size:11px;margin-top:3px">PODER <b style="color:var(--cyan)">${power}</b> · tipos: ${types.map(ty=>`<span class="type-pill" style="font-size:9px;padding:1px 4px">${ty}</span>`).join(' ')}</div>`:'';
+  // Bug: el modal se re-renderiza entero en cada toque y el scroll de la lista
+  // saltaba al principio. Se preserva y restaura el scrollTop.
+  const prevScroll=($("#restgrid")||{}).scrollTop||0;
   openOverlay(`<div>
     <div class="center mb8"><b>Tu equipo ${selected.length}/3</b>
-      <div class="dim" style="font-size:11px">toca un elegido para quitarlo</div></div>
+      <div class="dim" style="font-size:11px">toca un elegido para quitarlo</div>${liveInfo}</div>
     <div class="grid">${selGrid}</div>
     <div class="center" style="margin:12px 0 6px"><b style="font-size:13px">Cambiar / añadir</b>
       <div class="dim" style="font-size:11px">toca uno para meterlo al equipo</div></div>
     <div class="grid" id="restgrid" style="max-height:34vh;overflow-y:auto">${restGrid}</div>
     <button class="btn mt8" data-act="saveTeam">GUARDAR EQUIPO</button></div>`);
+  const rg=$("#restgrid"); if(rg)rg.scrollTop=prevScroll;
   $("#modal").querySelectorAll(".card[data-iid]").forEach(c=>c.onclick=()=>{
     const iid=c.dataset.iid;const k=teamSel.indexOf(iid);
     if(k>=0)teamSel.splice(k,1);else if(teamSel.length<3)teamSel.push(iid);else{toast("Máx 3");return;}
@@ -674,9 +713,11 @@ function prepBattle(){
   renderPrep(team);
 }
 function renderPrep(team){
+  // La habilidad de cada candidato a capitán, para elegir con criterio.
   const capCards=team.map(i=>`<div class="card r-${i.template.rarity}" data-cap="${i.instance_id}" style="${prep.captain===i.instance_id?'outline:3px solid var(--gold);outline-offset:-3px':''}">
      ${prep.captain===i.instance_id?'<div class="badge" style="background:var(--gold);color:#000">★CAP</div>':''}
-     <div class="lv">L${i.level}</div>${artTag(i.template,6)}<div class="nm">${i.template.name}</div></div>`).join("");
+     <div class="lv">L${i.level}</div>${artTag(i.template,6)}<div class="nm">${i.template.name}</div>
+     <div class="ty" style="color:var(--gold);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">✨ ${ABILITIES[i.template.ability].name}</div></div>`).join("");
   const st=(k,l,d)=>`<div class="stance ${prep.stance===k?'on':''}" data-stance="${k}"><b>${l}</b><div class="dim" style="font-size:10px">${d}</div></div>`;
   openOverlay(`<div>
     <div class="center mb8"><b>Prepara el combate</b></div>
@@ -1043,15 +1084,18 @@ function fleeDungeon(){
 let D=null;
 function relicChip(id){ const r=ENGINE.RELICS[id]; return r?`<div class="dg-relic" title="${r.name}: ${r.desc}">${r.emoji}</div>`:''; }
 function dgHeader(){
-  const pips=[]; for(let i=0;i<D.totalDepth;i++){ const boss=i===D.totalDepth-1; pips.push(`<span class="dg-pip ${i<D.depth?'done':''} ${boss?'boss':''}"></span>`); }
+  // Pips junto al título (no perdidos a la derecha): hechos = cian, actual
+  // brillando, jefe con borde dorado.
+  const pips=[]; for(let i=0;i<D.totalDepth;i++){ const boss=i===D.totalDepth-1;
+    pips.push(`<span class="dg-pip ${i<D.depth?'done':''} ${i===D.depth&&D.status==='active'?'cur':''} ${boss?'boss':''}"></span>`); }
   const team=D.team.map(m=>`<div class="dg-mem ${m.dead?'dead':''}">
      ${artTag(tpl(m.tplId),5)}
      <div class="hpbar"><i style="width:${m.dead?0:Math.round(m.hp/m.hpMax*100)}%;background:${m.hp/m.hpMax<0.3?'var(--red)':m.hp/m.hpMax<0.6?'var(--gold)':'var(--green)'}"></i></div>
      <div style="font-size:10px">${m.dead?'☠️':m.hp+'/'+m.hpMax}</div></div>`).join("");
   return `<div class="dg-bar"><b>Nodo ${Math.min(D.depth+1,D.totalDepth)}/${D.totalDepth}</b>
-       <span class="dim">·</span><span style="color:var(--epi)">${D.diffLabel||''} · enemigos nv${D.diffLevel||'?'}</span>
-       <span class="dim">·</span><span style="color:var(--gold)">🪙 ${D.coins}</span>
-       <span style="margin-left:auto;display:flex;gap:3px">${pips.join("")}</span></div>
+       <span style="display:flex;gap:4px">${pips.join("")}</span>
+       <span style="margin-left:auto;color:var(--epi)">${D.diffLabel||''} nv${D.diffLevel||'?'}</span>
+       <span class="dim" style="font-size:11px">botín: <b style="color:var(--gold)">${D.coins}</b>🪙</span></div>
      <div class="dg-team">${team}</div>
      <div class="dg-relics">${D.relics.length?D.relics.map(relicChip).join(""):'<span class="dim" style="font-size:12px">Sin reliquias aún</span>'}</div>`;
 }
@@ -1082,10 +1126,22 @@ async function renderDungeon(){
   }
   let body='';
   if(D.stage==='choosing'){
+    // Preview determinista del enemigo en nodos de combate (mismo motor y
+    // semilla que usará el servidor): elegir camino con información.
+    const preview=(kind)=>{
+      try{
+        const tpls=(S.daily&&S.daily.batch)||[];
+        if(!tpls.length||D.seed==null)return '';
+        const en=E.dungeonEnemyTeam(D.seed,D.depth,kind,tpls,D.diffLevel||1);
+        return `<div style="font-size:11px;margin-top:3px">${en.map(u=>{const t=tpl(u.tplId)||{};
+          return `<span class="rar-txt ${t.rarity||'COMUN'}">${u.name}</span> <span class="dim">nv${u.level}</span>`;}).join(' · ')}</div>`;
+      }catch(e){return '';}
+    };
     body=`<div class="dim mb8" style="font-size:13px">Elige tu camino:</div>`+
       D.options.map((o,i)=>{const n=NODE_INFO[o.type]||{ic:'?',t:o.type,d:''};
+        const pv=(o.type==='COMBATE'||o.type==='ELITE'||o.type==='JEFE')?preview(o.type):'';
         return `<div class="node-opt ${o.type}" data-act="dgChoose" data-arg="${i}">
-          <span class="ni2">${n.ic}</span><div><b>${n.t}</b><div class="dim" style="font-size:12px">${n.d}</div></div></div>`;}).join("");
+          <span class="ni2">${n.ic}</span><div style="min-width:0"><b>${n.t}</b><div class="dim" style="font-size:12px">${n.d}</div>${pv}</div></div>`;}).join("");
   } else if(D.stage==='draft'){
     body=`<div class="dim mb8" style="font-size:13px">¡Nodo superado! Elige una reliquia:</div>`+
       D.draft.map((r,i)=>`<div class="relic-card" data-act="dgDraft" data-arg="${i}">
@@ -1108,12 +1164,28 @@ async function renderDungeon(){
 }
 const DG_ORDER=['FACIL','NORMAL','DIFICIL','EXPERTO','PESADILLA'];
 let dgDiff='NORMAL';
+// Nivel medio del equipo (o de tus 3 primeros aigrons, igual que hace el servidor).
+function myTeamLevel(){
+  let team=S.team.map(instById).filter(Boolean);
+  if(!team.length)team=S.collection.slice(0,3);
+  return team.length?Math.round(team.reduce((a,i)=>a+i.level,0)/team.length):1;
+}
 function difficultyPicker(){
-  const cards=DG_ORDER.map(id=>{const d=ENGINE.DUNGEON_DIFFICULTIES[id];
-    return `<div class="relic-card" style="align-items:center">
-      <div style="flex:1"><b>${d.label}</b><div class="dim" style="font-size:11px">Enemigos nv${d.level} · recompensa ×${d.coinMult}</div></div>
-      <button class="btn sm" data-act="dgStart" data-arg="${id}">JUGAR</button></div>`;}).join("");
-  return `<div class="panel"><b style="font-size:13px">Elige dificultad</b><div class="mt8">${cards}</div></div>`;
+  // Recomendación: la dificultad cuyo nivel enemigo queda más cerca del tuyo
+  // (sin pasarse mucho). Hoy nada te dice cuál es razonable para tu equipo.
+  const lvl=myTeamLevel();
+  let recId=DG_ORDER[0],best=Infinity;
+  DG_ORDER.forEach(id=>{const d=ENGINE.DUNGEON_DIFFICULTIES[id];
+    const dist=Math.abs(d.level-lvl)+(d.level>lvl+6?8:0); // penaliza pasarse mucho
+    if(dist<best){best=dist;recId=id;}});
+  const cards=DG_ORDER.map(id=>{const d=ENGINE.DUNGEON_DIFFICULTIES[id];const rec=id===recId;
+    return `<div class="relic-card" style="align-items:center;${rec?'border-color:var(--cyan);box-shadow:0 0 8px rgba(52,245,228,.3)':''}">
+      <div style="flex:1"><b>${d.label}</b>${rec?' <span style="color:var(--cyan);font-size:10px;font-weight:700">✓ PARA TU EQUIPO</span>':''}
+        <div class="dim" style="font-size:11px">Enemigos nv${d.level} · recompensa ×${d.coinMult}</div></div>
+      <button class="btn sm ${rec?'':'ghost'}" data-act="dgStart" data-arg="${id}">JUGAR</button></div>`;}).join("");
+  return `<div class="panel"><div class="row" style="justify-content:space-between;align-items:center">
+    <b style="font-size:13px">Elige dificultad</b><span class="dim" style="font-size:11px">tu equipo: nv ${lvl}</span></div>
+    <div class="mt8">${cards}</div></div>`;
 }
 function dgRankSection(){
   const tabs=DG_ORDER.map(id=>`<button class="f ${dgDiff===id?'on':''}" data-act="dgRankTab" data-arg="${id}">${ENGINE.DUNGEON_DIFFICULTIES[id].label}</button>`).join("");
@@ -1166,20 +1238,31 @@ function dgContinue(){ closeOverlay(); go('dungeon'); }
 
 /* ====================== RANKING ====================== */
 let rankTab="diario";
+const MEDALS=['🥇','🥈','🥉'];
 async function renderRanking(){
   refreshChips();
-  let rows=[];
-  try{ rows=await api(rankTab==="diario"?'/rankings/daily':'/rankings/league'); }catch(e){}
-  const board=rows.length?rows.map(r=>`<div class="rank-row ${r.me?'me':''}">
-     <span class="pos">${r.pos}</span><span class="nm">${r.name}</span>
-     <span style="color:var(--gold);font-weight:700">${r.score}${rankTab==='diario'?' ✕':' pts'}</span></div>`).join("")
-     :'<div class="dim tc" style="padding:24px">Aún no hay datos. ¡Juega combates!</div>';
+  let rows=[],me=null;
+  try{ const r=await api(rankTab==="diario"?'/rankings/daily':'/rankings/league');
+    // Compatibilidad: forma nueva {rows,me} o antigua (array).
+    if(Array.isArray(r))rows=r;else{rows=r.rows||[];me=r.me||null;}
+  }catch(e){}
+  const rowHTML=r=>`<div class="rank-row ${r.me?'me':''}">
+     <span class="pos">${r.pos<=3?MEDALS[r.pos-1]:r.pos}</span><span class="nm">${r.name}</span>
+     <span style="color:var(--gold);font-weight:700">${r.score}${rankTab==='diario'?' ✕':' pts'}</span></div>`;
+  let board=rows.length?rows.map(rowHTML).join("")
+     :`<div class="dim tc" style="padding:18px">Aún no hay datos hoy.<br><button class="btn sm mag mt8" data-act="goHome">⚔️ IR A COMBATIR</button></div>`;
+  // Tu posición SIEMPRE visible: si no estás en el top, se ancla abajo.
+  if(rows.length&&me&&!rows.some(r=>r.me)){
+    board+=`<div class="dim tc" style="font-size:11px;padding:3px">···</div>
+      <div class="rank-row me"><span class="pos">${me.pos}</span><span class="nm">Tú</span>
+      <span style="color:var(--gold);font-weight:700">${me.score}${rankTab==='diario'?' ✕':' pts'}</span></div>`;
+  }
   $("#s-ranking").innerHTML=`
     <h2 class="title">RANKING</h2>
     <div class="tabs">
       <div class="t ${rankTab==='diario'?'on':''}" data-act="setRank" data-arg="diario">DIARIO</div>
-      <div class="t ${rankTab==='liga'?'on':''}" data-act="setRank" data-arg="liga">LIGA ${S.user.league}</div></div>
-    ${rankTab==='diario'?'<div class="dim mb8" style="font-size:13px">Con el lote de HOY (igual para todos), ¿quién ganó más combates?</div>':`<div class="dim mb8" style="font-size:13px">Tus puntos: <b style="color:var(--cyan)">${S.user.leaguePoints}</b>. Sube de liga ganando combates.</div>`}
+      <div class="t ${rankTab==='liga'?'on':''}" data-act="setRank" data-arg="liga">GLOBAL</div></div>
+    ${rankTab==='diario'?'<div class="dim mb8" style="font-size:13px">Con el lote de HOY (igual para todos), ¿quién ganó más combates?</div>':`<div class="dim mb8" style="font-size:13px">Top global por puntos. Tú: <b style="color:var(--gold)">${S.user.league}</b> · <b style="color:var(--cyan)">${S.user.leaguePoints} pts</b>.</div>`}
     <div class="panel" style="padding:4px 8px">${board}</div>`;
 }
 function setRank(t){rankTab=t;renderRanking();}
@@ -1190,19 +1273,29 @@ async function renderShop(){
   const item=(ico,t,d,btn,act,arg,extra,disabled)=>`<div class="panel shop-item">
      <div class="ico">${ico}</div><div class="meta"><div class="t">${t}</div><div class="d">${d}</div></div>
      <button class="btn sm ${extra||''}" ${disabled?'disabled':(act?`data-act="${act}" ${arg?`data-arg="${arg}"`:''}`:'disabled')}>${btn}</button></div>`;
+  // Cada artículo muestra QUÉ recibes y QUÉ cuesta; la tirada enseña el techo
+  // diario que queda (regla de producto: máx 10 tiradas pagas/día).
+  const rollsLeft=Math.max(0,(S.user.rollsMax||10)-(S.user.rollsToday||0));
+  const canRoll=rollsLeft>0&&S.user.coins>=100;
+  const canEnergy=S.user.gems>=20&&S.user.energy<S.user.energyMax;
   $("#s-shop").innerHTML=`
     <h2 class="title">TIENDA <small class="dim">sin sorpresas tóxicas</small></h2>
-    ${item("🥚","Tirada extra del lote de hoy","Aigrón aleatorio · 100🪙","TIRAR","shopRoll","", "")}
-    ${item("💎","Pack de gemas","Moneda premium","COMPRAR","purchase","gems_small","mag")}
-    ${item("🎟️","Pase de temporada","30 días de recompensas","COMPRAR","purchase","pass","gold")}
-    ${item("⚡","Recargar energía","Energía al máximo","COMPRAR","purchase","energy_refill","")}
-    <div class="dim tc mt8" style="font-size:12px">El dinero acelera tu colección, nunca compra victorias. Las compras reales se validan con el recibo de la tienda.</div>`;
+    ${item("🥚","Tirada extra del lote de hoy",
+      `Aigrón aleatorio · <b style="color:var(--gold)">100🪙</b> · quedan <b style="color:${rollsLeft>0?'var(--cyan)':'var(--red)'}">${rollsLeft}/${S.user.rollsMax||10}</b> hoy`,
+      rollsLeft<=0?"MAÑANA":"TIRAR","shopRoll","","",!canRoll)}
+    ${item("⚡","Recargar energía",`Energía al máximo (${S.user.energyMax}⚡) · <b style="color:var(--magenta)">20💎</b>`,
+      S.user.energy>=S.user.energyMax?"LLENA":"RECARGAR","purchase","energy_refill","",!canEnergy)}
+    ${item("💎","Pack de gemas",`<b style="color:var(--magenta)">+50💎</b> · 0,99 €`,"COMPRAR","purchase","gems_small","mag")}
+    ${item("🎟️","Pase de temporada","30 días de recompensas · 4,99 €","COMPRAR","purchase","pass","gold")}
+    <div class="dim tc mt8" style="font-size:12px">El dinero acelera tu colección, nunca compra victorias.<br>
+    Las 💎 sirven para recargar energía (pronto: cosméticos). Las compras reales se validan con el recibo de la tienda.</div>`;
 }
 async function shopRoll(){
   try{
     const r=await api('/shop/roll',{method:'POST'});
     const t=registerTpl(r.template);
     await Promise.all([refreshMe(),refreshCollection()]); refreshChips();
+    if($("#s-shop").classList.contains('active')) renderShop(); // contador de tiradas al día
     const rays=(t.rarity==="EPICA"||t.rarity==="LEGENDARIA")?'<div class="rays"></div>':'';
     openOverlay(`<div class="center reveal" style="position:relative">${rays}<div style="position:relative;z-index:2">
        ${artTag(t,10)}
@@ -1212,8 +1305,12 @@ async function shopRoll(){
   }catch(e){ const er=e.data&&e.data.error; toast(er==='daily_cap'?'Límite diario (10)':er==='insufficient'?'Te faltan monedas':'No se pudo'); }
 }
 async function purchase(sku){
-  try{ const u=await api('/shop/purchase',{method:'POST',body:{sku}}); S.user=Object.assign(S.user,u); refreshChips(); renderShop(); toast('¡Compra aplicada!'); }
-  catch(e){ if(e.status===501) toast('Requiere validación de recibo de tienda'); else toast('No disponible'); }
+  try{ const u=await api('/shop/purchase',{method:'POST',body:{sku}}); S.user=Object.assign(S.user,u); refreshChips(); renderShop(); toast(sku==='energy_refill'?'⚡ ¡Energía al máximo!':'¡Compra aplicada!'); }
+  catch(e){ const er=e.data&&e.data.error;
+    if(er==='insufficient_gems') toast('Te faltan gemas 💎');
+    else if(er==='energy_full') toast('Energía ya llena');
+    else if(e.status===501) toast('Requiere validación de recibo de tienda');
+    else toast('No disponible'); }
 }
 
 /* ====================== NAVEGACIÓN + INIT ====================== */
@@ -1232,6 +1329,8 @@ const ACTIONS={
   toCollection:()=>{closeOverlay();go("collection");},
   close:()=>closeOverlay(),
   setFilter:(a)=>setFilter(a),
+  setSort:(a)=>setSort(a),
+  goHome:()=>go('home'),
   levelUp:(a)=>levelUp(a),
   toggleFav:(a)=>toggleFav(a),
   release:(a)=>release(a),

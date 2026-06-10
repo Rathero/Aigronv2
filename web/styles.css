@@ -152,6 +152,11 @@ h2.title small{font-family:var(--ui);font-size:13px;color:var(--ink-dim);font-we
 .card .fav{position:absolute;top:2px;right:3px;font-size:11px;color:var(--gold)}
 .badge{position:absolute;top:-7px;right:-7px;background:var(--magenta);color:#fff;font-size:10px;
   padding:2px 5px;border:2px solid #000;animation:bob 1.5s infinite}
+/* contexto en la colección: EQ = en tu equipo, NUEVO = obtenido hoy */
+.tag-eq{position:absolute;bottom:2px;left:2px;background:var(--cyan);color:#06121f;font-size:9px;font-weight:700;padding:1px 4px;z-index:2}
+.tag-new{position:absolute;top:2px;right:2px;background:var(--gold);color:#2a1d00;font-size:9px;font-weight:700;padding:1px 4px;z-index:2}
+.card .fav~.tag-new{top:16px} /* si además es favorito, NUEVO baja para no taparlo */
+.filters .sortf{font-size:11px;padding:4px 7px}
 
 .type-pill{display:inline-block;font-size:11px;padding:2px 6px;border:1px solid var(--line);background:#0a0818}
 .rar-txt.COMUN{color:var(--com)}.rar-txt.RARA{color:var(--rar)}.rar-txt.EPICA{color:var(--epi)}.rar-txt.LEGENDARIA{color:var(--leg)}
