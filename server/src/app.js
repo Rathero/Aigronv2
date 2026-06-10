@@ -21,6 +21,8 @@ const { generateDailyBatch } = require("./jobs/generateDailyBatch");
 const { startCron } = require("./cron");
 const { fuse } = require("./fusion");
 const dungeon = require("./dungeon");
+const leagues = require("./leagues");
+const { startMaintenance } = require("./maintenance");
 const { tplBaseStats, tplTypes } = require("./util");
 
 const app = express();
@@ -89,7 +91,18 @@ function yesterdayStr() {
 }
 async function ensureDailyBatch(date) {
   const r = await db.query("SELECT 1 FROM creature_templates WHERE batch_date=$1 AND is_fusion=false LIMIT 1", [date]);
-  if (r.rowCount === 0) await generateDailyBatch(date, DAILY_N);
+  if (r.rowCount > 0) return;
+  // Advisory lock: a medianoche TODOS los clientes piden /daily a la vez
+  // (thundering herd); sin el lock varios procesos generarían el lote en paralelo.
+  const client = await db.pool.connect();
+  try {
+    await client.query("SELECT pg_advisory_lock(hashtext($1))", ["gen:" + date]);
+    const again = await db.query("SELECT 1 FROM creature_templates WHERE batch_date=$1 AND is_fusion=false LIMIT 1", [date]);
+    if (again.rowCount === 0) await generateDailyBatch(date, DAILY_N);
+  } finally {
+    await client.query("SELECT pg_advisory_unlock(hashtext($1))", ["gen:" + date]).catch(() => {});
+    client.release();
+  }
 }
 async function todayTemplates() {
   const date = C.todayStr();
@@ -588,34 +601,52 @@ async function awardBattleResult({ user, win, abilitiesUsed = 0, defenderId = nu
 // --------------------------------- RANKINGS ----------------------------------
 // Ambos rankings devuelven { rows, me }: `me` trae tu posición real aunque no
 // estés en el top 50 (el cliente la ancla abajo — es lo que el jugador busca).
+// El TOP compartido se CACHEA (cambia poco y lo pide todo el mundo): a escala,
+// recalcular el top-50 por petición es matar la BD para nada.
+const _rankCache = new Map();
+async function cached(key, ms, fn) {
+  const e = _rankCache.get(key);
+  if (e && Date.now() - e.at < ms) return e.v;
+  const v = await fn();
+  _rankCache.set(key, { at: Date.now(), v });
+  return v;
+}
+const RANK_CACHE_MS = parseInt(process.env.RANK_CACHE_MS || "30000", 10);
 app.get("/rankings/daily", authMiddleware, wrap(async (req, res) => {
-  const r = await db.query(
-    `SELECT u.display_name AS name, ds.wins, ds.user_id
-       FROM daily_scores ds JOIN users u ON u.id=ds.user_id
-      WHERE ds.daily_date=$1 ORDER BY ds.wins DESC LIMIT 50`,
-    [C.todayStr()]
-  );
-  const rows = r.rows.map((x, i) => ({ pos: i + 1, name: x.name, score: x.wins, me: x.user_id === req.userId }));
+  const today = C.todayStr();
+  const top = await cached("daily:" + today, RANK_CACHE_MS, async () => {
+    const r = await db.query(
+      `SELECT u.display_name AS name, ds.wins, ds.user_id
+         FROM daily_scores ds JOIN users u ON u.id=ds.user_id
+        WHERE ds.daily_date=$1 ORDER BY ds.wins DESC LIMIT 50`,
+      [today]
+    );
+    return r.rows;
+  });
+  const rows = top.map((x, i) => ({ pos: i + 1, name: x.name, score: x.wins, me: x.user_id === req.userId }));
   let me = rows.find((x) => x.me) || null;
   if (!me) {
-    const mine = await db.query("SELECT wins FROM daily_scores WHERE daily_date=$1 AND user_id=$2", [C.todayStr(), req.userId]);
+    const mine = await db.query("SELECT wins FROM daily_scores WHERE daily_date=$1 AND user_id=$2", [today, req.userId]);
     if (mine.rowCount) {
-      const pos = await db.query("SELECT COUNT(*)::int AS n FROM daily_scores WHERE daily_date=$1 AND wins > $2", [C.todayStr(), mine.rows[0].wins]);
+      const pos = await db.query("SELECT COUNT(*)::int AS n FROM daily_scores WHERE daily_date=$1 AND wins > $2", [today, mine.rows[0].wins]);
       me = { pos: pos.rows[0].n + 1, score: mine.rows[0].wins };
     }
   }
-  res.json({ rows, me });
+  res.json({ rows, me, closeAt: leagues.nextCloseAt() });
 }));
 app.get("/rankings/league", authMiddleware, wrap(async (req, res) => {
-  const r = await db.query("SELECT id, display_name AS name, league, league_points FROM users ORDER BY league_points DESC LIMIT 50");
-  const rows = r.rows.map((x, i) => ({ pos: i + 1, name: x.name, league: x.league, score: x.league_points, me: x.id === req.userId }));
+  const top = await cached("league", RANK_CACHE_MS, async () => {
+    const r = await db.query("SELECT id, display_name AS name, league, league_points FROM users ORDER BY league_points DESC LIMIT 50");
+    return r.rows;
+  });
+  const rows = top.map((x, i) => ({ pos: i + 1, name: x.name, league: x.league, score: x.league_points, me: x.id === req.userId }));
   let me = rows.find((x) => x.me) || null;
   if (!me) {
     const u = await getUser(req.userId);
     const pos = await db.query("SELECT COUNT(*)::int AS n FROM users WHERE league_points > $1", [u.league_points]);
     me = { pos: pos.rows[0].n + 1, score: u.league_points, league: u.league };
   }
-  res.json({ rows, me });
+  res.json({ rows, me, closeAt: leagues.nextCloseAt(), rewards: leagues.REWARDS });
 }));
 
 // ----------------------------------- SHOP ------------------------------------
@@ -759,11 +790,12 @@ if (require.main === module) {
   // Escuchar en 0.0.0.0 (requisito de Railway/PaaS para que el proxy llegue a la app).
   server = app.listen(PORT, "0.0.0.0", () => console.log(`AIGRONS API escuchando en 0.0.0.0:${PORT} (frontend en /)`));
   startCron(generateDailyBatch, DAILY_N);
+  startMaintenance(db); // limpieza de tablas + cierre semanal de ligas
 
   // PvP en vivo (WebSocket en /pvp, mismo puerto). Inyecta los helpers compartidos.
   try {
     const { attachPvp } = require("./pvp");
-    attachPvp(server, { db, getUser, syncEnergy, buildTeamUnits, awardBattleResult, publicUnit, MATCH_LEVEL_WINDOW });
+    attachPvp(server, { db, getUser, syncEnergy, buildTeamUnits, awardBattleResult, publicUnit, MATCH_LEVEL_WINDOW, todayTemplates });
     console.log("PvP en vivo (WebSocket) activo en /pvp");
   } catch (e) {
     console.warn("[pvp] no se pudo activar el WebSocket:", e.message);

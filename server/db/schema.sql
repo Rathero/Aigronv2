@@ -166,3 +166,20 @@ CREATE TABLE IF NOT EXISTS dungeon_scores (
   PRIMARY KEY (daily_date, user_id, difficulty)
 );
 CREATE INDEX IF NOT EXISTS idx_dscores ON dungeon_scores(daily_date, difficulty, best_depth DESC);
+
+-- Metadatos de la app (marcas de jobs idempotentes: cierre semanal de ligas...).
+CREATE TABLE IF NOT EXISTS app_meta (
+  key   TEXT PRIMARY KEY,
+  value TEXT
+);
+
+-- Histórico del cierre semanal de ligas (perfil / salón de la fama).
+CREATE TABLE IF NOT EXISTS league_weeks (
+  week_start   DATE NOT NULL,
+  user_id      UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  league       TEXT NOT NULL,
+  points       INT  NOT NULL,
+  reward_coins INT  NOT NULL DEFAULT 0,
+  reward_gems  INT  NOT NULL DEFAULT 0,
+  PRIMARY KEY (week_start, user_id)
+);

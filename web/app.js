@@ -164,6 +164,45 @@ function instById(id){ return S.collection.find(c=>c.instance_id===id); }
 
 /* ====================== UI: helpers ====================== */
 const $=s=>document.querySelector(s);
+
+/* ---------------- SFX (chiptune sintetizado, sin assets) + háptica ----------
+   WebAudio genera los pitidos 8-bit al vuelo (encaja con el pixel-art y pesa 0).
+   El contexto se crea perezosamente en el primer gesto (política de autoplay).
+   Mute persistente en localStorage (toggle en el menú ≡). */
+const SFX=(()=>{
+  let ctx=null, muted=localStorage.getItem('aigrons_mute')==='1';
+  function ac(){ if(!ctx){ try{ctx=new (window.AudioContext||window.webkitAudioContext)();}catch(e){} }
+    if(ctx&&ctx.state==='suspended') ctx.resume().catch(()=>{});
+    return ctx; }
+  function tone(f,dur,type,vol,slide,at){
+    const c=ac(); if(!c||muted)return;
+    const t0=c.currentTime+(at||0);
+    const o=c.createOscillator(),g=c.createGain();
+    o.type=type||'square'; o.frequency.setValueAtTime(f,t0);
+    if(slide) o.frequency.exponentialRampToValueAtTime(Math.max(30,f+slide),t0+dur);
+    g.gain.setValueAtTime(vol||.04,t0);
+    g.gain.exponentialRampToValueAtTime(.0001,t0+dur);
+    o.connect(g); g.connect(c.destination);
+    o.start(t0); o.stop(t0+dur+.02);
+  }
+  const fx={
+    click:()=>tone(520,.04,'square',.018),
+    hit:()=>tone(200,.09,'square',.05,-90),
+    crit:()=>{tone(150,.1,'sawtooth',.06,-60);tone(990,.06,'square',.04,0,.03);},
+    ability:()=>tone(420,.14,'sawtooth',.035,260),
+    heal:()=>{tone(523,.08,'triangle',.04);tone(784,.1,'triangle',.04,0,.07);},
+    poison:()=>tone(160,.12,'triangle',.04,-40),
+    claim:()=>{[523,659,784,1047].forEach((f,i)=>tone(f,.1,'square',.04,0,i*.08));},
+    win:()=>{[523,659,784,1047,1319].forEach((f,i)=>tone(f,.12,'square',.045,0,i*.09));},
+    lose:()=>{[392,330,262,196].forEach((f,i)=>tone(f,.16,'triangle',.05,0,i*.12));},
+  };
+  return {
+    play:(k)=>{ try{ fx[k]&&fx[k](); }catch(e){} },
+    toggle:()=>{ muted=!muted; localStorage.setItem('aigrons_mute',muted?'1':'0'); return muted; },
+    muted:()=>muted,
+  };
+})();
+function buzz(ms){ if(navigator.vibrate){ try{navigator.vibrate(ms);}catch(e){} } }
 function refreshChips(){
   if(!S.user)return;
   $("#c-coins").textContent=S.user.coins;
@@ -295,18 +334,31 @@ async function renderHome(){
   refreshChips();
   const claimed=S.daily&&S.daily.claimed;
   let dg=null; try{ dg=await api('/dungeon'); }catch(e){}
+  // Meta de COLECCIÓN del día: cuántos aigrons del lote de hoy tienes ya.
+  // Convierte el lote compartido en un objetivo diario medible.
+  let loteLine='';
+  if(S.daily&&S.daily.count){
+    const owned=new Set(S.collection.filter(i=>i.template.id&&i.template.id.indexOf(S.daily.date+'_')===0).map(i=>i.template.id)).size;
+    const pct=Math.min(100,Math.round(owned/S.daily.count*100));
+    loteLine=`<div class="mis ${owned>=S.daily.count?'done':''}" style="margin:8px 0 0">
+      <div class="mrow"><span>📖 Lote de hoy</span><span class="dim">${owned}/${S.daily.count}${owned>=S.daily.count?' 🏆':''}</span></div>
+      <div class="mis-bar"><i style="width:${pct}%"></i></div></div>`;
+  }
   // Reclamado: banda compacta con cuenta atrás (anticipación) en vez de un
   // panel grande "sin nada que hacer" ocupando el espacio premium.
   const dailyCard=claimed?
-    `<div class="panel daily-compact">
-       <span>🎁 Nuevo lote en <b id="next-batch">--</b></span>
-       <span>🔥 Racha: <b style="color:var(--gold)">${S.user.streak}</b> día${S.user.streak===1?'':'s'}</span>
+    `<div class="panel">
+       <div class="daily-compact">
+         <span>🎁 Nuevo lote en <b id="next-batch">--</b></span>
+         <span>🔥 Racha: <b style="color:var(--gold)">${S.user.streak}</b> día${S.user.streak===1?'':'s'}</span>
+       </div>${loteLine}
      </div>`:
     `<div class="daily panel glow-cyan"><div class="halo"></div>
        <div class="tc"><b style="font-size:14px;color:var(--cyan)">AIGRÓN DEL DÍA</b></div>
        <canvas class="egg" data-egg="1" data-px="8"></canvas>
        <div class="subtle tc mb8">Hoy ha nacido un lote único. Reclama el tuyo gratis.</div>
        <button class="btn mag" data-act="doClaim">ABRIR — GRATIS</button>
+       ${loteLine}
      </div>`;
   const missions=(S.user.missions)||[];
   const labels={claim:"Reclama tu aigrón",win:"Gana 3 combates",ability:"Usa 5 habilidades"};
@@ -354,6 +406,7 @@ async function doClaim(){
     const t=registerTpl(r.instance.template);
     await Promise.all([refreshMe(),refreshDaily(),refreshCollection()]);
     refreshChips();
+    SFX.play('claim'); buzz([30,40,30,40,80]);
     const rays=(t.rarity==="EPICA"||t.rarity==="LEGENDARIA")?'<div class="rays"></div>':'';
     openOverlay(`<div class="center reveal" style="position:relative">${rays}
       <div style="position:relative;z-index:2">
@@ -364,8 +417,41 @@ async function doClaim(){
         <div class="dim" style="font-size:13px;margin-bottom:10px">"${t.lore}"</div>
         <div style="text-align:left;max-width:220px;margin:0 auto 12px">${statBars(t.base_stats)}</div>
         <button class="btn" data-act="toCollection">A LA COLECCIÓN</button>
+        <button class="btn ghost cyan mt8" data-act="shareAig" data-arg="${t.id}">📤 COMPARTIR</button>
       </div></div>`);
   }catch(e){ toast(e.data&&e.data.error==='already_claimed'?'Ya reclamaste hoy':'No se pudo reclamar'); }
+}
+// Compartir el aigrón (viralidad): compone una tarjeta PNG (sprite + nombre +
+// rareza + fecha) y usa Web Share si está disponible; si no, descarga.
+const RARITY_COLOR={COMUN:'#8b86b8',RARA:'#43b6ff',EPICA:'#c061ff',LEGENDARIA:'#ffd23f'};
+async function shareAig(tplId){
+  const t=tpl(tplId); if(!t)return;
+  const c=document.createElement('canvas'); c.width=480; c.height=600;
+  const g=c.getContext('2d'); g.imageSmoothingEnabled=false;
+  g.fillStyle='#0a0818'; g.fillRect(0,0,480,600);
+  g.strokeStyle='#3a3270'; g.lineWidth=6; g.strokeRect(10,10,460,580);
+  g.fillStyle='#34f5e4'; g.font='bold 26px monospace'; g.textAlign='center';
+  g.fillText('AIGRONS',240,52);
+  const sc=document.createElement('canvas'); drawAigron(sc,t,8); // sprite procedural (sin CORS)
+  g.drawImage(sc,(480-352)/2,84,352,352);
+  g.fillStyle='#e8e4ff'; g.font='bold 30px monospace'; g.fillText(t.name,240,486);
+  g.fillStyle=RARITY_COLOR[t.rarity]||'#8b86b8'; g.font='bold 20px monospace';
+  g.fillText(`${t.rarity} · ${typesLabel(t)}`,240,518);
+  g.fillStyle='#aaa2dc'; g.font='16px monospace';
+  g.fillText(`Lote del ${(S.daily&&S.daily.date)||''} · aigrons.app`,240,556);
+  c.toBlob(async(b)=>{
+    if(!b){toast('No se pudo crear la imagen');return;}
+    const file=new File([b],'aigron-'+(t.name||'hoy')+'.png',{type:'image/png'});
+    try{
+      if(navigator.canShare&&navigator.canShare({files:[file]})){
+        await navigator.share({files:[file],title:t.name,text:`Mi aigrón de hoy: ${t.name} (${t.rarity}) 🥚 #AIGRONS`});
+        return;
+      }
+    }catch(e){ if(e&&e.name==='AbortError')return; }
+    const a=document.createElement('a'); a.href=URL.createObjectURL(b); a.download=file.name; a.click();
+    setTimeout(()=>URL.revokeObjectURL(a.href),5000);
+    toast('Imagen guardada 📸');
+  });
 }
 async function claimMission(key){
   try{ const r=await api('/missions/claim',{method:'POST',body:{key}}); S.user.missions=r.missions; await refreshMe(); refreshChips(); renderHome(); toast('+'+r.reward+'🪙'); }
@@ -578,7 +664,23 @@ function startLivePvp(captain,stance){
   PVP={ws,status:'connecting',captain:captain||S.team[0],stance:stance||'NEUTRAL'};
   pvpQueueUI('Conectando…');
   ws.onmessage=(ev)=>{ let m;try{m=JSON.parse(ev.data);}catch(e){return;} pvpOnMessage(m); };
-  ws.onclose=()=>{ const wasPlaying=PVP&&(PVP.status==='match'); PVP=null; if(wasPlaying&&CB&&CB.live&&!CB.ended){ toast('Conexión PvP perdida'); CB=null; closeOverlay(); go('battle'); } };
+  ws.onclose=()=>{ const wasPlaying=PVP&&(PVP.status==='match'); PVP=null; if(wasPlaying&&CB&&CB.live&&!CB.ended){ pvpReconnect(1); } };
+  ws.onerror=()=>{};
+}
+// Reconexión tras un corte de red en pleno match (el servidor da ~30s de
+// gracia): nuevo socket + 'resume' con el matchId. Antes cualquier microcorte
+// era derrota instantánea por abandono.
+function pvpReconnect(attempt){
+  if(!CB||!CB.live||CB.ended)return;
+  if(attempt>5){ toast('Conexión PvP perdida'); CB=null; closeOverlay(); go('home'); return; }
+  setBanner(`⚠️ Reconectando… (${attempt}/5)`);
+  let ws; try{ ws=new WebSocket(pvpWsUrl()); }catch(e){ setTimeout(()=>pvpReconnect(attempt+1),1500); return; }
+  PVP={ws,status:'resuming'};
+  ws.onmessage=(ev)=>{ let m;try{m=JSON.parse(ev.data);}catch(e){return;}
+    if(m.t==='hello'){ pvpSend({t:'resume',matchId:CB.battleId}); return; }
+    pvpOnMessage(m); };
+  ws.onclose=()=>{ const resuming=PVP&&PVP.status!=='over'; PVP=null;
+    if(resuming&&CB&&CB.live&&!CB.ended) setTimeout(()=>pvpReconnect(attempt+1),1200); };
   ws.onerror=()=>{};
 }
 function pvpSend(o){ if(PVP&&PVP.ws&&PVP.ws.readyState===1) PVP.ws.send(JSON.stringify(o)); }
@@ -595,10 +697,15 @@ function pvpOnMessage(m){
   if(!PVP)return;
   if(m.t==='hello'){ PVP.status='queue'; pvpSend({t:'queue',captain:PVP.captain,stance:PVP.stance}); pvpStatus('Buscando rival…'); }
   else if(m.t==='queued'){ pvpStatus('Buscando rival…'); }
-  else if(m.t==='error'){ toast(m.msg==='no_energy'?'Sin energía ⚡':m.msg==='empty_team'?'Equipo vacío':'PvP no disponible'); pvpCancel(); }
+  else if(m.t==='error'){
+    if(m.msg==='resume_failed'){ toast('La partida ya terminó'); PVP=null; CB=null; closeOverlay(); go('home'); return; }
+    toast(m.msg==='no_energy'?'Sin energía ⚡':m.msg==='empty_team'?'Equipo vacío':'PvP no disponible'); pvpCancel(); }
   else if(m.t==='match'){ PVP.status='match'; closeOverlay(); startLiveBattle(m); }
+  else if(m.t==='resumed'){ PVP.status='match'; closeOverlay(); resumeLiveBattle(m); }
   else if(m.t==='round'){ pvpRound(m); }
   else if(m.t==='resolve'){ pvpResolve(m); }
+  else if(m.t==='opponentDisconnected'){ setBanner('📶 Rival desconectado — esperando su reconexión…'); }
+  else if(m.t==='opponentReconnected'){ toast('Rival reconectado'); }
   else if(m.t==='opponentLeft'){ toast('Tu rival abandonó'); }
   else if(m.t==='over'){ PVP.status='over'; pvpOver(m); }
 }
@@ -607,12 +714,30 @@ function startLiveBattle(m){
   registerUnitArt(m.team); registerUnitArt(m.opponent); // arte IA del rival
   const A=m.team.map((s,i)=>mkUnit(s,'A',i));      // MI equipo -> local 'A' (abajo)
   const B=m.opponent.map((s,i)=>mkUnit(s,'B',i));  // rival -> local 'B' (arriba)
-  CB={A,B,seed:0,battleId:m.matchId,pvp:true,live:true,you:m.you,oppName:m.oppName||'Rival',
+  CB={A,B,seed:0,battleId:m.matchId,pvp:!m.bot,live:true,you:m.you,oppName:m.oppName||'Rival',
       rng:null,turn:0,order:[],oi:0,plan:{},planTurn:0,selecting:null,phase:'wait',speed:1,
       decisions:[],timer:null,planTimer:null,initA:m.team,initB:m.opponent,ended:false};
   buildArena();
   const vs=$(".vs"); if(vs){vs.style.opacity=1;setTimeout(()=>{vs.style.opacity=0;},800);}
-  setBanner(`⚔️ PvP vs <b>${CB.oppName}</b>`);
+  setBanner(`⚔️ ${m.bot?'Combate':'PvP'} vs <b>${CB.oppName}</b>`);
+}
+// Reconstruye el combate tras reanudar: mismos equipos + estado ACTUAL del servidor.
+function resumeLiveBattle(m){
+  go('battle');
+  registerUnitArt(m.team); registerUnitArt(m.opponent);
+  const A=m.team.map((s,i)=>mkUnit(s,'A',i));
+  const B=m.opponent.map((s,i)=>mkUnit(s,'B',i));
+  CB={A,B,seed:0,battleId:m.matchId,pvp:true,live:true,you:m.you,oppName:m.oppName||'Rival',
+      rng:null,turn:0,order:[],oi:0,plan:{},planTurn:m.round,selecting:null,phase:'wait',speed:1,
+      decisions:[],timer:null,planTimer:null,initA:m.team,initB:m.opponent,ended:false};
+  buildArena();
+  const smap={};
+  ((m.state&&m.state.A)||[]).forEach(s=>smap[toLocalUid(s.uid)]=s);
+  ((m.state&&m.state.B)||[]).forEach(s=>smap[toLocalUid(s.uid)]=s);
+  [...CB.A,...CB.B].forEach(u=>{const s=smap[u.uid]; if(s){u.hp=s.hp;u.shield=s.shield;u.energy=s.energy;u.poisonTurns=s.poisonTurns;u.stunTurns=s.stunTurns;}});
+  refreshArena();
+  toast('✅ Reconectado');
+  pvpRound({round:m.round,deadline:m.deadline});
 }
 function pvpRound(m){
   if(!CB||!CB.live||CB.ended)return;
@@ -675,11 +800,11 @@ function liveAnimate(log, state){
     if(actor&&actor.el) actor.el.classList.add("acting");
     const who=actor&&actor.team==='A'?'var(--cyan)':'var(--magenta)';
     const nm=actor?actor.name:e.name;
-    if(e.poison&&actor&&actor.el) floatNum(actor,"☠"+e.poison,"var(--epi)");
+    if(e.poison&&actor&&actor.el){ floatNum(actor,"☠"+e.poison,"var(--epi)"); SFX.play('poison'); }
     if(e.stunned) setBanner(`<span style="color:${who}">${nm}</span> está aturdido 💫`);
     else if(e.died) setBanner(`<span style="color:${who}">${nm}</span> cae por el veneno ☠`);
     else if(e.guard) setBanner(`<span style="color:${who}">${nm}</span> se protege 🛡️`);
-    else if(e.ability) setBanner(`<span style="color:${who}">${nm}</span> usa <b style="color:var(--gold)">${e.ability}</b>${e.overcharge?' ⚡⚡×1.5':''}`);
+    else if(e.ability){ setBanner(`<span style="color:${who}">${nm}</span> usa <b style="color:var(--gold)">${e.ability}</b>${e.overcharge?' ⚡⚡×1.5':''}`); SFX.play('ability'); }
     else if(e.hits&&e.hits.length) setBanner(`<span style="color:${who}">${nm}</span> ataca`);
     // Historial (PvP en vivo): mismo formato que el combate local.
     {
@@ -698,6 +823,7 @@ function liveAnimate(log, state){
     }
     (e.hits||[]).forEach(h=>{ const luid=toLocalUid(h.tgt&&h.tgt.uid); const t=byUid(luid); if(!t||!t.el)return;
       t.el.classList.remove("hit");void t.el.offsetWidth;t.el.classList.add("hit");
+      SFX.play(h.crit?'crit':'hit'); buzz(h.crit?40:15);
       floatNum(t,(h.shielded?"🛡":"")+(h.guarded?"🛡️":"")+(h.crit?"¡":"")+h.dmg+(h.crit?"!":""),h.crit?"var(--gold)":h.shielded?"#aebfce":h.guarded?"var(--cyan)":h.typeM>1?"var(--magenta)":"#fff");
       const ss=smap[luid]; if(ss) t.hp=ss.hp;
     });
@@ -714,6 +840,7 @@ function pvpOver(m){
   if(m.energy!=null) S.user.energy=m.energy;
   refreshChips();
   const won=!!m.youWon;
+  SFX.play(won?'win':'lose'); buzz(won?[40,60,80]:60);
   openOverlay(`<div class="center">
     <div style="font-family:var(--pixel);font-size:16px;color:${won?'var(--green)':'var(--red)'};margin:6px 0 10px">${won?'¡VICTORIA!':'DERROTA'}</div>
     <div class="dim" style="font-size:13px">${m.reason==='opponent_left'?(won?'Tu rival abandonó.':'Abandonaste.'):'Combate PvP en vivo terminado.'}</div>
@@ -1000,13 +1127,14 @@ function resolveTick(){
     action=E.performAction(CB.rng,u,intent,mine,foes); action.poison=st.poison;
   }
   logAction(u,action,st,actionExtras(u,action,hpBefore,mine,foes));
-  if(st.poison && u.el) floatNum(u,"☠"+st.poison,"var(--epi)"); // daño de veneno/quemadura
+  if(st.poison && u.el){ floatNum(u,"☠"+st.poison,"var(--epi)"); SFX.play('poison'); } // veneno/quemadura
   if(action.stunned) setBanner(`<span style="color:${who}">${u.name}</span> está aturdido 💫`);
   else if(action.died) setBanner(`<span style="color:${who}">${u.name}</span> cae por el veneno ☠`);
   else if(action.guard) setBanner(`<span style="color:${who}">${u.name}</span> se protege 🛡️`);
-  else if(action.ability) setBanner(`<span style="color:${who}">${u.name}</span> usa <b style="color:var(--gold)">${action.ability}</b>${action.overcharge?' ⚡⚡×1.5':''}`);
+  else if(action.ability){ setBanner(`<span style="color:${who}">${u.name}</span> usa <b style="color:var(--gold)">${action.ability}</b>${action.overcharge?' ⚡⚡×1.5':''}`); SFX.play('ability'); }
   else if(action.hits.length) setBanner(`<span style="color:${who}">${u.name}</span> ataca`);
   action.hits.forEach(h=>{const t=h.tgt; if(!t.el)return; t.el.classList.remove("hit");void t.el.offsetWidth;t.el.classList.add("hit");
+    SFX.play(h.crit?'crit':'hit'); buzz(h.crit?40:15);
     floatNum(t,(h.shielded?"🛡":"")+(h.guarded?"🛡️":"")+(h.crit?"¡":"")+h.dmg+(h.crit?"!":""),h.crit?"var(--gold)":h.shielded?"#aebfce":h.guarded?"var(--cyan)":h.typeM>1?"var(--magenta)":"#fff");});
   refreshArena();
   if(!CB.A.some(x=>x.hp>0)||!CB.B.some(x=>x.hp>0)) finishBattle();
@@ -1057,6 +1185,7 @@ function finishBattle(){
 }
 function showResult(r){
   const win=r.win;
+  SFX.play(win?'win':'lose'); buzz(win?[40,60,80]:60);
   openOverlay(`<div class="center">
      <div style="font-family:var(--pixel);font-size:16px;color:${win?'var(--gold)':'var(--ink-dim)'};margin-bottom:10px">${win?'¡VICTORIA!':'DERROTA'}</div>
      <div style="font-size:50px;margin-bottom:8px">${win?'🏆':'💀'}</div>
@@ -1241,6 +1370,7 @@ function dgFight(){
 }
 function showDungeonResult(r){
   const win=r.win; let extra='';
+  SFX.play(win?'win':'lose'); buzz(win?[40,60,80]:60);
   if(r.cleared) extra='<div style="color:var(--gold);margin-top:6px">🏆 ¡Mazmorra completada!</div>';
   else if(r.fled) extra='<div style="color:var(--red);margin-top:6px">🏳 Huiste — la run termina aquí.</div>';
   else if(r.dead) extra='<div style="color:var(--red);margin-top:6px">☠️ Tu equipo cayó.</div>';
@@ -1260,11 +1390,19 @@ let rankTab="diario";
 const MEDALS=['🥇','🥈','🥉'];
 async function renderRanking(){
   refreshChips();
-  let rows=[],me=null;
+  let rows=[],me=null,closeAt=null,rewards=null;
   try{ const r=await api(rankTab==="diario"?'/rankings/daily':'/rankings/league');
     // Compatibilidad: forma nueva {rows,me} o antigua (array).
-    if(Array.isArray(r))rows=r;else{rows=r.rows||[];me=r.me||null;}
+    if(Array.isArray(r))rows=r;else{rows=r.rows||[];me=r.me||null;closeAt=r.closeAt||null;rewards=r.rewards||null;}
   }catch(e){}
+  // Cierre SEMANAL de ligas: cuenta atrás + tu recompensa si mantienes la liga.
+  let closeLine='';
+  if(rankTab==='liga'&&closeAt){
+    const ms=new Date(closeAt)-Date.now();
+    const d=Math.floor(ms/86400000),h=Math.floor(ms%86400000/3600000);
+    const rw=rewards&&rewards[S.user.league];
+    closeLine=`<div class="panel" style="padding:8px 10px;font-size:12px">⏳ Cierre semanal en <b style="color:var(--cyan)">${d}d ${h}h</b>${rw?` · recompensa ${S.user.league}: <b style="color:var(--gold)">+${rw.coins}🪙</b>${rw.gems?` <b style="color:var(--magenta)">+${rw.gems}💎</b>`:''}`:''}</div>`;
+  }
   const rowHTML=r=>`<div class="rank-row ${r.me?'me':''}">
      <span class="pos">${r.pos<=3?MEDALS[r.pos-1]:r.pos}</span><span class="nm">${r.name}</span>
      <span style="color:var(--gold);font-weight:700">${r.score}${rankTab==='diario'?' ✕':' pts'}</span></div>`;
@@ -1282,6 +1420,7 @@ async function renderRanking(){
       <div class="t ${rankTab==='diario'?'on':''}" data-act="setRank" data-arg="diario">DIARIO</div>
       <div class="t ${rankTab==='liga'?'on':''}" data-act="setRank" data-arg="liga">GLOBAL</div></div>
     ${rankTab==='diario'?'<div class="dim mb8" style="font-size:13px">Con el lote de HOY (igual para todos), ¿quién ganó más combates?</div>':`<div class="dim mb8" style="font-size:13px">Top global por puntos. Tú: <b style="color:var(--gold)">${S.user.league}</b> · <b style="color:var(--cyan)">${S.user.leaguePoints} pts</b>.</div>`}
+    ${closeLine}
     <div class="panel" style="padding:4px 8px">${board}</div>`;
 }
 function setRank(t){rankTab=t;renderRanking();}
@@ -1350,6 +1489,7 @@ const ACTIONS={
   setFilter:(a)=>setFilter(a),
   setSort:(a)=>setSort(a),
   goHome:()=>go('home'),
+  shareAig:(a)=>shareAig(a),
   levelUp:(a)=>levelUp(a),
   toggleFav:(a)=>toggleFav(a),
   release:(a)=>release(a),
@@ -1374,8 +1514,9 @@ const ACTIONS={
   openTutorial:()=>openTutorial(),
   tutNext:()=>tutNext(), tutPrev:()=>tutPrev(), tutDone:()=>tutDone(),
   logout:()=>logout(),
-  menuToggle:()=>$("#topmenu").classList.toggle("show"),
+  menuToggle:()=>{ $("#topmenu").classList.toggle("show"); const s=$("#m-sound"); if(s)s.textContent=SFX.muted()?'🔇 Sonido: off':'🔊 Sonido: on'; },
   menuTutorial:()=>{$("#topmenu").classList.remove("show");openTutorial();},
+  menuSound:()=>{ const m=SFX.toggle(); const s=$("#m-sound"); if(s)s.textContent=m?'🔇 Sonido: off':'🔊 Sonido: on'; if(!m)SFX.play('claim'); },
   menuLogout:()=>{$("#topmenu").classList.remove("show");logout();},
   dgStart:(a)=>dgStart(a), dgRankTab:(a)=>dgRankTab(a), dgChoose:(a)=>dgChoose(a), dgDraft:(a)=>dgDraft(a), dgSkipDraft:()=>dgSkipDraft(),
   dgBuy:(a)=>dgBuy(a), dgHeal:()=>dgHeal(), dgLeaveShop:()=>dgLeaveShop(), dgFight:()=>dgFight(), dgContinue:()=>dgContinue(),
@@ -1387,6 +1528,7 @@ document.getElementById("app").addEventListener("click",e=>{
   const menu=$("#topmenu");
   if(menu&&menu.classList.contains("show")&&!e.target.closest("#topmenu")&&(!el||el.dataset.act!=="menuToggle")) menu.classList.remove("show");
   if(!el) return;
+  SFX.play('click');
   const fn=ACTIONS[el.dataset.act]; if(fn) fn(el.dataset.arg, el);
 });
 

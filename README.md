@@ -330,7 +330,16 @@ test de paridad en `npm test`.
 
 ### Retención y meta (parcial)
 - ✅ Misiones diarias y racha **server-side** (`daily_missions`, `/missions`).
-- Pendiente: Ligas completas (reset semanal, ascensos/descensos) y Salón de la Fama.
+- ✅ **Cierre semanal de ligas** (`src/leagues.js`): cada lunes reparte recompensa por
+  liga, guarda histórico (`league_weeks`) y comprime puntos hacia el suelo de la liga
+  (soft-reset). Idempotente y multi-instancia (advisory lock + `app_meta`). El ranking
+  muestra cuenta atrás y recompensa.
+- ✅ **PvP siempre jugable**: sin rival humano en ~8s entra un **bot** (IA del motor,
+  sin recompensas para el bot); cortes de red tienen **30s de gracia de reconexión**
+  (`resume` por WebSocket) en vez de derrota instantánea.
+- ✅ Sonido chiptune sintetizado + háptica (toggle en el menú ≡), compartir el aigrón
+  del día (Web Share), progreso del lote diario ("X/30 de hoy").
+- Pendiente: ascensos/descensos por percentil y Salón de la Fama (el histórico ya existe).
 
 ### P2 — Monetización
 - Pase de temporada, packs de gemas, cosméticos, anuncio recompensado, con validación de
@@ -345,8 +354,13 @@ test de paridad en `npm test`.
 - ✅ Lint (`cd server && npm run lint`, ESLint con config en la raíz).
 - ✅ Rate limiting con Redis opcional (define `REDIS_URL`; sin él, memoria local).
 - ✅ Endpoints con escrituras atómicas (claim/roll/level-up/resolve: sin carreras).
+- ✅ Higiene de datos a escala (`src/maintenance.js`): job diario que poda
+  `battle_offers` consumidas, `battles`/`daily_missions`/`*_scores` antiguos y runs
+  caducadas (retenciones por env). Caché de 30s del top de rankings. Advisory lock
+  en la generación del lote (sin doble generación a medianoche).
 - Pendiente: tests de integración de endpoints, métricas (retención D1/D7, win-rate
-  por tipo para balance).
+  por tipo para balance), matchmaking distribuido (Redis) para >1 réplica, CDN para
+  arte/estáticos, Sentry + pruebas de carga.
 
 ---
 
