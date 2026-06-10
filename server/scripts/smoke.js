@@ -75,11 +75,11 @@ async function loginAs(subject) {
   const reResolve = await api(t1, "/battle/resolve", { method: "POST", body: { battleId: find.data.battleId, decisions: [] } });
   ok(reResolve.status === 404, "no se puede resolver dos veces la misma oferta (anti-trampa)");
 
-  // Rankings
+  // Rankings: devuelven { rows, me } (tu posición aunque no estés en el top)
   const rd = await api(t1, "/rankings/daily");
-  ok(rd.status === 200 && Array.isArray(rd.data), "/rankings/daily ok");
+  ok(rd.status === 200 && Array.isArray(rd.data.rows), "/rankings/daily ok");
   const rl = await api(t1, "/rankings/league");
-  ok(rl.status === 200 && Array.isArray(rl.data), "/rankings/league ok");
+  ok(rl.status === 200 && Array.isArray(rl.data.rows) && rl.data.me && rl.data.me.pos >= 1, "/rankings/league ok (con posición propia)");
 
   // Misiones: la de reclamar ya está completa -> reclamar recompensa
   const mc = await api(t1, "/missions/claim", { method: "POST", body: { key: "claim" } });

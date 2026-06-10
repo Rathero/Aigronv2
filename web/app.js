@@ -111,6 +111,12 @@ function drawEgg(canvas,px){
 const TPL={};
 function registerTpl(t){ if(t&&t.id){ TPL[t.id]=Object.assign(TPL[t.id]||{},t); } return t; }
 function tpl(id){ return TPL[id]||(TPL[id]=genTemplate(id)); }
+// Registra el arte IA de unidades de combate que llegan del servidor (rival de
+// PvP): sus plantillas pueden no estar en mi caché (lote de otro día, fusión) y
+// sin esto se dibujaban con el sprite procedural en vez de su imagen real.
+function registerUnitArt(list){ (list||[]).forEach(s=>{ if(s&&s.tplId&&s.image_url){
+  TPL[s.tplId]=Object.assign(TPL[s.tplId]||genTemplate(s.tplId),{image_url:s.image_url,image_thumb_url:s.image_thumb_url||null});
+}});}
 /* HTML del arte: imagen IA si existe, si no canvas procedural */
 function artTag(t,px){
   if(t&&t.image_url) return `<img class="aigimg" src="${t.image_url}" alt="${t.name||''}">`;
@@ -598,6 +604,7 @@ function pvpOnMessage(m){
 }
 function startLiveBattle(m){
   go('battle');
+  registerUnitArt(m.team); registerUnitArt(m.opponent); // arte IA del rival
   const A=m.team.map((s,i)=>mkUnit(s,'A',i));      // MI equipo -> local 'A' (abajo)
   const B=m.opponent.map((s,i)=>mkUnit(s,'B',i));  // rival -> local 'B' (arriba)
   CB={A,B,seed:0,battleId:m.matchId,pvp:true,live:true,you:m.you,oppName:m.oppName||'Rival',
@@ -609,6 +616,10 @@ function startLiveBattle(m){
 }
 function pvpRound(m){
   if(!CB||!CB.live||CB.ended)return;
+  // El servidor manda 'resolve' y 'round' seguidos: si aún se está ANIMANDO la
+  // ronda anterior, NO la cortes (antes esto mataba el intervalo y el combate
+  // parecía no ejecutar nada). Se difiere y se arranca al acabar la animación.
+  if(CB.phase==='resolve'){ CB.pendingRound=m; return; }
   if(CB.timer){clearInterval(CB.timer);CB.timer=null;}
   CB.phase='plan'; CB.planTurn=m.round; CB.selecting=null;
   CB.plan={}; CB.A.forEach(u=>{ if(u.hp>0) CB.plan[u.uid]={action:'basic',target:null,overcharge:false}; });
@@ -651,6 +662,11 @@ function liveAnimate(log, state){
       refreshArena();
       if(CB.timer){clearInterval(CB.timer);CB.timer=null;}
       CB.phase='wait'; // espera al siguiente 'round' o 'over' del servidor
+      // Despacha lo que llegó DURANTE la animación (round/over diferidos).
+      const pr=CB.pendingRound, po=CB.pendingOver;
+      CB.pendingRound=null; CB.pendingOver=null;
+      if(po){ pvpOver(po); return; }
+      if(pr){ pvpRound(pr); return; }
       return;
     }
     const e=log[i++];
@@ -690,6 +706,9 @@ function liveAnimate(log, state){
   }, Math.round(560/(CB.speed||1)));
 }
 function pvpOver(m){
+  // Igual que 'round': si la última ronda aún se anima, difiere el resultado
+  // para que el jugador VEA el desenlace antes del overlay de victoria/derrota.
+  if(CB&&CB.live&&!CB.ended&&CB.phase==='resolve'&&CB.timer){ CB.pendingOver=m; return; }
   if(CB){ CB.ended=true; if(CB.timer){clearInterval(CB.timer);CB.timer=null;} if(CB.planTimer){clearInterval(CB.planTimer);CB.planTimer=null;} }
   if(m.leaguePoints!=null){ S.user.leaguePoints=m.leaguePoints; S.user.league=m.league; }
   if(m.energy!=null) S.user.energy=m.energy;

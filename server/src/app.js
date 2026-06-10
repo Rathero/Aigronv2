@@ -188,7 +188,8 @@ async function buildTeamUnits(userId, team = "A") {
   if (!slots.length) return [];
   const inst = await db.query(
     `SELECT ci.instance_id, ci.level, t.template_id, t.name, t.type, t.type2, t.ability_id,
-            t.base_hp, t.base_atk, t.base_def, t.base_spd, t.base_atk_p, t.base_atk_s, t.base_def_p, t.base_def_s
+            t.base_hp, t.base_atk, t.base_def, t.base_spd, t.base_atk_p, t.base_atk_s, t.base_def_p, t.base_def_s,
+            t.image_url, t.image_thumb_url
        FROM creature_instances ci JOIN creature_templates t ON t.template_id = ci.template_id
       WHERE ci.instance_id = ANY($1::uuid[])`,
     [slots]
@@ -199,13 +200,17 @@ async function buildTeamUnits(userId, team = "A") {
     const tplLike = { id: r.template_id, name: r.name, type: r.type, types: tplTypes(r), ability: r.ability_id, base_stats: tplBaseStats(r) };
     const u = combat.buildUnit(tplLike, r.level, team, i);
     u.instanceId = iid; // para mapear el capitán elegido a su uid de combate
+    // Arte IA: el RIVAL puede no tener esta plantilla en su caché (lote de otro
+    // día, fusión); viaja con la unidad para que la vea con su imagen real.
+    u.imageUrl = r.image_url; u.imageThumbUrl = r.image_thumb_url;
     return u;
   }).filter(Boolean);
 }
 const teamAvgLevel = (units) => units.length ? Math.round(units.reduce((a, u) => a + (u.level || 1), 0) / units.length) : 3;
 function publicUnit(u) {
   return { uid: u.uid, tplId: u.tplId, name: u.name, type: u.type, types: u.types, ability: u.ability, level: u.level,
-    hpMax: u.hpMax, atkP: u.atkP, atkS: u.atkS, defP: u.defP, defS: u.defS, spd: u.spd, startEnergy: u.startEnergy || 0 };
+    hpMax: u.hpMax, atkP: u.atkP, atkS: u.atkS, defP: u.defP, defS: u.defS, spd: u.spd, startEnergy: u.startEnergy || 0,
+    image_url: u.imageUrl || null, image_thumb_url: u.imageThumbUrl || null };
 }
 
 // ---------------------------------- AUTH -------------------------------------
@@ -425,7 +430,7 @@ async function opponentFromSnapshot(snapshot) {
   // snapshot: [{template_id, level}]
   const ids = snapshot.map((s) => s.template_id);
   const r = await db.query(
-    "SELECT template_id, name, type, type2, ability_id, base_hp, base_atk, base_def, base_spd, base_atk_p, base_atk_s, base_def_p, base_def_s FROM creature_templates WHERE template_id = ANY($1)",
+    "SELECT template_id, name, type, type2, ability_id, base_hp, base_atk, base_def, base_spd, base_atk_p, base_atk_s, base_def_p, base_def_s, image_url, image_thumb_url FROM creature_templates WHERE template_id = ANY($1)",
     [ids]
   );
   const byId = {}; r.rows.forEach((x) => (byId[x.template_id] = x));
@@ -434,7 +439,9 @@ async function opponentFromSnapshot(snapshot) {
     const t = byId[s.template_id];
     if (!t) return;
     const tplLike = { id: t.template_id, name: t.name, type: t.type, types: tplTypes(t), ability: t.ability_id, base_stats: tplBaseStats(t) };
-    out.push(combat.buildUnit(tplLike, s.level, "B", out.length));
+    const u = combat.buildUnit(tplLike, s.level, "B", out.length);
+    u.imageUrl = t.image_url; u.imageThumbUrl = t.image_thumb_url;
+    out.push(u);
   });
   return out;
 }
