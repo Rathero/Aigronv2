@@ -1,5 +1,7 @@
-# CI — lint + tests en cada push y PR. Los tests no necesitan base de datos
-# (motor compartido + PvP con deps mockeadas), así que el job es rápido y simple.
+# CI — lint + tests + SMOKE de integración en cada push y PR.
+#   test : motor compartido + PvP con deps mockeadas (sin BD, rápido).
+#   smoke: API completa contra PostgreSQL real (migración, lote, login, claim,
+#          combate, mazmorra, tienda... 27 checks de scripts/smoke.js).
 name: CI
 
 on:
@@ -22,3 +24,40 @@ jobs:
       - run: npm ci --no-audit --no-fund
       - run: npm run lint
       - run: npm test
+
+  smoke:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: aigrons
+          POSTGRES_PASSWORD: aigrons
+          POSTGRES_DB: aigrons
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U aigrons" --health-interval 5s
+          --health-timeout 3s --health-retries 10
+    defaults:
+      run:
+        working-directory: server
+    env:
+      DATABASE_URL: postgres://aigrons:aigrons@localhost:5432/aigrons
+      DAILY_BATCH_SIZE: "12"
+      DISABLE_CRON: "true"
+      PVP_BOT_WAIT_MS: "0"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - run: node scripts/migrate.js
+      - name: Arrancar API y correr smoke
+        run: |
+          node src/app.js & SERVER_PID=$!
+          for i in $(seq 1 30); do curl -sf http://localhost:3000/health && break; sleep 1; done
+          node scripts/smoke.js http://localhost:3000
+          kill $SERVER_PID

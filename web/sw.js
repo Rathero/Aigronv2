@@ -14,6 +14,21 @@ self.addEventListener("activate", (e) => {
     caches.keys().then((ks) => Promise.all(ks.filter((k) => k !== CACHE).map((k) => caches.delete(k)))).then(() => self.clients.claim())
   );
 });
+// Web Push: muestra la notificación y, al tocarla, abre/enfoca el juego.
+self.addEventListener("push", (e) => {
+  let d = {}; try { d = e.data ? e.data.json() : {}; } catch (err) {}
+  e.waitUntil(self.registration.showNotification(d.title || "AIGRONS", {
+    body: d.body || "", tag: d.tag || "aigrons", icon: "/icon.svg", badge: "/icon.svg",
+  }));
+});
+self.addEventListener("notificationclick", (e) => {
+  e.notification.close();
+  e.waitUntil(clients.matchAll({ type: "window", includeUncontrolled: true }).then((list) => {
+    for (const c of list) { if ("focus" in c) return c.focus(); }
+    return clients.openWindow("/");
+  }));
+});
+
 self.addEventListener("fetch", (e) => {
   if (e.request.method !== "GET") return; // escrituras de API -> red
   const url = new URL(e.request.url);

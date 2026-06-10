@@ -158,6 +158,12 @@ h2.title small{font-family:var(--ui);font-size:13px;color:var(--ink-dim);font-we
 .card .fav~.tag-new{top:16px} /* si además es favorito, NUEVO baja para no taparlo */
 .filters .sortf{font-size:11px;padding:4px 7px}
 
+/* marcos COSMÉTICOS (desbloqueables por liga/victorias; cero ventaja) */
+.card.frame-plata{border-color:#cfd6e4;box-shadow:0 0 8px rgba(207,214,228,.4)}
+.card.frame-oro{border-color:var(--gold);box-shadow:0 0 10px rgba(255,210,63,.45)}
+.card.frame-diamante{border-color:#7df0ff;box-shadow:0 0 12px rgba(125,240,255,.55)}
+.card.frame-campeon{border-color:var(--magenta);box-shadow:0 0 12px rgba(255,77,157,.55)}
+
 .type-pill{display:inline-block;font-size:11px;padding:2px 6px;border:1px solid var(--line);background:#0a0818}
 .rar-txt.COMUN{color:var(--com)}.rar-txt.RARA{color:var(--rar)}.rar-txt.EPICA{color:var(--epi)}.rar-txt.LEGENDARIA{color:var(--leg)}
 

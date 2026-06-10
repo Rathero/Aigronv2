@@ -23,6 +23,10 @@ const { fuse } = require("./fusion");
 const dungeon = require("./dungeon");
 const leagues = require("./leagues");
 const { startMaintenance } = require("./maintenance");
+const weekly = require("./missions");
+const achievements = require("./achievements");
+const push = require("./push");
+const { eventFor } = require("./jobs/generateDailyBatch");
 const { tplBaseStats, tplTypes } = require("./util");
 
 const app = express();
@@ -85,6 +89,9 @@ const DAILY_N = parseInt(process.env.DAILY_BATCH_SIZE || "30", 10);
 
 // --------------------------------- helpers ----------------------------------
 const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
+// Orden de ligas como expresión SQL (para comparar best_league).
+const leagueOrdSql = (col) =>
+  `CASE ${col} WHEN 'DIAMANTE' THEN 4 WHEN 'PLATINO' THEN 3 WHEN 'ORO' THEN 2 WHEN 'PLATA' THEN 1 ELSE 0 END`;
 
 function yesterdayStr() {
   return C.todayStr(new Date(Date.now() - 86400000));
@@ -272,6 +279,7 @@ app.get("/me", authMiddleware, wrap(async (req, res) => {
   u = await syncEnergy(u);
   const pub = userPublic(u);
   pub.missions = await missionsPublic(u.id);
+  pub.weeklyMissions = await weekly.weeklyPublic(u.id);
   res.json(pub);
 }));
 
@@ -279,7 +287,7 @@ app.get("/me", authMiddleware, wrap(async (req, res) => {
 app.get("/daily", authMiddleware, wrap(async (req, res) => {
   const u = await getUser(req.userId);
   const list = await todayTemplates();
-  res.json({ date: C.todayStr(), count: list.length, claimed: userPublic(u).claimedToday, nextBatchAt: nextBatchAt(), batch: list });
+  res.json({ date: C.todayStr(), count: list.length, claimed: userPublic(u).claimedToday, nextBatchAt: nextBatchAt(), event: eventFor(C.todayStr()), batch: list });
 }));
 
 app.post("/daily/claim", authMiddleware, wrap(async (req, res) => {
@@ -289,7 +297,8 @@ app.post("/daily/claim", authMiddleware, wrap(async (req, res) => {
   // peticiones concurrentes no pueden reclamar dos veces el mismo día.
   const streak = u.last_claim_date && C.todayStr(new Date(u.last_claim_date)) === yesterdayStr() ? u.daily_streak + 1 : 1;
   const claim = await db.query(
-    `UPDATE users SET last_claim_date=$1, daily_streak=$2, coins=coins+30
+    `UPDATE users SET last_claim_date=$1, daily_streak=$2, coins=coins+30,
+            best_streak=GREATEST(best_streak,$2)
       WHERE id=$3 AND (last_claim_date IS NULL OR last_claim_date <> $1)
       RETURNING id`,
     [C.todayStr(), streak, u.id]
@@ -318,6 +327,12 @@ app.get("/missions", authMiddleware, wrap(async (req, res) => {
 }));
 app.post("/missions/claim", authMiddleware, wrap(async (req, res) => {
   const key = req.body && req.body.key;
+  // Misiones SEMANALES (claves w_*): mismo endpoint, lógica en missions.js.
+  if (key && key.startsWith("w_")) {
+    const out = await weekly.claimWeekly(req.userId, key);
+    if (out.error) return res.status(400).json(out);
+    return res.json(Object.assign(out, { weeklyMissions: await weekly.weeklyPublic(req.userId) }));
+  }
   const def = MISSIONS[key];
   if (!def) return res.status(400).json({ error: "bad_mission" });
   await ensureMissionRow(req.userId);
@@ -333,7 +348,7 @@ app.post("/missions/claim", authMiddleware, wrap(async (req, res) => {
 // -------------------------------- COLLECTION ---------------------------------
 app.get("/collection", authMiddleware, wrap(async (req, res) => {
   const r = await db.query(
-    `SELECT ci.instance_id, ci.level, ci.xp, ci.favorite, ci.locked, ci.obtained_at,
+    `SELECT ci.instance_id, ci.level, ci.xp, ci.favorite, ci.locked, ci.obtained_at, ci.cosmetic_frame,
             t.template_id, t.name, t.type, t.type2, t.rarity, t.ability_id, t.lore, t.art_seed,
             t.base_hp, t.base_atk, t.base_def, t.base_spd, t.base_atk_p, t.base_atk_s, t.base_def_p, t.base_def_s,
             t.image_url, t.image_thumb_url
@@ -346,6 +361,7 @@ app.get("/collection", authMiddleware, wrap(async (req, res) => {
     return {
       instance_id: x.instance_id, level: x.level, favorite: x.favorite, locked: x.locked,
       obtained_at: x.obtained_at, // para el badge NUEVO (obtenido hoy) del cliente
+      frame: x.cosmetic_frame,
       template: {
         id: x.template_id, name: x.name, type: x.type, types: tplTypes(x), rarity: x.rarity, ability: x.ability_id,
         lore: x.lore, art_seed: x.art_seed, image_url: x.image_url, image_thumb_url: x.image_thumb_url,
@@ -556,7 +572,11 @@ app.post("/battle/resolve", authMiddleware, wrap(async (req, res) => {
   const win = result.winner === "A";
   const abilitiesUsed = result.log.filter((e) => e.ability && e.uid[0] === "A").length;
 
-  const award = await awardBattleResult({ user: u, win, abilitiesUsed, defenderId: offer.defender_id, seed: offer.seed | 0 });
+  // Replay: equipos congelados + log + estado final (suficiente para reproducir).
+  const snapEnd = (team) => team.map((x) => ({ uid: x.uid, hp: Math.round(x.hp) }));
+  const replay = { you: "A", team: frozen.team, opponent: frozen.opponent, log: result.log,
+    end: { A: snapEnd(A), B: snapEnd(B) } };
+  const award = await awardBattleResult({ user: u, win, abilitiesUsed, defenderId: offer.defender_id, seed: offer.seed | 0, replay });
 
   res.json({ win, coins: award.coins, leaguePoints: award.leaguePoints, league: award.league, energy: award.energy, log: result.log, turns: result.turns, pvp: !!offer.defender_id });
 }));
@@ -565,7 +585,7 @@ app.post("/battle/resolve", authMiddleware, wrap(async (req, res) => {
 // energía −1, registro en `battles`, `daily_scores` y misiones. Reutilizado por el
 // combate PvE (/battle/resolve) y por el PvP en vivo (pvp.js, ambos jugadores).
 // `user` debe venir ya con la energía sincronizada (syncEnergy).
-async function awardBattleResult({ user, win, abilitiesUsed = 0, defenderId = null, seed = 0 }) {
+async function awardBattleResult({ user, win, abilitiesUsed = 0, defenderId = null, seed = 0, replay = null }) {
   const coins = win ? 40 : 8;
   const lpDelta = win ? 12 : -6;
   // Deltas atómicos en SQL (no valores absolutos leídos antes): dos combates
@@ -575,17 +595,26 @@ async function awardBattleResult({ user, win, abilitiesUsed = 0, defenderId = nu
        coins = coins + $1,
        league_points = GREATEST(league_points + $2, 0),
        energy_updated_at = CASE WHEN GREATEST(energy - 1, 0) < $3 THEN now() ELSE energy_updated_at END,
-       energy = GREATEST(energy - 1, 0)
+       energy = GREATEST(energy - 1, 0),
+       total_wins = total_wins + $5,
+       total_losses = total_losses + $6
      WHERE id = $4
      RETURNING energy, league_points`,
-    [coins, lpDelta, C.ENERGY_MAX, user.id]
+    [coins, lpDelta, C.ENERGY_MAX, user.id, win ? 1 : 0, win ? 0 : 1]
   );
   const newEnergy = upd.rows[0].energy;
   const newLp = upd.rows[0].league_points;
   const league = C.computeLeague(newLp);
-  await db.query("UPDATE users SET league=$1 WHERE id=$2", [league, user.id]);
-  await db.query("INSERT INTO battles (attacker_id, defender_id, seed, result, daily_date) VALUES ($1,$2,$3,$4,$5)",
-    [user.id, defenderId, seed | 0, win ? "WIN" : "LOSS", C.todayStr()]);
+  // `best_league` alimenta perfil, logros y marcos cosméticos.
+  await db.query(
+    `UPDATE users SET league=$1,
+       best_league = CASE WHEN ${leagueOrdSql("$1")} > ${leagueOrdSql("best_league")} THEN $1 ELSE best_league END
+     WHERE id=$2`,
+    [league, user.id]
+  );
+  await db.query("INSERT INTO battles (attacker_id, defender_id, seed, result, daily_date, replay) VALUES ($1,$2,$3,$4,$5,$6)",
+    [user.id, defenderId, seed | 0, win ? "WIN" : "LOSS", C.todayStr(), replay ? JSON.stringify(replay) : null]);
+  if (win) await weekly.bumpWeekly(user.id, "w_wins", 1);
   if (win) {
     await db.query(
       `INSERT INTO daily_scores (daily_date, user_id, wins) VALUES ($1,$2,1)
@@ -719,6 +748,8 @@ app.post("/fusion", authMiddleware, wrap(async (req, res) => {
   if (!a || !b || a === b) return res.status(400).json({ error: "need_two_distinct" });
   try {
     const out = await fuse(req.userId, a, b);
+    await db.query("UPDATE users SET fusions_done=fusions_done+1 WHERE id=$1", [req.userId]);
+    await weekly.bumpWeekly(req.userId, "w_fusions", 1);
     res.json(out);
   } catch (e) {
     res.status(400).json({ error: e.message });
@@ -766,6 +797,114 @@ app.get("/dungeon/ranking", authMiddleware, wrap(async (req, res) => {
   res.json(await dungeon.ranking(req.userId, (req.query && req.query.difficulty) || "NORMAL"));
 }));
 
+// ---------------------------- PERFIL / REPLAYS -------------------------------
+app.get("/profile", authMiddleware, wrap(async (req, res) => {
+  const u = await getUser(req.userId);
+  if (!u) return res.status(404).json({ error: "no_user" });
+  const col = await db.query("SELECT COUNT(*)::int AS n FROM creature_instances WHERE user_id=$1", [u.id]);
+  const weeks = await db.query(
+    "SELECT week_start, league, points FROM league_weeks WHERE user_id=$1 ORDER BY week_start DESC LIMIT 8", [u.id]);
+  const recent = await db.query(
+    `SELECT b.id, b.result, b.created_at, b.defender_id IS NOT NULL AS pvp, b.replay IS NOT NULL AS has_replay,
+            d.display_name AS opp_name
+       FROM battles b LEFT JOIN users d ON d.id = b.defender_id
+      WHERE b.attacker_id=$1 ORDER BY b.created_at DESC LIMIT 10`, [u.id]);
+  res.json({
+    displayName: u.display_name, createdAt: u.created_at,
+    totalWins: u.total_wins, totalLosses: u.total_losses,
+    bestStreak: u.best_streak, streak: u.daily_streak,
+    league: u.league, leaguePoints: u.league_points, bestLeague: u.best_league,
+    dungeonsCleared: u.dungeons_cleared, fusionsDone: u.fusions_done,
+    collectionCount: col.rows[0].n,
+    weeks: weeks.rows,
+    recent: recent.rows.map((b) => ({ id: b.id, result: b.result, at: b.created_at, pvp: b.pvp, hasReplay: b.has_replay, oppName: b.opp_name })),
+  });
+}));
+// Cambio de nombre (3-16 caracteres razonables).
+app.post("/me/name", authMiddleware, wrap(async (req, res) => {
+  const name = ((req.body && req.body.name) || "").trim();
+  if (!/^[\p{L}\p{N} _.\-·]{3,16}$/u.test(name)) return res.status(400).json({ error: "bad_name" });
+  await db.query("UPDATE users SET display_name=$1 WHERE id=$2", [name, req.userId]);
+  res.json({ displayName: name });
+}));
+// Replay de un combate propio (combate determinista grabado: equipos+log+final).
+app.get("/battle/:id/replay", authMiddleware, wrap(async (req, res) => {
+  const r = await db.query("SELECT replay FROM battles WHERE id=$1 AND attacker_id=$2", [req.params.id, req.userId]);
+  if (!r.rowCount || !r.rows[0].replay) return res.status(404).json({ error: "no_replay" });
+  res.json(r.rows[0].replay);
+}));
+// Salón de la fama: top de la ÚLTIMA semana cerrada.
+app.get("/hall-of-fame", authMiddleware, wrap(async (req, res) => {
+  const wk = await db.query("SELECT MAX(week_start) AS w FROM league_weeks");
+  if (!wk.rows[0].w) return res.json({ week: null, rows: [] });
+  const r = await db.query(
+    `SELECT lw.league, lw.points, u.display_name AS name, lw.user_id
+       FROM league_weeks lw JOIN users u ON u.id = lw.user_id
+      WHERE lw.week_start=$1 ORDER BY lw.points DESC LIMIT 10`, [wk.rows[0].w]);
+  res.json({ week: C.todayStr(new Date(wk.rows[0].w)),
+    rows: r.rows.map((x, i) => ({ pos: i + 1, name: x.name, league: x.league, score: x.points, me: x.user_id === req.userId })) });
+}));
+
+// ----------------------------------- LOGROS ----------------------------------
+app.get("/achievements", authMiddleware, wrap(async (req, res) => {
+  const u = await getUser(req.userId);
+  res.json(await achievements.list(req.userId, u));
+}));
+app.post("/achievements/claim", authMiddleware, wrap(async (req, res) => {
+  const u = await getUser(req.userId);
+  const out = await achievements.claim(req.userId, u, req.body && req.body.key);
+  if (out.error) return res.status(400).json(out);
+  res.json(out);
+}));
+
+// ------------------------- MARCOS COSMÉTICOS (frames) ------------------------
+// Se desbloquean por progreso (mejor liga alcanzada / victorias): cosmética
+// pura, cero ventaja de combate (regla de monetización no tóxica).
+const FRAMES = {
+  plata:    { name: "Marco Plata",    req: (u) => leagueOrd(u.best_league) >= 1 },
+  oro:      { name: "Marco Oro",      req: (u) => leagueOrd(u.best_league) >= 2 },
+  diamante: { name: "Marco Diamante", req: (u) => leagueOrd(u.best_league) >= 4 },
+  campeon:  { name: "Marco Campeón",  req: (u) => u.total_wins >= 100 },
+};
+const leagueOrd = (l) => ({ BRONCE: 0, PLATA: 1, ORO: 2, PLATINO: 3, DIAMANTE: 4 }[l] || 0);
+app.get("/frames", authMiddleware, wrap(async (req, res) => {
+  const u = await getUser(req.userId);
+  res.json(Object.entries(FRAMES).map(([key, f]) => ({ key, name: f.name, unlocked: f.req(u) })));
+}));
+app.put("/creature/:id/frame", authMiddleware, wrap(async (req, res) => {
+  const frame = (req.body && req.body.frame) || null;
+  if (frame) {
+    const def = FRAMES[frame];
+    const u = await getUser(req.userId);
+    if (!def || !def.req(u)) return res.status(400).json({ error: "frame_locked" });
+  }
+  const r = await db.query(
+    "UPDATE creature_instances SET cosmetic_frame=$1 WHERE instance_id=$2 AND user_id=$3 RETURNING cosmetic_frame",
+    [frame, req.params.id, req.userId]
+  );
+  if (!r.rowCount) return res.status(404).json({ error: "not_found" });
+  res.json({ frame: r.rows[0].cosmetic_frame });
+}));
+
+// ---------------------------------- WEB PUSH ---------------------------------
+app.get("/push/key", (req, res) => res.json({ enabled: push.enabled(), key: push.publicKey() }));
+app.post("/push/subscribe", authMiddleware, wrap(async (req, res) => {
+  if (!push.enabled()) return res.status(501).json({ error: "push_disabled" });
+  const sub = req.body && req.body.subscription;
+  if (!sub || !sub.endpoint) return res.status(400).json({ error: "bad_subscription" });
+  await db.query(
+    `INSERT INTO push_subs (user_id, endpoint, sub) VALUES ($1,$2,$3)
+     ON CONFLICT (user_id, endpoint) DO UPDATE SET sub=$3`,
+    [req.userId, sub.endpoint, JSON.stringify(sub)]
+  );
+  res.json({ ok: true });
+}));
+app.post("/push/unsubscribe", authMiddleware, wrap(async (req, res) => {
+  const endpoint = req.body && req.body.endpoint;
+  await db.query("DELETE FROM push_subs WHERE user_id=$1 AND ($2::text IS NULL OR endpoint=$2)", [req.userId, endpoint || null]);
+  res.json({ ok: true });
+}));
+
 // --------------------------------- HEALTH ------------------------------------
 app.get("/health", wrap(async (req, res) => {
   await db.query("SELECT 1");
@@ -791,6 +930,7 @@ if (require.main === module) {
   server = app.listen(PORT, "0.0.0.0", () => console.log(`AIGRONS API escuchando en 0.0.0.0:${PORT} (frontend en /)`));
   startCron(generateDailyBatch, DAILY_N);
   startMaintenance(db); // limpieza de tablas + cierre semanal de ligas
+  push.initPush(db).then(() => push.startPushCron(db)).catch((e) => console.warn("[push]", e.message));
 
   // PvP en vivo (WebSocket en /pvp, mismo puerto). Inyecta los helpers compartidos.
   try {

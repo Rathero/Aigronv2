@@ -15,8 +15,57 @@
 // =============================================================================
 require("dotenv").config();
 const db = require("../db");
-const { dailyBatch } = require("../generator");
+const E = require("../generator"); // motor compartido (genTemplate, TYPES, hashStr)
 const { getImageProvider } = require("../ai/imageProvider");
+
+// ----------------------------- EVENTOS TEMÁTICOS -----------------------------
+// El lote de algunos días tiene tema (retención + algo que comentar):
+//   Sábado : "Sábado de <TIPO>" — ~40% del lote es de un tipo (determinista por fecha).
+//   Domingo: "Domingo Legendario" — 2 legendarias garantizadas (en vez de ~1).
+// Determinista: cliente y servidor pueden derivarlo solo de la fecha.
+function eventFor(dateStr) {
+  const d = new Date(dateStr + "T00:00:00");
+  const dow = d.getDay();
+  if (dow === 6) {
+    const t = E.TYPES[E.hashStr("event:" + dateStr) % E.TYPES.length];
+    return { kind: "type", type: t, share: 0.4, name: `Sábado de ${t}`, emoji: "🔥" };
+  }
+  if (dow === 0) return { kind: "legendary", min: 2, name: "Domingo Legendario", emoji: "👑" };
+  return null;
+}
+
+// Composición por CUPOS: escanea candidatos deterministas (date_0000..) y los
+// selecciona hasta clavar la curva de rareza exacta (60/25/12/3, ver README §6)
+// y el sesgo del evento. Cada plantilla sigue derivando solo de su id, así que
+// la paridad cliente/servidor se mantiene (el lote es la selección de ids).
+function composeBatch(date, n) {
+  const ev = eventFor(date);
+  const want = {
+    LEGENDARIA: Math.max(1, Math.round(n * 0.03)) + (ev && ev.kind === "legendary" ? (ev.min - 1) : 0),
+    EPICA: Math.max(1, Math.round(n * 0.12)),
+    RARA: Math.max(1, Math.round(n * 0.25)),
+  };
+  want.COMUN = Math.max(0, n - want.LEGENDARIA - want.EPICA - want.RARA);
+  const out = [];
+  const picked = { COMUN: 0, RARA: 0, EPICA: 0, LEGENDARIA: 0 };
+  const typeTarget = ev && ev.kind === "type" ? Math.floor(n * ev.share) : 0;
+  let typed = 0;
+  const passes = typeTarget > 0 ? [true, false] : [false]; // 1º candidatos del tipo del evento
+  for (const onlyEventType of passes) {
+    for (let i = 0; i < n * 14 && out.length < n; i++) {
+      const id = date + "_" + String(i).padStart(4, "0");
+      if (out.some((t) => t.id === id)) continue;
+      const t = E.genTemplate(id);
+      if (picked[t.rarity] >= want[t.rarity]) continue;
+      const isEvType = ev && ev.kind === "type" && (t.types || [t.type]).includes(ev.type);
+      if (onlyEventType && (!isEvType || typed >= typeTarget)) continue;
+      out.push(t);
+      picked[t.rarity]++;
+      if (isEvType) typed++;
+    }
+  }
+  return out;
+}
 
 // Construye el "concepto" que consume el proveedor de imagen a partir de la
 // plantilla determinista (en modo openai esto alimenta el prompt de imagen).
@@ -49,7 +98,7 @@ async function generateArt(provider, t) {
 }
 
 async function generateDailyBatch(date, n) {
-  const list = dailyBatch(date, n);
+  const list = composeBatch(date, n);
   const provider = getImageProvider();
   // Espaciado entre llamadas para respetar rate limits (configurable). El modo
   // procedural no llama a ninguna API, así que no necesita delay.
@@ -97,4 +146,4 @@ async function generateDailyBatch(date, n) {
   return { date, total: list.length, accepted, inserted, rejected, acceptRate, dist };
 }
 
-module.exports = { generateDailyBatch };
+module.exports = { generateDailyBatch, eventFor, composeBatch };

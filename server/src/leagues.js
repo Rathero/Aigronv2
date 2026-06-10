@@ -54,14 +54,52 @@ async function closeWeekIfDue(db) {
        ON CONFLICT (week_start, user_id) DO NOTHING`,
       [thisWeek]
     );
-    // Recompensa + soft-reset: lp' = suelo + (lp - suelo) / 2 (la liga no cambia).
+    // Mejor liga histórica alcanzada (perfil + desbloqueo de marcos cosméticos).
+    const ord = `CASE league WHEN 'DIAMANTE' THEN 4 WHEN 'PLATINO' THEN 3 WHEN 'ORO' THEN 2 WHEN 'PLATA' THEN 1 ELSE 0 END`;
+    const ordBest = ord.replace(/league/g, "best_league");
+    await client.query(`UPDATE users SET best_league = league WHERE league_points > 0 AND ${ord} > ${ordBest}`);
+
+    // Movilidad por PERCENTIL dentro de cada liga (solo ligas con >=5 activos):
+    //   top 20%  -> ASCIENDE al suelo de la liga superior.
+    //   bottom 20% -> DESCIENDE a mitad de la liga inferior.
+    // El resto: recompensa + soft-reset (lp' = suelo + progreso/2).
+    await client.query(
+      `CREATE TEMP TABLE _mov ON COMMIT DROP AS
+       SELECT id, league, league_points,
+              percent_rank() OVER (PARTITION BY league ORDER BY league_points) AS pr,
+              count(*) OVER (PARTITION BY league) AS n
+         FROM users WHERE league_points > 0`
+    );
+    const NEXT_FLOOR = `CASE league WHEN 'BRONCE' THEN 100 WHEN 'PLATA' THEN 250 WHEN 'ORO' THEN 450 ELSE 700 END`;
+    const PREV_MID = `CASE league WHEN 'PLATA' THEN 50 WHEN 'ORO' THEN 175 WHEN 'PLATINO' THEN 350 ELSE 575 END`;
+    const up = await client.query(
+      `UPDATE users u SET coins = coins + ${caseCoins}, gems = gems + ${caseGems},
+              league_points = ${NEXT_FLOOR}
+         FROM _mov m WHERE u.id = m.id AND m.n >= 5 AND m.pr >= 0.8 AND u.league <> 'DIAMANTE'`
+    );
+    const down = await client.query(
+      `UPDATE users u SET coins = coins + ${caseCoins}, gems = gems + ${caseGems},
+              league_points = ${PREV_MID}
+         FROM _mov m WHERE u.id = m.id AND m.n >= 5 AND m.pr <= 0.2 AND u.league <> 'BRONCE'`
+    );
+    // Resto: recompensa + soft-reset.
     const upd = await client.query(
-      `UPDATE users SET
+      `UPDATE users u SET
          coins = coins + ${caseCoins},
          gems  = gems + ${caseGems},
          league_points = ${caseFloor} + (league_points - ${caseFloor}) / 2
-       WHERE league_points > 0`
+       FROM _mov m WHERE u.id = m.id
+         AND NOT (m.n >= 5 AND m.pr >= 0.8 AND u.league <> 'DIAMANTE')
+         AND NOT (m.n >= 5 AND m.pr <= 0.2 AND u.league <> 'BRONCE')`
     );
+    // Recalcula la columna `league` desde los puntos finales (única fuente de verdad).
+    await client.query(
+      `UPDATE users SET league = CASE
+         WHEN league_points >= 700 THEN 'DIAMANTE' WHEN league_points >= 450 THEN 'PLATINO'
+         WHEN league_points >= 250 THEN 'ORO' WHEN league_points >= 100 THEN 'PLATA' ELSE 'BRONCE' END
+       WHERE id IN (SELECT id FROM _mov)`
+    );
+    upd.rowCount += up.rowCount + down.rowCount;
     await client.query(
       `INSERT INTO app_meta (key, value) VALUES ('league_week_closed', $1)
        ON CONFLICT (key) DO UPDATE SET value = $1`,

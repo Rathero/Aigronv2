@@ -233,7 +233,19 @@ Todas requieren `Authorization: Bearer <token>` salvo `/auth/login`.
 | POST | `/dungeon/choose` · `/dungeon/battle` · `/dungeon/draft` · `/dungeon/shop` | Avanzar nodo, resolver combate, draftear reliquia, tienda |
 | POST | `/dungeon/abandon` | Huir de la run activa = permadeath (cuenta como muerte, registra score) |
 | GET  | `/dungeon/ranking` | Ranking diario por profundidad alcanzada |
+| GET  | `/profile` · POST `/me/name` | Perfil (stats, semanas de liga, combates recientes) y cambio de nombre |
+| GET  | `/battle/:id/replay` | Replay grabado de un combate propio (equipos+log+estado final) |
+| GET  | `/hall-of-fame` | Top de la última semana cerrada de ligas |
+| GET  | `/achievements` · POST `/achievements/claim` | Logros (progreso desde contadores) y reclamo |
+| GET  | `/frames` · PUT `/creature/:id/frame` | Marcos cosméticos desbloqueables (liga/victorias) |
+| GET  | `/push/key` · POST `/push/subscribe` · `/push/unsubscribe` | Web Push (recordatorio diario del lote) |
 | GET  | `/health` | Healthcheck (usado por Docker / balanceadores) |
+
+**PvP en vivo (WebSocket /pvp)**: `queue` admite `code` (duelo privado: solo empareja
+con el mismo código, sin ventana de nivel ni bot); `resume` reanuda tras un corte.
+Las misiones semanales se reclaman en `/missions/claim` con claves `w_*`.
+El lote tiene **eventos** (sábado temático ~40% de un tipo; domingo 2 legendarias);
+`/daily` devuelve `event` y la generación se compone por cupos (curva exacta).
 
 **Mazmorra del día (roguelike, semilla compartida):** run de 8 nodos de dificultad creciente
 con el equipo del jugador. El **HP se arrastra** entre combates, **permadeath**, y entre nodos

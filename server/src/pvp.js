@@ -68,17 +68,21 @@ function attachPvp(server, deps) {
     const team = await buildTeamUnits(ws.userId, "A");
     if (!team.length) return send(ws, { t: "error", msg: "empty_team" });
     const level = Math.round(team.reduce((s, x) => s + (x.level || 1), 0) / team.length);
-    const entry = { userId: ws.userId, ws, captain: m.captain, stance: m.stance, level, name: u.display_name };
-    // Rival compatible: usuario distinto y nivel dentro de la ventana.
-    const idx = queue.findIndex((x) => x.userId !== ws.userId && Math.abs(x.level - level) <= MATCH_LEVEL_WINDOW);
+    // Duelo PRIVADO ("reta a un amigo"): con `code` solo se empareja con quien
+    // tenga el MISMO código (sin ventana de nivel ni fallback a bot).
+    const code = typeof m.code === "string" ? m.code.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 6) : null;
+    const entry = { userId: ws.userId, ws, captain: m.captain, stance: m.stance, level, name: u.display_name, code: code || null };
+    const idx = code
+      ? queue.findIndex((x) => x.userId !== ws.userId && x.code === code)
+      : queue.findIndex((x) => x.userId !== ws.userId && !x.code && Math.abs(x.level - level) <= MATCH_LEVEL_WINDOW);
     if (idx >= 0) {
       const other = queue.splice(idx, 1)[0];
       if (other.botTimer) clearTimeout(other.botTimer);
       return startMatch(other, entry);
     }
     queue.push(entry);
-    send(ws, { t: "queued" });
-    if (todayTemplates && BOT_WAIT_MS > 0) {
+    send(ws, { t: "queued", code: entry.code || undefined });
+    if (!code && todayTemplates && BOT_WAIT_MS > 0) {
       entry.botTimer = setTimeout(() => {
         const i = queue.indexOf(entry);
         if (i < 0 || !entry.ws || entry.ws.readyState !== 1) return;
@@ -196,6 +200,7 @@ function attachPvp(server, deps) {
     const all = [...aDec, ...bDec].map((d) => ({ ...d, turn: round }));
     const dmap = new Map(all.map((d) => [round + ":" + d.uid, d]));
     const r = E.stepTurn(match.teams.A, match.teams.B, match.rng, dmap, round);
+    match.fullLog = (match.fullLog || []).concat(r.log); // para el REPLAY
     bcast(match, { t: "resolve", round, log: r.log, hpA: teamHp(match.teams.A), hpB: teamHp(match.teams.B), state: { A: snap(match.teams.A), B: snap(match.teams.B) } });
     if (r.done) return endMatch(match);
     startRound(match);
@@ -231,6 +236,7 @@ function attachPvp(server, deps) {
     matches.delete(match.id);
     const aliveA = match.teams.A.some((u) => u.hp > 0), aliveB = match.teams.B.some((u) => u.hp > 0);
     const winner = opts.winner || (aliveA && (!aliveB || teamHp(match.teams.A) >= teamHp(match.teams.B)) ? "A" : "B");
+    const snapEnd = (team) => team.map((x) => ({ uid: x.uid, hp: Math.round(x.hp) }));
     for (const role of ["A", "B"]) {
       const p = match.players[role];
       if (p.bot) continue; // el bot no cobra ni recibe mensajes
@@ -238,7 +244,10 @@ function attachPvp(server, deps) {
       try {
         const u = await syncEnergy(await getUser(p.userId));
         if (u) {
-          const a = await awardBattleResult({ user: u, win: winner === role, abilitiesUsed: 0, defenderId: foe.userId, seed: 0 });
+          // Replay desde la PERSPECTIVA de cada jugador (you = su rol real).
+          const replay = match.fullLog ? { you: role, team: match.pub[role], opponent: match.pub[role === "A" ? "B" : "A"],
+            log: match.fullLog, end: { A: snapEnd(match.teams.A), B: snapEnd(match.teams.B) } } : null;
+          const a = await awardBattleResult({ user: u, win: winner === role, abilitiesUsed: 0, defenderId: foe.userId, seed: 0, replay });
           send(p.ws, { t: "over", winner, youWon: winner === role, leaguePoints: a.leaguePoints, league: a.league, energy: a.energy, reason: opts.reason || "" });
         }
       } catch (e) {}

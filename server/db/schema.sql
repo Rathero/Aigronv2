@@ -183,3 +183,46 @@ CREATE TABLE IF NOT EXISTS league_weeks (
   reward_gems  INT  NOT NULL DEFAULT 0,
   PRIMARY KEY (week_start, user_id)
 );
+
+-- Replay de un combate: equipos + log de eventos + estado final (el combate es
+-- determinista, así que esto basta para reproducirlo 1:1 en el cliente).
+ALTER TABLE battles ADD COLUMN IF NOT EXISTS replay JSONB;
+
+-- Contadores de PERFIL (se actualizan en el momento del evento; sobreviven a la
+-- poda de `battles`, que solo retiene ~30 días).
+ALTER TABLE users ADD COLUMN IF NOT EXISTS total_wins       INT  NOT NULL DEFAULT 0;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS total_losses     INT  NOT NULL DEFAULT 0;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS best_streak      INT  NOT NULL DEFAULT 0;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS best_league      TEXT NOT NULL DEFAULT 'BRONCE';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS dungeons_cleared INT  NOT NULL DEFAULT 0;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS fusions_done     INT  NOT NULL DEFAULT 0;
+
+-- Misiones SEMANALES (las diarias retienen el día; estas retienen la semana).
+CREATE TABLE IF NOT EXISTS weekly_missions (
+  user_id         UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  week_start      DATE NOT NULL,
+  wins            INT  NOT NULL DEFAULT 0,
+  dungeon_depth   INT  NOT NULL DEFAULT 0,   -- mejor profundidad de la semana
+  fusions         INT  NOT NULL DEFAULT 0,
+  claimed_wins    BOOLEAN NOT NULL DEFAULT false,
+  claimed_dungeon BOOLEAN NOT NULL DEFAULT false,
+  claimed_fusions BOOLEAN NOT NULL DEFAULT false,
+  PRIMARY KEY (user_id, week_start)
+);
+
+-- Logros reclamados (el progreso se deriva de los contadores; aquí solo lo cobrado).
+CREATE TABLE IF NOT EXISTS achievements (
+  user_id    UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  key        TEXT NOT NULL,
+  claimed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (user_id, key)
+);
+
+-- Suscripciones Web Push (recordatorio diario del lote, cierres de liga...).
+CREATE TABLE IF NOT EXISTS push_subs (
+  user_id    UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  endpoint   TEXT NOT NULL,
+  sub        JSONB NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (user_id, endpoint)
+);

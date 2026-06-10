@@ -269,7 +269,7 @@ function abilityEffect(id){const a=ABILITIES[id];return {
   stun:`Aturde a un enemigo: se salta su próxima acción (${a.turns} turno${a.turns>1?'s':''}).`,
   shield:`Da un escudo que absorbe daño (${a.amt*100}% de la vida máxima) ${a.team?"a todo tu equipo":"a esta criatura"} antes de tocar el HP.`,
   drain:`Daña a un enemigo (${a.mult}× tu ataque) y te curas el ${a.drain*100}% del daño hecho.`}[a.kind];}
-function cardHTML(inst,extra){const t=inst.template;return `<div class="card r-${t.rarity}" data-iid="${inst.instance_id}">
+function cardHTML(inst,extra){const t=inst.template;return `<div class="card r-${t.rarity} ${inst.frame?'frame-'+inst.frame:''}" data-iid="${inst.instance_id}">
   <div class="lv">L${inst.level}</div>${inst.favorite?'<div class="fav">★</div>':''}${extra||""}
   ${artTag(t,6)}
   <div class="nm">${t.name}</div><div class="ty rar-txt ${t.rarity}">${typesLabel(t)}</div></div>`;}
@@ -361,22 +361,35 @@ async function renderHome(){
        ${loteLine}
      </div>`;
   const missions=(S.user.missions)||[];
+  const weeklyM=(S.user.weeklyMissions)||[];
   const labels={claim:"Reclama tu aigrón",win:"Gana 3 combates",ability:"Usa 5 habilidades"};
   const mrow=(m)=>{const pct=Math.min(100,Math.round(m.progress/m.goal*100));
     return `<div class="mis ${m.done?'done':''}">
      <div class="mrow">
-       <span>${m.done?"✅":"▫️"} ${labels[m.key]||m.key} <span class="dim">(${m.progress}/${m.goal})</span></span>
+       <span>${m.done?"✅":"▫️"} ${m.label||labels[m.key]||m.key} <span class="dim">(${m.progress}/${m.goal})</span></span>
        ${m.done&&!m.claimed?`<button class="btn sm gold pulse" style="padding:4px 8px" data-act="claimMission" data-arg="${m.key}">+${m.reward}🪙</button>`
           :`<span style="color:var(--gold)">${m.claimed?'✔':'+'+m.reward+'🪙'}</span>`}
      </div>
      <div class="mis-bar"><i style="width:${pct}%"></i></div></div>`;};
+  // Aviso push (suave, una vez): tras reclamar, ofrece el recordatorio diario.
+  const canAskPush=claimed&&!localStorage.getItem('aigrons_push_asked')&&('Notification' in window)&&Notification.permission==='default'&&('serviceWorker' in navigator);
+  const pushLine=canAskPush?`<div class="panel" style="padding:8px 10px;font-size:12px;display:flex;align-items:center;gap:8px">
+     <span style="flex:1">🔔 ¿Te avisamos cuando nazca el lote de mañana?</span>
+     <button class="btn sm" style="padding:4px 8px" data-act="pushEnable">SÍ</button>
+     <button class="btn sm ghost" style="padding:4px 8px" data-act="pushSkip">NO</button></div>`:'';
+  // Banner de EVENTO del lote (sábado temático / domingo legendario).
+  const ev=S.daily&&S.daily.event;
+  const evBanner=ev?`<div class="panel" style="padding:8px 10px;border-color:var(--gold);font-size:13px">${ev.emoji||'⚡'} <b style="color:var(--gold)">EVENTO:</b> ${ev.name}${ev.kind==='legendary'?' — legendarias extra en el lote':''}</div>`:'';
   $("#s-home").innerHTML=`
-    <h2 class="title">${(S.user.displayName||'INICIO').toUpperCase()}</h2>
+    <h2 class="title" data-act="openProfile" style="cursor:pointer">${(S.user.displayName||'INICIO').toUpperCase()} <small class="dim" style="font-size:10px">👤 perfil</small></h2>
     ${leagueBarHTML()}
+    ${evBanner}
+    ${pushLine}
     ${dailyCard}
     ${teamCombatHTML()}
     <div class="panel"><b style="font-size:14px">Misiones diarias</b>
       ${missions.map(mrow).join("")}
+      ${weeklyM.length?`<div style="border-top:1px solid var(--line);margin-top:8px;padding-top:6px"><b style="font-size:13px">Semanales</b> <span class="dim" style="font-size:10px">se reinician el lunes</span>${weeklyM.map(mrow).join("")}</div>`:''}
     </div>
     ${dungeonHomeCard(dg)}`;
   renderCanvases($("#s-home"));
@@ -416,11 +429,45 @@ async function doClaim(){
         <div class="mb8">${typePills(t)} <span class="rar-txt ${t.rarity}" style="font-weight:700">${t.rarity}</span></div>
         <div class="dim" style="font-size:13px;margin-bottom:10px">"${t.lore}"</div>
         <div style="text-align:left;max-width:220px;margin:0 auto 12px">${statBars(t.base_stats)}</div>
+        ${!localStorage.getItem('aigrons_first_fight_done')?'<button class="btn mag mb8" data-act="firstFight">⚔️ ¡TU PRIMER COMBATE!</button>':''}
         <button class="btn" data-act="toCollection">A LA COLECCIÓN</button>
         <button class="btn ghost cyan mt8" data-act="shareAig" data-arg="${t.id}">📤 COMPARTIR</button>
       </div></div>`);
   }catch(e){ toast(e.data&&e.data.error==='already_claimed'?'Ya reclamaste hoy':'No se pudo reclamar'); }
 }
+// ---------------------- Web Push (recordatorio diario) -----------------------
+function b64ToU8(b64){const p='='.repeat((4-b64.length%4)%4);const s=atob((b64+p).replace(/-/g,'+').replace(/_/g,'/'));return Uint8Array.from(s,c=>c.charCodeAt(0));}
+async function pushEnable(){
+  localStorage.setItem('aigrons_push_asked','1');
+  try{
+    const perm=await Notification.requestPermission();
+    if(perm!=='granted'){renderHome();return;}
+    const k=await api('/push/key');
+    if(!k.enabled||!k.key){toast('Notificaciones no disponibles');renderHome();return;}
+    const reg=await navigator.serviceWorker.ready;
+    const sub=await reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:b64ToU8(k.key)});
+    await api('/push/subscribe',{method:'POST',body:{subscription:sub.toJSON()}});
+    toast('🔔 Te avisaremos cada día');
+  }catch(e){ toast('No se pudo activar'); }
+  renderHome();
+}
+
+// ------------------ Onboarding: primer combate guiado ------------------------
+// Tras el PRIMER reclamo, CTA directa a un combate (el bot del matchmaking
+// garantiza rival aunque no haya nadie): time-to-first-wow < 1 minuto.
+async function firstFight(){
+  localStorage.setItem('aigrons_first_fight_done','1');
+  closeOverlay();
+  try{
+    if(!S.team.length){
+      const slots=S.collection.slice(0,3).map(i=>i.instance_id);
+      const r=await api('/team',{method:'PUT',body:{slots}});
+      S.team=r.slots;
+    }
+    startLivePvp(S.team[0],'NEUTRAL');
+  }catch(e){ toast('No se pudo preparar el equipo'); go('home'); }
+}
+
 // Compartir el aigrón (viralidad): compone una tarjeta PNG (sprite + nombre +
 // rareza + fecha) y usa Web Share si está disponible; si no, descarga.
 const RARITY_COLOR={COMUN:'#8b86b8',RARA:'#43b6ff',EPICA:'#c061ff',LEGENDARIA:'#ffd23f'};
@@ -454,9 +501,110 @@ async function shareAig(tplId){
   });
 }
 async function claimMission(key){
-  try{ const r=await api('/missions/claim',{method:'POST',body:{key}}); S.user.missions=r.missions; await refreshMe(); refreshChips(); renderHome(); toast('+'+r.reward+'🪙'); }
+  try{ const r=await api('/missions/claim',{method:'POST',body:{key}});
+    await refreshMe(); refreshChips(); renderHome(); toast('+'+r.reward+'🪙'); SFX.play('claim'); }
   catch(e){ toast('Aún no completada'); }
 }
+
+/* ====================== PERFIL + LOGROS + REPLAYS ====================== */
+async function openProfile(){
+  let p,ach;
+  try{ [p,ach]=await Promise.all([api('/profile'),api('/achievements')]); }catch(e){ toast('No se pudo cargar el perfil'); return; }
+  const winrate=p.totalWins+p.totalLosses>0?Math.round(p.totalWins/(p.totalWins+p.totalLosses)*100):0;
+  const stat=(l,v)=>`<div style="flex:1;min-width:90px;text-align:center;padding:6px 2px;border:1px solid var(--line);background:#0a0818"><div style="font-family:var(--pixel);font-size:13px;color:var(--cyan)">${v}</div><div class="dim" style="font-size:10px">${l}</div></div>`;
+  const weeks=(p.weeks||[]).map(w=>`<div class="rank-row" style="padding:4px 6px;font-size:12px"><span class="nm">Semana ${w.week_start.slice(5,10)}</span><span class="rar-txt" style="color:var(--gold)">${w.league}</span><span style="color:var(--cyan);margin-left:8px">${w.points} pts</span></div>`).join('')||'<div class="dim" style="font-size:12px;padding:6px">Aún sin semanas cerradas.</div>';
+  const recent=(p.recent||[]).map(b=>`<div class="rank-row" style="padding:4px 6px;font-size:12px">
+     <span>${b.result==='WIN'?'🏆':'💀'}</span><span class="nm">${b.pvp?('vs '+(b.oppName||'rival')):'PvE'}</span>
+     ${b.hasReplay?`<button class="btn sm ghost" style="padding:2px 8px;font-size:11px" data-act="watchReplay" data-arg="${b.id}">▶ VER</button>`:''}</div>`).join('')||'<div class="dim" style="font-size:12px;padding:6px">Sin combates recientes.</div>';
+  const arow=(a)=>{const pct=Math.min(100,Math.round(a.progress/a.goal*100));
+    return `<div class="mis ${a.done?'done':''}"><div class="mrow">
+      <span>${a.claimed?'🏅':a.done?'✅':'▫️'} <b>${a.name}</b> <span class="dim" style="font-size:11px">${a.desc} (${a.progress}/${a.goal})</span></span>
+      ${a.done&&!a.claimed?`<button class="btn sm gold pulse" style="padding:3px 7px" data-act="claimAch" data-arg="${a.key}">+${a.reward.coins}🪙${a.reward.gems?'+'+a.reward.gems+'💎':''}</button>`
+        :`<span style="color:var(--gold);font-size:11px">${a.claimed?'✔':'+'+a.reward.coins+'🪙'}</span>`}
+      </div><div class="mis-bar"><i style="width:${pct}%"></i></div></div>`;};
+  openOverlay(`<div>
+    <div class="center mb8">
+      <b id="prof-name" style="font-size:17px">${p.displayName}</b>
+      <button class="help" data-act="editName" title="Cambiar nombre" style="width:22px;height:22px;font-size:11px">✏️</button>
+      <div class="dim" style="font-size:11px">🏅 ${p.league} · mejor: ${p.bestLeague}</div>
+    </div>
+    <div class="row" style="flex-wrap:wrap;gap:4px;margin-bottom:10px">
+      ${stat('victorias',p.totalWins)}${stat('win rate',winrate+'%')}${stat('mejor racha',p.bestStreak+'d')}
+      ${stat('aigrons',p.collectionCount)}${stat('mazmorras',p.dungeonsCleared)}${stat('fusiones',p.fusionsDone)}
+    </div>
+    <div class="mb8"><b style="font-size:13px">🏅 Logros</b>${ach.map(arow).join('')}</div>
+    <div class="mb8"><b style="font-size:13px">📅 Tus semanas de liga</b>${weeks}</div>
+    <div class="mb8"><b style="font-size:13px">⚔️ Últimos combates</b>${recent}</div>
+    <button class="btn sm ghost" style="width:100%" data-act="close">CERRAR</button>
+  </div>`);
+}
+async function editName(){
+  const cur=$("#prof-name")?$("#prof-name").textContent:'';
+  const name=prompt('Nuevo nombre (3-16 caracteres):',cur);
+  if(!name||name.trim()===cur)return;
+  try{ const r=await api('/me/name',{method:'POST',body:{name:name.trim()}});
+    S.user.displayName=r.displayName; toast('Nombre cambiado'); openProfile(); }
+  catch(e){ toast('Nombre no válido'); }
+}
+async function claimAch(key){
+  try{ const r=await api('/achievements/claim',{method:'POST',body:{key}});
+    await refreshMe(); refreshChips(); SFX.play('claim'); buzz(60);
+    toast(`🏅 +${r.reward.coins||0}🪙${r.reward.gems?' +'+r.reward.gems+'💎':''}`); openProfile(); }
+  catch(e){ toast('Aún no desbloqueado'); }
+}
+// ---- REPLAY: reproduce un combate grabado (equipos + log + estado final) ----
+async function watchReplay(battleId){
+  let rep=null; try{ rep=await api('/battle/'+battleId+'/replay'); }catch(e){ toast('Replay no disponible'); return; }
+  closeOverlay();
+  document.querySelectorAll(".screen").forEach(s=>s.classList.remove("active"));
+  $("#s-battle").classList.add("active");
+  registerUnitArt(rep.team); registerUnitArt(rep.opponent);
+  const A=rep.team.map((s,i)=>mkUnit(s,'A',i));
+  const B=rep.opponent.map((s,i)=>mkUnit(s,'B',i));
+  CB={A,B,seed:0,battleId:null,pvp:false,live:false,mode:'replay',you:rep.you||'A',oppName:'',
+      rng:null,turn:0,order:[],oi:0,plan:{},planTurn:0,selecting:null,phase:'replay',speed:1,
+      decisions:[],timer:null,planTimer:null,initA:rep.team,initB:rep.opponent,ended:false};
+  buildArena();
+  const pl=$("#planner"); if(pl)pl.innerHTML='';
+  const ctrl=document.querySelector('#s-battle .combat-ctrl');
+  if(ctrl)ctrl.innerHTML=`<button class="cbtn" id="rp-speed" data-act="replaySpeed">▶▶ 1x</button><button class="cbtn" data-act="replayExit">✕ SALIR</button>`;
+  setBanner('▶ REPLAY');
+  const swapNeeded=(rep.you==='B');
+  const loc=(uid)=>(!uid?uid:(swapNeeded?(uid[0]==='A'?'B':'A')+uid.slice(1):uid));
+  const byUid=(luid)=>CB.A.find(x=>x.uid===luid)||CB.B.find(x=>x.uid===luid);
+  const log=rep.log||[]; let i=0;
+  function tick(){
+    if(!CB||CB.mode!=='replay')return;
+    if(i>=log.length){
+      // estado final autoritativo (corrige curas no registradas en el log)
+      ((rep.end&&rep.end.A)||[]).forEach(s=>{const u=byUid(loc(s.uid));if(u)u.hp=s.hp;});
+      ((rep.end&&rep.end.B)||[]).forEach(s=>{const u=byUid(loc(s.uid));if(u)u.hp=s.hp;});
+      refreshArena(); setBanner('▶ Fin del replay');
+      CB.timer=null; return;
+    }
+    const e=log[i++];
+    const actor=byUid(loc(e.uid));
+    [...CB.A,...CB.B].forEach(x=>x.el&&x.el.classList.remove("acting"));
+    if(actor&&actor.el)actor.el.classList.add("acting");
+    const who=actor&&actor.team==='A'?'var(--cyan)':'var(--magenta)';
+    const nm=actor?actor.name:e.name;
+    if(e.poison&&actor){actor.hp=Math.max(0,actor.hp-e.poison);if(actor.el)floatNum(actor,"☠"+e.poison,"var(--epi)");}
+    if(e.stunned)setBanner(`<span style="color:${who}">${nm}</span> está aturdido 💫`);
+    else if(e.died){if(actor)actor.hp=0;setBanner(`<span style="color:${who}">${nm}</span> cae ☠`);}
+    else if(e.guard)setBanner(`<span style="color:${who}">${nm}</span> se protege 🛡️`);
+    else if(e.ability)setBanner(`<span style="color:${who}">${nm}</span> usa <b style="color:var(--gold)">${e.ability}</b>`);
+    else if(e.hits&&e.hits.length)setBanner(`<span style="color:${who}">${nm}</span> ataca`);
+    (e.hits||[]).forEach(h=>{const t=byUid(loc(h.tgt&&h.tgt.uid));if(!t)return;
+      t.hp=Math.max(0,t.hp-h.dmg);
+      if(t.el){t.el.classList.remove("hit");void t.el.offsetWidth;t.el.classList.add("hit");
+        floatNum(t,(h.crit?"¡":"")+h.dmg+(h.crit?"!":""),h.crit?"var(--gold)":"#fff");}});
+    refreshArena();
+    CB.timer=setTimeout(tick,Math.round(560/(CB.speed||1)));
+  }
+  CB.timer=setTimeout(tick,400);
+}
+function replaySpeed(){ if(!CB||CB.mode!=='replay')return; CB.speed=CB.speed===1?2:1; const b=$("#rp-speed"); if(b)b.textContent='▶▶ '+CB.speed+'x'; }
+function replayExit(){ if(CB&&CB.timer)clearTimeout(CB.timer); CB=null; go('home'); openProfile(); }
 
 /* ====================== COLECCIÓN ====================== */
 let collFilter="TODOS", collSort="RECIENTE";
@@ -530,8 +678,25 @@ function openDetail(iid){
       <button class="btn sm ghost" style="flex:1" data-act="release" data-arg="${iid}" ${(inst.locked||inTeam)?'disabled':''}>LIBERAR +${releaseDust}✨</button>
     </div>
     <button class="btn sm gold" style="width:100%" data-act="fusionPick" data-arg="${iid}" ${(inst.locked||inTeam)?'disabled':''}>FUSIONAR 🧬</button>
+    <div id="frame-row" class="mt8"></div>
     <button class="btn sm ghost mt8" style="width:100%" data-act="close">CERRAR</button>
   </div>`);
+  loadFrameRow(inst);
+}
+// Marcos cosméticos: chips de los marcos desbloqueados (por liga/victorias).
+let _framesCache=null;
+async function loadFrameRow(inst){
+  try{ if(!_framesCache)_framesCache=await api('/frames'); }catch(e){ return; }
+  const row=$("#frame-row"); if(!row)return;
+  const chips=_framesCache.map(f=>`<span class="f ${inst.frame===f.key?'on':''}" ${f.unlocked?`data-act="setFrame" data-arg="${inst.instance_id}:${f.key}"`:'style="opacity:.4"'} title="${f.unlocked?'':'Bloqueado'}">${f.unlocked?'':'🔒 '}${f.name.replace('Marco ','')}</span>`).join('');
+  row.innerHTML=`<div class="dim" style="font-size:11px;margin-bottom:4px">Marco:</div>
+    <div class="filters" style="margin:0"><span class="f ${!inst.frame?'on':''}" data-act="setFrame" data-arg="${inst.instance_id}:">ninguno</span>${chips}</div>`;
+}
+async function setFrame(arg){
+  const i=arg.indexOf(':'); const iid=arg.slice(0,i), frame=arg.slice(i+1)||null;
+  try{ await api('/creature/'+iid+'/frame',{method:'PUT',body:{frame}});
+    await refreshCollection(); openDetail(iid); }
+  catch(e){ toast('Marco bloqueado'); }
 }
 async function levelUp(iid){
   try{ await api('/creature/'+iid+'/level-up',{method:'POST'}); await Promise.all([refreshMe(),refreshCollection()]); refreshChips(); openDetail(iid); toast("¡Subió de nivel!"); }
@@ -656,13 +821,13 @@ function pvpWsUrl(){
   if(API_BASE) return API_BASE.replace(/^http/,'ws')+'/pvp?token='+tok;
   return (location.protocol==='https:'?'wss':'ws')+'://'+location.host+'/pvp?token='+tok;
 }
-function startLivePvp(captain,stance){
+function startLivePvp(captain,stance,code){
   if(!S.user||S.user.energy<1){toast('Sin energía ⚡');return;}
   if(!S.team.length){toast('Equipo vacío');return;}
   if(PVP){return;}
   let ws; try{ ws=new WebSocket(pvpWsUrl()); }catch(e){ toast('PvP no disponible'); return; }
-  PVP={ws,status:'connecting',captain:captain||S.team[0],stance:stance||'NEUTRAL'};
-  pvpQueueUI('Conectando…');
+  PVP={ws,status:'connecting',captain:captain||S.team[0],stance:stance||'NEUTRAL',code:code||null};
+  pvpQueueUI(code?`Reto privado · código <b style="color:var(--cyan);font-family:var(--pixel)">${code}</b>`:'Conectando…');
   ws.onmessage=(ev)=>{ let m;try{m=JSON.parse(ev.data);}catch(e){return;} pvpOnMessage(m); };
   ws.onclose=()=>{ const wasPlaying=PVP&&(PVP.status==='match'); PVP=null; if(wasPlaying&&CB&&CB.live&&!CB.ended){ pvpReconnect(1); } };
   ws.onerror=()=>{};
@@ -695,8 +860,8 @@ function pvpQueueUI(msg){
 function pvpStatus(msg){ const e=$('#pvp-status'); if(e)e.textContent=msg; }
 function pvpOnMessage(m){
   if(!PVP)return;
-  if(m.t==='hello'){ PVP.status='queue'; pvpSend({t:'queue',captain:PVP.captain,stance:PVP.stance}); pvpStatus('Buscando rival…'); }
-  else if(m.t==='queued'){ pvpStatus('Buscando rival…'); }
+  if(m.t==='hello'){ PVP.status='queue'; pvpSend({t:'queue',captain:PVP.captain,stance:PVP.stance,code:PVP.code||undefined}); if(!PVP.code)pvpStatus('Buscando rival…'); }
+  else if(m.t==='queued'){ if(!PVP.code)pvpStatus('Buscando rival…'); }
   else if(m.t==='error'){
     if(m.msg==='resume_failed'){ toast('La partida ya terminó'); PVP=null; CB=null; closeOverlay(); go('home'); return; }
     toast(m.msg==='no_energy'?'Sin energía ⚡':m.msg==='empty_team'?'Equipo vacío':'PvP no disponible'); pvpCancel(); }
@@ -875,11 +1040,33 @@ function renderPrep(team){
       ${st('NEUTRAL','⚖️ Neutral','equilibrada')}
       ${st('DEFENSIVA','🛡️ Defensiva','+15% DEF<br>−8% ATK, +1⚡')}
     </div>
-    <button class="btn mag" data-act="goBattle">⚔️ BUSCAR RIVAL — ⚡1</button>`);
+    <button class="btn mag" data-act="goBattle">⚔️ BUSCAR RIVAL — ⚡1</button>
+    <button class="btn sm ghost cyan mt8" style="width:100%" data-act="duelPrivate">🤝 RETO PRIVADO (con código)</button>`);
   $("#capgrid").querySelectorAll("[data-cap]").forEach(c=>c.onclick=()=>{prep.captain=c.dataset.cap;renderPrep(team);});
   $("#stancesel").querySelectorAll("[data-stance]").forEach(c=>c.onclick=()=>{prep.stance=c.dataset.stance;renderPrep(team);});
 }
 function goBattle(){ const p=prep; closeOverlay(); startLivePvp(p.captain,p.stance); }
+// Duelo PRIVADO: ambos jugadores introducen el MISMO código (4-6 letras) y se
+// emparejan entre sí, sin ventana de nivel ni bot. El loop viral más barato.
+function duelPrivate(){
+  const gen=()=>Array.from({length:4},()=>"ABCDEFGHJKLMNPQRSTUVWXYZ"[Math.floor(Math.random()*24)]).join('');
+  openOverlay(`<div class="center">
+    <div style="font-family:var(--pixel);font-size:12px;color:var(--cyan);margin-bottom:10px">RETO PRIVADO</div>
+    <div class="dim mb8" style="font-size:13px">Compartid un código: quien tenga el mismo, se enfrenta a ti (sin límite de nivel).</div>
+    <input id="duel-code" maxlength="6" value="${gen()}" style="width:140px;text-align:center;font-family:var(--pixel);font-size:16px;letter-spacing:3px;background:#0a0818;color:var(--cyan);border:2px solid var(--cyan);padding:10px;text-transform:uppercase">
+    <div class="row mt8">
+      <button class="btn sm ghost" style="flex:1" data-act="close">CANCELAR</button>
+      <button class="btn sm mag" style="flex:1" data-act="duelStart">⚔️ RETAR</button>
+    </div></div>`);
+  const inp=$("#duel-code"); if(inp){inp.focus();inp.select();}
+}
+function duelStart(){
+  const code=(($("#duel-code")||{}).value||'').toUpperCase().replace(/[^A-Z0-9]/g,'').slice(0,6);
+  if(code.length<3){toast('Código demasiado corto');return;}
+  const p=prep||{captain:S.team[0],stance:'NEUTRAL'};
+  closeOverlay();
+  startLivePvp(p.captain,p.stance,code);
+}
 
 function buildArena(){
   const fHTML=(u)=>`<div class="fighter ${u.team==='B'?'enemy':''}" data-uid="${u.uid}" ${u.team==='B'?`data-act="planEnemy" data-arg="${u.uid}"`:''}>
@@ -1390,10 +1577,14 @@ let rankTab="diario";
 const MEDALS=['🥇','🥈','🥉'];
 async function renderRanking(){
   refreshChips();
-  let rows=[],me=null,closeAt=null,rewards=null;
-  try{ const r=await api(rankTab==="diario"?'/rankings/daily':'/rankings/league');
-    // Compatibilidad: forma nueva {rows,me} o antigua (array).
-    if(Array.isArray(r))rows=r;else{rows=r.rows||[];me=r.me||null;closeAt=r.closeAt||null;rewards=r.rewards||null;}
+  let rows=[],me=null,closeAt=null,rewards=null,hofWeek=null;
+  try{
+    if(rankTab==='fama'){ const h=await api('/hall-of-fame'); rows=h.rows||[]; hofWeek=h.week; }
+    else{
+      const r=await api(rankTab==="diario"?'/rankings/daily':'/rankings/league');
+      // Compatibilidad: forma nueva {rows,me} o antigua (array).
+      if(Array.isArray(r))rows=r;else{rows=r.rows||[];me=r.me||null;closeAt=r.closeAt||null;rewards=r.rewards||null;}
+    }
   }catch(e){}
   // Cierre SEMANAL de ligas: cuenta atrás + tu recompensa si mantienes la liga.
   let closeLine='';
@@ -1414,12 +1605,16 @@ async function renderRanking(){
       <div class="rank-row me"><span class="pos">${me.pos}</span><span class="nm">Tú</span>
       <span style="color:var(--gold);font-weight:700">${me.score}${rankTab==='diario'?' ✕':' pts'}</span></div>`;
   }
+  const sub=rankTab==='diario'?'<div class="dim mb8" style="font-size:13px">Con el lote de HOY (igual para todos), ¿quién ganó más combates?</div>'
+    :rankTab==='fama'?`<div class="dim mb8" style="font-size:13px">👑 Salón de la fama: el top de la última semana cerrada${hofWeek?` (${hofWeek})`:''}.</div>`
+    :`<div class="dim mb8" style="font-size:13px">Top global por puntos. Tú: <b style="color:var(--gold)">${S.user.league}</b> · <b style="color:var(--cyan)">${S.user.leaguePoints} pts</b>.</div>`;
   $("#s-ranking").innerHTML=`
     <h2 class="title">RANKING</h2>
     <div class="tabs">
       <div class="t ${rankTab==='diario'?'on':''}" data-act="setRank" data-arg="diario">DIARIO</div>
-      <div class="t ${rankTab==='liga'?'on':''}" data-act="setRank" data-arg="liga">GLOBAL</div></div>
-    ${rankTab==='diario'?'<div class="dim mb8" style="font-size:13px">Con el lote de HOY (igual para todos), ¿quién ganó más combates?</div>':`<div class="dim mb8" style="font-size:13px">Top global por puntos. Tú: <b style="color:var(--gold)">${S.user.league}</b> · <b style="color:var(--cyan)">${S.user.leaguePoints} pts</b>.</div>`}
+      <div class="t ${rankTab==='liga'?'on':''}" data-act="setRank" data-arg="liga">GLOBAL</div>
+      <div class="t ${rankTab==='fama'?'on':''}" data-act="setRank" data-arg="fama">👑 FAMA</div></div>
+    ${sub}
     ${closeLine}
     <div class="panel" style="padding:4px 8px">${board}</div>`;
 }
@@ -1490,6 +1685,12 @@ const ACTIONS={
   setSort:(a)=>setSort(a),
   goHome:()=>go('home'),
   shareAig:(a)=>shareAig(a),
+  openProfile:()=>openProfile(), editName:()=>editName(), claimAch:(a)=>claimAch(a),
+  watchReplay:(a)=>watchReplay(a), replaySpeed:()=>replaySpeed(), replayExit:()=>replayExit(),
+  setFrame:(a,el)=>setFrame(a,el),
+  duelPrivate:()=>duelPrivate(), duelStart:()=>duelStart(),
+  pushEnable:()=>pushEnable(), pushSkip:()=>{closeOverlay();localStorage.setItem('aigrons_push_asked','1');},
+  firstFight:()=>firstFight(),
   levelUp:(a)=>levelUp(a),
   toggleFav:(a)=>toggleFav(a),
   release:(a)=>release(a),

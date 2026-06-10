@@ -12,6 +12,7 @@
 const E = require("../../web/engine.js");
 const db = require("./db");
 const C = require("./config");
+const weekly = require("./missions");
 
 const COMBAT_KINDS = ["COMBATE", "ELITE", "JEFE"];
 
@@ -214,6 +215,9 @@ async function resolveCombat(userId, decisions) {
       await db.query("UPDATE users SET coins = coins + $1 WHERE id=$2", [reward, userId]);
       out.accountReward = reward;
     } else { out.accountReward = 0; out.noReward = "no_best"; }
+    // Perfil/logros + misión semanal de profundidad.
+    if (row.status === "cleared") await db.query("UPDATE users SET dungeons_cleared = dungeons_cleared + 1 WHERE id=$1", [userId]);
+    await weekly.bumpWeekly(userId, "w_dungeon", row.depth);
   }
   await saveRow(row);
   return Object.assign({ state: publicState(await loadRow(userId)) }, out);
@@ -295,6 +299,7 @@ async function abandonRun(userId) {
     await db.query("UPDATE users SET coins = coins + $1 WHERE id=$2", [reward, userId]);
     out.accountReward = reward;
   } else { out.accountReward = 0; out.noReward = "no_best"; }
+  await weekly.bumpWeekly(userId, "w_dungeon", row.depth);
   await saveRow(row);
   return Object.assign({ state: publicState(await loadRow(userId)) }, out);
 }
