@@ -164,6 +164,9 @@ function instById(id){ return S.collection.find(c=>c.instance_id===id); }
 
 /* ====================== UI: helpers ====================== */
 const $=s=>document.querySelector(s);
+// Escape HTML para texto controlado por OTROS usuarios (nombres en rankings,
+// banners de PvP...). El servidor sanea al escribir; esto es la segunda capa.
+const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
 /* ---------------- SFX (chiptune sintetizado, sin assets) + háptica ----------
    WebAudio genera los pitidos 8-bit al vuelo (encaja con el pixel-art y pesa 0).
@@ -203,6 +206,20 @@ const SFX=(()=>{
   };
 })();
 function buzz(ms){ if(navigator.vibrate){ try{navigator.vibrate(ms);}catch(e){} } }
+
+/* Beacon de ERRORES: los fallos de los jugadores dejan de ser invisibles.
+   Máximo 3 por sesión (el servidor además limita por IP). */
+let _errSent=0;
+function beaconError(msg,src){
+  if(_errSent>=3)return; _errSent++;
+  try{ fetch((typeof API_BASE!=='undefined'?API_BASE:'')+'/client-errors',{method:'POST',
+    headers:{'content-type':'application/json'},
+    body:JSON.stringify({msg:String(msg).slice(0,300),src:String(src||'').slice(0,200)})}).catch(()=>{});
+  }catch(e){}
+}
+window.addEventListener('error',e=>beaconError(e.message,(e.filename||'')+':'+(e.lineno||'')));
+window.addEventListener('unhandledrejection',e=>beaconError('promise: '+((e.reason&&e.reason.message)||e.reason),''));
+
 function refreshChips(){
   if(!S.user)return;
   $("#c-coins").textContent=S.user.coins;
@@ -231,6 +248,14 @@ function tickCountdowns(){
   if(nb&&S.daily){
     const t=S.daily.nextBatchAt?new Date(S.daily.nextBatchAt):(()=>{const n=new Date();return new Date(n.getFullYear(),n.getMonth(),n.getDate()+1);})();
     nb.textContent=fmtHMS(t-Date.now());
+  }
+  // botón de PvP deshabilitado por energía: cuenta atrás a la próxima ⚡
+  const pw=$("#pvp-wait");
+  if(pw&&S.user&&S.user.energyNextAt){
+    const ms=new Date(S.user.energyNextAt)-Date.now();
+    pw.textContent=fmtMMSS(ms);
+    // ya hay energía: reactiva el botón (solo si INICIO está visible)
+    if(ms<=0&&S.user.energy>=1&&$("#s-home").classList.contains('active')) renderHome();
   }
 }
 setInterval(tickCountdowns,1000);
@@ -381,7 +406,7 @@ async function renderHome(){
   const ev=S.daily&&S.daily.event;
   const evBanner=ev?`<div class="panel" style="padding:8px 10px;border-color:var(--gold);font-size:13px">${ev.emoji||'⚡'} <b style="color:var(--gold)">EVENTO:</b> ${ev.name}${ev.kind==='legendary'?' — legendarias extra en el lote':''}</div>`:'';
   $("#s-home").innerHTML=`
-    <h2 class="title" data-act="openProfile" style="cursor:pointer">${(S.user.displayName||'INICIO').toUpperCase()} <small class="dim" style="font-size:10px">👤 perfil</small></h2>
+    <h2 class="title" data-act="openProfile" style="cursor:pointer">${esc((S.user.displayName||'INICIO').toUpperCase())} <small class="dim" style="font-size:10px">👤 perfil</small></h2>
     ${leagueBarHTML()}
     ${evBanner}
     ${pushLine}
@@ -405,13 +430,17 @@ function teamPower(team){
 function teamCombatHTML(){
   const team=S.team.map(instById).filter(Boolean);
   const power=teamPower(team);
+  // Sin energía: el botón explica CUÁNDO podrás volver a luchar (cuenta atrás
+  // viva vía tickCountdowns) en vez de un disabled mudo.
+  const noEnergy=S.user.energy<1;
+  const btnLabel=noEnergy?`SIN ENERGÍA — ⚡ en <span id="pvp-wait">--:--</span>`:'⚔️ COMBATE PvP EN VIVO — ⚡1';
   return `<div class="panel"><div class="row" style="justify-content:space-between;align-items:center;margin-bottom:8px">
       <b style="font-size:14px">Tu equipo</b>
       ${power?`<span class="dim" style="font-size:12px">PODER <b style="color:var(--cyan)">${power}</b></span>`:''}
       <button class="btn sm ghost" data-act="editTeam">EDITAR</button></div>
       <div class="grid team-grid">${team.length?team.map(i=>cardHTML(i)).join(""):'<div class="grid-hint" data-act="editTeam">＋ Elige 3 aigrons de tu colección</div>'}</div>
     </div>
-    <button class="btn mag mb8" data-act="prepBattle" ${team.length<1?'disabled':''}>⚔️ COMBATE PvP EN VIVO — ⚡1</button>`;
+    <button class="btn mag mb8" data-act="prepBattle" ${(team.length<1||noEnergy)?'disabled':''}>${btnLabel}</button>`;
 }
 async function doClaim(){
   try{
@@ -514,7 +543,7 @@ async function openProfile(){
   const stat=(l,v)=>`<div style="flex:1;min-width:90px;text-align:center;padding:6px 2px;border:1px solid var(--line);background:#0a0818"><div style="font-family:var(--pixel);font-size:13px;color:var(--cyan)">${v}</div><div class="dim" style="font-size:10px">${l}</div></div>`;
   const weeks=(p.weeks||[]).map(w=>`<div class="rank-row" style="padding:4px 6px;font-size:12px"><span class="nm">Semana ${w.week_start.slice(5,10)}</span><span class="rar-txt" style="color:var(--gold)">${w.league}</span><span style="color:var(--cyan);margin-left:8px">${w.points} pts</span></div>`).join('')||'<div class="dim" style="font-size:12px;padding:6px">Aún sin semanas cerradas.</div>';
   const recent=(p.recent||[]).map(b=>`<div class="rank-row" style="padding:4px 6px;font-size:12px">
-     <span>${b.result==='WIN'?'🏆':'💀'}</span><span class="nm">${b.pvp?('vs '+(b.oppName||'rival')):'PvE'}</span>
+     <span>${b.result==='WIN'?'🏆':'💀'}</span><span class="nm">${b.pvp?('vs '+esc(b.oppName||'rival')):'PvE'}</span>
      ${b.hasReplay?`<button class="btn sm ghost" style="padding:2px 8px;font-size:11px" data-act="watchReplay" data-arg="${b.id}">▶ VER</button>`:''}</div>`).join('')||'<div class="dim" style="font-size:12px;padding:6px">Sin combates recientes.</div>';
   const arow=(a)=>{const pct=Math.min(100,Math.round(a.progress/a.goal*100));
     return `<div class="mis ${a.done?'done':''}"><div class="mrow">
@@ -524,7 +553,7 @@ async function openProfile(){
       </div><div class="mis-bar"><i style="width:${pct}%"></i></div></div>`;};
   openOverlay(`<div>
     <div class="center mb8">
-      <b id="prof-name" style="font-size:17px">${p.displayName}</b>
+      <b id="prof-name" style="font-size:17px">${esc(p.displayName)}</b>
       <button class="help" data-act="editName" title="Cambiar nombre" style="width:22px;height:22px;font-size:11px">✏️</button>
       <div class="dim" style="font-size:11px">🏅 ${p.league} · mejor: ${p.bestLeague}</div>
     </div>
@@ -607,7 +636,7 @@ function replaySpeed(){ if(!CB||CB.mode!=='replay')return; CB.speed=CB.speed===1
 function replayExit(){ if(CB&&CB.timer)clearTimeout(CB.timer); CB=null; go('home'); openProfile(); }
 
 /* ====================== COLECCIÓN ====================== */
-let collFilter="TODOS", collSort="RECIENTE";
+let collFilter="TODOS", collSort="RECIENTE", collSearch="";
 const RARITY_ORDER={LEGENDARIA:0,EPICA:1,RARA:2,COMUN:3};
 const isNewToday=(i)=>i.obtained_at&&new Date(i.obtained_at).toDateString()===new Date().toDateString();
 async function renderCollection(){
@@ -618,6 +647,9 @@ async function renderCollection(){
   const fLabel=f=>f==="TODOS"?`TODOS · ${S.collection.length}`:`${f} · ${counts[f]||0}`;
   let items=S.collection.slice();
   if(collFilter!=="TODOS")items=items.filter(i=>i.template.rarity===collFilter);
+  // Búsqueda por nombre/tipo (imprescindible cuando la colección crece).
+  if(collSearch){const q=collSearch.toLowerCase();
+    items=items.filter(i=>i.template.name.toLowerCase().includes(q)||(i.template.types||[i.template.type]).join(' ').toLowerCase().includes(q));}
   // Ordenación: RECIENTE (orden del servidor), NIVEL desc, RAREZA (leg→común, luego nivel).
   if(collSort==="NIVEL")items.sort((a,b)=>b.level-a.level);
   else if(collSort==="RAREZA")items.sort((a,b)=>(RARITY_ORDER[a.template.rarity]-RARITY_ORDER[b.template.rarity])||(b.level-a.level));
@@ -630,10 +662,13 @@ async function renderCollection(){
   $("#s-collection").innerHTML=`
     <h2 class="title">COLECCIÓN <small>${S.collection.length} aigrons</small></h2>
     <div class="filters">${fl.map(f=>`<span class="f ${f===collFilter?'on':''}" data-act="setFilter" data-arg="${f}">${fLabel(f)}</span>`).join("")}</div>
-    <div class="filters" style="margin-top:-4px">${sorts.map(s=>`<span class="f sortf ${s===collSort?'on':''}" data-act="setSort" data-arg="${s}">${s==='RECIENTE'?'🕐':s==='NIVEL'?'⬆':'★'} ${s}</span>`).join("")}</div>
-    ${items.length?`<div class="grid">${items.map(i=>cardHTML(i,extraFor(i))).join("")}</div>`:'<div class="dim tc" style="padding:30px">Nada aquí todavía.</div>'}`;
+    <div class="filters" style="margin-top:-4px">${sorts.map(s=>`<span class="f sortf ${s===collSort?'on':''}" data-act="setSort" data-arg="${s}">${s==='RECIENTE'?'🕐':s==='NIVEL'?'⬆':'★'} ${s}</span>`).join("")}
+      <input id="coll-search" placeholder="🔍 buscar" value="${esc(collSearch)}" style="flex:1;min-width:90px;background:#0a0818;border:2px solid var(--line);color:var(--ink);font-family:var(--ui);font-size:12px;padding:4px 7px"></div>
+    ${items.length?`<div class="grid">${items.map(i=>cardHTML(i,extraFor(i))).join("")}</div>`:'<div class="dim tc" style="padding:30px">Nada aquí'+(collSearch?' con esa búsqueda':' todavía')+'.</div>'}`;
   renderCanvases($("#s-collection"));
   $("#s-collection").querySelectorAll(".card").forEach(c=>c.onclick=()=>openDetail(c.dataset.iid));
+  const si=$("#coll-search");
+  if(si){ si.oninput=()=>{ collSearch=si.value; const pos=si.selectionStart; renderCollection(); const si2=$("#coll-search"); if(si2){si2.focus(); si2.setSelectionRange(pos,pos);} }; }
 }
 function setFilter(f){collFilter=f;renderCollection();}
 function setSort(s){collSort=s;renderCollection();}
@@ -791,12 +826,21 @@ function renderTeamPicker(){
     <div class="center" style="margin:12px 0 6px"><b style="font-size:13px">Cambiar / añadir</b>
       <div class="dim" style="font-size:11px">toca uno para meterlo al equipo</div></div>
     <div class="grid" id="restgrid" style="max-height:34vh;overflow-y:auto">${restGrid}</div>
-    <button class="btn mt8" data-act="saveTeam">GUARDAR EQUIPO</button></div>`);
+    <div class="row mt8">
+      <button class="btn sm ghost cyan" style="flex:0 0 auto" data-act="autoTeam" title="Los 3 de mayor poder">⚡ AUTO</button>
+      <button class="btn" style="flex:1" data-act="saveTeam">GUARDAR EQUIPO</button>
+    </div></div>`);
   const rg=$("#restgrid"); if(rg)rg.scrollTop=prevScroll;
   $("#modal").querySelectorAll(".card[data-iid]").forEach(c=>c.onclick=()=>{
     const iid=c.dataset.iid;const k=teamSel.indexOf(iid);
     if(k>=0)teamSel.splice(k,1);else if(teamSel.length<3)teamSel.push(iid);else{toast("Máx 3");return;}
     renderTeamPicker();});   // re-render SIN resetear teamSel
+}
+// AUTO: elige los 3 aigrons de mayor poder (índice de stats escalados).
+function autoTeam(){
+  const power=i=>{const s=i.template.stats||i.template.base_stats;return s?s.hp/10+s.atkP+s.atkS+s.defP+s.defS+s.spd:0;};
+  teamSel=S.collection.slice().sort((a,b)=>power(b)-power(a)).slice(0,3).map(i=>i.instance_id);
+  renderTeamPicker();
 }
 async function saveTeam(){
   if(!teamSel.length){toast("Elige al menos 1");return;}
@@ -880,11 +924,12 @@ function startLiveBattle(m){
   const A=m.team.map((s,i)=>mkUnit(s,'A',i));      // MI equipo -> local 'A' (abajo)
   const B=m.opponent.map((s,i)=>mkUnit(s,'B',i));  // rival -> local 'B' (arriba)
   CB={A,B,seed:0,battleId:m.matchId,pvp:!m.bot,live:true,you:m.you,oppName:m.oppName||'Rival',
+      duelCode:(PVP&&PVP.code)||null, // para ofrecer REVANCHA al terminar
       rng:null,turn:0,order:[],oi:0,plan:{},planTurn:0,selecting:null,phase:'wait',speed:1,
       decisions:[],timer:null,planTimer:null,initA:m.team,initB:m.opponent,ended:false};
   buildArena();
   const vs=$(".vs"); if(vs){vs.style.opacity=1;setTimeout(()=>{vs.style.opacity=0;},800);}
-  setBanner(`⚔️ ${m.bot?'Combate':'PvP'} vs <b>${CB.oppName}</b>`);
+  setBanner(`⚔️ ${m.bot?'Combate':'PvP'} vs <b>${esc(CB.oppName)}</b>`);
 }
 // Reconstruye el combate tras reanudar: mismos equipos + estado ACTUAL del servidor.
 function resumeLiveBattle(m){
@@ -1010,10 +1055,18 @@ function pvpOver(m){
     <div style="font-family:var(--pixel);font-size:16px;color:${won?'var(--green)':'var(--red)'};margin:6px 0 10px">${won?'¡VICTORIA!':'DERROTA'}</div>
     <div class="dim" style="font-size:13px">${m.reason==='opponent_left'?(won?'Tu rival abandonó.':'Abandonaste.'):'Combate PvP en vivo terminado.'}</div>
     <div style="margin:12px 0;font-size:14px">Liga <b>${m.league}</b> · ${m.leaguePoints} pts</div>
+    ${CB&&CB.duelCode&&m.reason!=='opponent_left'?`<button class="btn mag mb8" data-act="rematch" style="width:100%">🔁 REVANCHA (código ${esc(CB.duelCode)})</button>`:''}
     <button class="btn" data-act="pvpDone" style="width:100%">CONTINUAR</button></div>`);
   if(PVP){ try{PVP.ws.close();}catch(e){} PVP=null; }
 }
 function pvpDone(){ closeOverlay(); CB=null; go('home'); }
+// Revancha de un duelo privado: vuelve a la cola con el MISMO código.
+function rematch(){
+  const code=CB&&CB.duelCode; const cap=(prep&&prep.captain)||S.team[0]; const st=(prep&&prep.stance)||'NEUTRAL';
+  closeOverlay(); CB=null;
+  if(!code){ go('home'); return; }
+  startLivePvp(cap,st,code);
+}
 
 /* --- Preparación: capitán + estancia (decisión previa) --- */
 function prepBattle(){
@@ -1532,7 +1585,7 @@ function dgRankTab(id){ dgDiff=id; renderDungeon(); }
 async function loadDgRank(){
   try{ const r=await api('/dungeon/ranking?difficulty='+dgDiff); const box=$("#dg-rank"); if(!box)return;
     const rows=r.rows||[];
-    box.innerHTML=rows.length?rows.slice(0,10).map(x=>`<div class="rank-row ${x.me?'me':''}" style="padding:5px 4px"><span class="pos">${x.pos}</span><span class="nm">${x.name}</span><span style="color:var(--gold)">${x.cleared?'🏆 ':''}nodo ${x.depth}</span></div>`).join(""):'Nadie ha entrado aún en esta dificultad.';
+    box.innerHTML=rows.length?rows.slice(0,10).map(x=>`<div class="rank-row ${x.me?'me':''}" style="padding:5px 4px"><span class="pos">${x.pos}</span><span class="nm">${esc(x.name)}</span><span style="color:var(--gold)">${x.cleared?'🏆 ':''}nodo ${x.depth}</span></div>`).join(""):'Nadie ha entrado aún en esta dificultad.';
   }catch(e){}
 }
 async function dgStart(diff){ try{ dgDiff=ENGINE.DUNGEON_DIFFICULTIES[diff]?diff:dgDiff; D=await api('/dungeon/start',{method:'POST',body:{difficulty:dgDiff}}); renderDungeon(); }catch(e){ toast(e.data&&e.data.error==='empty_team'?'Configura tu equipo en INICIO':'No se pudo entrar'); } }
@@ -1595,7 +1648,7 @@ async function renderRanking(){
     closeLine=`<div class="panel" style="padding:8px 10px;font-size:12px">⏳ Cierre semanal en <b style="color:var(--cyan)">${d}d ${h}h</b>${rw?` · recompensa ${S.user.league}: <b style="color:var(--gold)">+${rw.coins}🪙</b>${rw.gems?` <b style="color:var(--magenta)">+${rw.gems}💎</b>`:''}`:''}</div>`;
   }
   const rowHTML=r=>`<div class="rank-row ${r.me?'me':''}">
-     <span class="pos">${r.pos<=3?MEDALS[r.pos-1]:r.pos}</span><span class="nm">${r.name}</span>
+     <span class="pos">${r.pos<=3?MEDALS[r.pos-1]:r.pos}</span><span class="nm">${esc(r.name)}</span>
      <span style="color:var(--gold);font-weight:700">${r.score}${rankTab==='diario'?' ✕':' pts'}</span></div>`;
   let board=rows.length?rows.map(rowHTML).join("")
      :`<div class="dim tc" style="padding:18px">Aún no hay datos hoy.<br><button class="btn sm mag mt8" data-act="goHome">⚔️ IR A COMBATIR</button></div>`;
@@ -1697,6 +1750,8 @@ const ACTIONS={
   fusionPick:(a)=>fusionPick(a),
   editTeam:()=>editTeam(),
   prepBattle:()=>prepBattle(),
+  autoTeam:()=>autoTeam(),
+  rematch:()=>rematch(),
   livePvp:()=>startLivePvp(), pvpCancel:()=>pvpCancel(), pvpDone:()=>pvpDone(),
   goBattle:()=>goBattle(),
   saveTeam:()=>saveTeam(),

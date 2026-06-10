@@ -305,6 +305,10 @@ h2.title small{font-family:var(--ui);font-size:13px;color:var(--ink-dim);font-we
   padding:8px 14px;font-size:13px;z-index:200;color:var(--cyan);display:none;white-space:nowrap}
 .toast.show{display:block;animation:fade .2s}
 .mb8{margin-bottom:8px}.mt8{margin-top:8px}.tc{text-align:center}.dim{color:var(--ink-dim)}
+/* accesibilidad: respeta la preferencia de reducir movimiento del sistema */
+@media (prefers-reduced-motion: reduce){
+  *,*::before,*::after{animation-duration:.01ms !important;animation-iteration-count:1 !important;transition-duration:.01ms !important}
+}
 /* arte por IA (image_url) con fallback al sprite procedural en canvas */
 .aigimg{width:100%;image-rendering:pixelated;display:block;background:#0a081880}
 .fighter .aigimg{width:74px;margin:0 auto}.fighter.enemy .aigimg{transform:scaleX(-1)}

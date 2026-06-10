@@ -23,6 +23,21 @@ if (process.env.NODE_ENV === "production" && SECRET === "dev-secret-cambia-esto"
   process.exit(1);
 }
 
+// Sanea un nombre visible ANTES de guardarlo: los nombres acaban en el HTML de
+// otros jugadores (rankings, banners de PvP), así que aquí se eliminan los
+// caracteres con significado en HTML y los de control. Defensa en el origen
+// (el cliente además escapa al renderizar: dos capas).
+function sanitizeName(name) {
+  const clean = String(name || "")
+    .replace(/[<>&"'`\\/]/g, "")
+    // eslint-disable-next-line no-control-regex -- elimina chars de control a propósito
+    .replace(/[\u0000-\u001f\u007f]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 24);
+  return clean.length >= 2 ? clean : "Jugador";
+}
+
 function sign(user) {
   return jwt.sign({ uid: user.id }, SECRET, { expiresIn: "30d" });
 }
@@ -84,14 +99,19 @@ async function verifyApple(idToken) {
 
 // Devuelve { subject, displayName } o lanza si el token no es válido.
 async function verifyIdentity({ provider, subject, idToken, displayName }) {
-  if (provider === "google") return verifyGoogle(idToken);
-  if (provider === "apple") return verifyApple(idToken);
-  // provider 'dev' o desconocido
-  if (ALLOW_DEV_AUTH) {
+  let out;
+  if (provider === "google") out = await verifyGoogle(idToken);
+  else if (provider === "apple") out = await verifyApple(idToken);
+  else if (ALLOW_DEV_AUTH) {
+    // provider 'dev' o desconocido
     if (!subject) throw new Error("subject_required");
-    return { subject, displayName: displayName || "Jugador" };
+    out = { subject, displayName: displayName || "Jugador" };
+  } else {
+    throw new Error("dev_auth_disabled");
   }
-  throw new Error("dev_auth_disabled");
+  // El nombre viene del proveedor o del cliente: SIEMPRE saneado antes de BD.
+  out.displayName = sanitizeName(out.displayName);
+  return out;
 }
 
 // Verifica un JWT de sesión y devuelve el userId (uid), o null si es inválido.
@@ -100,4 +120,4 @@ function verifyToken(token) {
   try { return jwt.verify(token, SECRET).uid; } catch (e) { return null; }
 }
 
-module.exports = { sign, authMiddleware, verifyIdentity, verifyToken, ALLOW_DEV_AUTH, GOOGLE_CLIENT_ID: process.env.AUTH_GOOGLE_CLIENT_ID || "" };
+module.exports = { sign, authMiddleware, verifyIdentity, verifyToken, sanitizeName, ALLOW_DEV_AUTH, GOOGLE_CLIENT_ID: process.env.AUTH_GOOGLE_CLIENT_ID || "" };

@@ -820,9 +820,9 @@ app.get("/profile", authMiddleware, wrap(async (req, res) => {
     recent: recent.rows.map((b) => ({ id: b.id, result: b.result, at: b.created_at, pvp: b.pvp, hasReplay: b.has_replay, oppName: b.opp_name })),
   });
 }));
-// Cambio de nombre (3-16 caracteres razonables).
+// Cambio de nombre (3-16 caracteres razonables, saneado contra HTML).
 app.post("/me/name", authMiddleware, wrap(async (req, res) => {
-  const name = ((req.body && req.body.name) || "").trim();
+  const name = auth.sanitizeName((req.body && req.body.name) || "");
   if (!/^[\p{L}\p{N} _.\-·]{3,16}$/u.test(name)) return res.status(400).json({ error: "bad_name" });
   await db.query("UPDATE users SET display_name=$1 WHERE id=$2", [name, req.userId]);
   res.json({ displayName: name });
@@ -903,6 +903,44 @@ app.post("/push/unsubscribe", authMiddleware, wrap(async (req, res) => {
   const endpoint = req.body && req.body.endpoint;
   await db.query("DELETE FROM push_subs WHERE user_id=$1 AND ($2::text IS NULL OR endpoint=$2)", [req.userId, endpoint || null]);
   res.json({ ok: true });
+}));
+
+// ------------------------- OBSERVABILIDAD MÍNIMA -----------------------------
+// Errores del CLIENTE: beacon ligero al log del servidor (sin Sentry todavía,
+// pero deja de ser un agujero negro). Rate limit estricto y campos acotados.
+const errorLimiter = rateLimit({ windowMs: 60 * 1000, max: 5, standardHeaders: false, legacyHeaders: false });
+app.post("/client-errors", errorLimiter, (req, res) => {
+  const b = req.body || {};
+  const msg = String(b.msg || "").slice(0, 300);
+  const src = String(b.src || "").slice(0, 200);
+  const ua = String(req.headers["user-agent"] || "").slice(0, 120);
+  if (msg) console.error(`[cliente] ${msg} @ ${src} · ${ua}`);
+  res.json({ ok: true });
+});
+
+// Stats de negocio (DAU, retención D1/D7, combates): protegido por ADMIN_KEY.
+//   curl -H "x-admin-key: $ADMIN_KEY" /admin/stats
+app.get("/admin/stats", wrap(async (req, res) => {
+  const key = process.env.ADMIN_KEY;
+  if (!key || req.headers["x-admin-key"] !== key) return res.status(404).json({ error: "not_found" });
+  const today = C.todayStr();
+  const q = async (sql, params) => (await db.query(sql, params)).rows[0];
+  const users = await q("SELECT COUNT(*)::int AS total, COUNT(*) FILTER (WHERE created_at::date = CURRENT_DATE)::int AS new_today FROM users");
+  const dau = await q("SELECT COUNT(*)::int AS n FROM users WHERE last_claim_date = $1", [today]);
+  const battles = await q("SELECT COUNT(*)::int AS total, COUNT(*) FILTER (WHERE defender_id IS NOT NULL)::int AS pvp FROM battles WHERE daily_date = $1", [today]);
+  // Retención: de los creados hace N días, ¿cuántos reclamaron HOY?
+  const ret = async (days) => {
+    const r = await q(
+      `SELECT COUNT(*)::int AS cohort, COUNT(*) FILTER (WHERE last_claim_date = $1)::int AS back
+         FROM users WHERE created_at::date = CURRENT_DATE - $2::int`, [today, days]);
+    return { cohort: r.cohort, back: r.back, rate: r.cohort ? Math.round(r.back / r.cohort * 100) : null };
+  };
+  res.json({
+    date: today,
+    users: { total: users.total, newToday: users.new_today, dauToday: dau.n },
+    battlesToday: { total: battles.total, pvp: battles.pvp },
+    retention: { d1: await ret(1), d7: await ret(7) },
+  });
 }));
 
 // --------------------------------- HEALTH ------------------------------------

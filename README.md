@@ -370,9 +370,14 @@ test de paridad en `npm test`.
   `battle_offers` consumidas, `battles`/`daily_missions`/`*_scores` antiguos y runs
   caducadas (retenciones por env). Caché de 30s del top de rankings. Advisory lock
   en la generación del lote (sin doble generación a medianoche).
-- Pendiente: tests de integración de endpoints, métricas (retención D1/D7, win-rate
-  por tipo para balance), matchmaking distribuido (Redis) para >1 réplica, CDN para
-  arte/estáticos, Sentry + pruebas de carga.
+- ✅ Tests de integración en CI (job `smoke` con PostgreSQL de servicio).
+- ✅ Observabilidad mínima: `GET /admin/stats` (DAU, nuevos, combates, retención
+  D1/D7; protegido por `ADMIN_KEY`) y beacon de errores del cliente
+  (`POST /client-errors`, rate-limited, al log del servidor).
+- ✅ XSS endurecido: los nombres se SANEAN al escribir (auth.sanitizeName +
+  migración 001 para datos viejos) y se ESCAPAN al renderizar (esc() en cliente).
+- Pendiente: matchmaking distribuido (Redis) para >1 réplica, CDN para
+  arte/estáticos, Sentry real + pruebas de carga, i18n.
 
 ---
 
