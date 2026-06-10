@@ -86,15 +86,18 @@ function colorFor(v,tpl){
     case 4:return tpl.rarity==="LEGENDARIA"?"#ffd23f":"#08060f";case 9:return "#fff7c8";default:return null;}
 }
 const _spriteCache={};
-function drawAigron(canvas,tpl,px){
+function drawAigron(canvas,tpl,px,prismId){
   px=px||8; const N=16;
   canvas.width=N*px; canvas.height=N*px;
   const ctx=canvas.getContext("2d"); ctx.imageSmoothingEnabled=false;
   ctx.clearRect(0,0,canvas.width,canvas.height);
   const key=tpl.id||("s"+spriteSeed(tpl));
   const g=_spriteCache[key]||(_spriteCache[key]=buildSprite(tpl));
+  // Prismática: paleta alternativa determinista por instancia (cosmético).
+  const prism=prismId&&ENGINE.isPrismatic(prismId);
   for(let y=0;y<N;y++)for(let x=0;x<N;x++){
-    const c=colorFor(g[y][x],tpl); if(!c)continue;
+    let c=colorFor(g[y][x],tpl); if(!c)continue;
+    if(prism) c=ENGINE.prismaticShift(c,prismId);
     ctx.fillStyle=c; ctx.fillRect(x*px,y*px,px,px);
   }
 }
@@ -117,10 +120,12 @@ function tpl(id){ return TPL[id]||(TPL[id]=genTemplate(id)); }
 function registerUnitArt(list){ (list||[]).forEach(s=>{ if(s&&s.tplId&&s.image_url){
   TPL[s.tplId]=Object.assign(TPL[s.tplId]||genTemplate(s.tplId),{image_url:s.image_url,image_thumb_url:s.image_thumb_url||null});
 }});}
-/* HTML del arte: imagen IA si existe, si no canvas procedural */
-function artTag(t,px){
-  if(t&&t.image_url) return `<img class="aigimg" src="${t.image_url}" alt="${t.name||''}">`;
-  return `<canvas data-aig="${t.id}" data-px="${px}"></canvas>`;
+/* HTML del arte: imagen IA si existe, si no canvas procedural.
+   instId opcional -> variante prismática (cosmético) si toca y la feature está on. */
+function artTag(t,px,instId){
+  if(t&&t.image_url) return `<img class="aigimg" src="${t.image_url}" alt="${esc(t.name||'')}">`;
+  const prism=(FEATURES.prismatic&&instId&&ENGINE.isPrismatic(instId))?` data-prism="${instId}"`:'';
+  return `<canvas data-aig="${t.id}" data-px="${px}"${prism}></canvas>`;
 }
 /* tipos de una plantilla (1 o 2) */
 function tplTypes(t){ return (t&&t.types&&t.types.length)?t.types:[t&&t.type].filter(Boolean); }
@@ -156,6 +161,10 @@ async function login(){
 
 /* ---------------- Estado (cache del servidor) ---------------- */
 const S={user:null,daily:null,collection:[],team:[]};
+// Flags de funcionalidad (las 7 mecánicas). Se cargan del servidor en el boot;
+// por defecto todas on para que el primer render no esconda nada por error.
+const FEATURES={puzzle:true,echoes:true,worldboss:true,nemesis:true,prismatic:true,oracle:true,arena:true};
+async function loadFeatures(){ try{ const f=await api('/features'); Object.assign(FEATURES,f); }catch(e){} }
 async function refreshMe(){ S.user=await api('/me'); }
 async function refreshDaily(){ S.daily=await api('/daily'); (S.daily.batch||[]).forEach(registerTpl); }
 async function refreshCollection(){ const c=await api('/collection'); c.forEach(x=>registerTpl(x.template)); S.collection=c; }
@@ -265,7 +274,7 @@ function openOverlay(html){$("#modal").innerHTML=html;$("#overlay").classList.ad
 function closeOverlay(){$("#overlay").classList.remove("show");}
 $("#overlay").addEventListener("click",e=>{if(e.target.id==="overlay")closeOverlay();});
 function renderCanvases(root){
-  root.querySelectorAll("canvas[data-aig]").forEach(c=>{if(c._done)return;drawAigron(c,tpl(c.dataset.aig),parseInt(c.dataset.px||"8"));c._done=1;});
+  root.querySelectorAll("canvas[data-aig]").forEach(c=>{if(c._done)return;drawAigron(c,tpl(c.dataset.aig),parseInt(c.dataset.px||"8"),c.dataset.prism);c._done=1;});
   root.querySelectorAll("canvas[data-egg]").forEach(c=>{if(c._done)return;drawEgg(c,parseInt(c.dataset.px||"8"));c._done=1;});
 }
 // Versión CORTA (para el planificador de combate).
@@ -294,10 +303,12 @@ function abilityEffect(id){const a=ABILITIES[id];return {
   stun:`Aturde a un enemigo: se salta su próxima acción (${a.turns} turno${a.turns>1?'s':''}).`,
   shield:`Da un escudo que absorbe daño (${a.amt*100}% de la vida máxima) ${a.team?"a todo tu equipo":"a esta criatura"} antes de tocar el HP.`,
   drain:`Daña a un enemigo (${a.mult}× tu ataque) y te curas el ${a.drain*100}% del daño hecho.`}[a.kind];}
-function cardHTML(inst,extra){const t=inst.template;return `<div class="card r-${t.rarity} ${inst.frame?'frame-'+inst.frame:''}" data-iid="${inst.instance_id}">
-  <div class="lv">L${inst.level}</div>${inst.favorite?'<div class="fav">★</div>':''}${extra||""}
-  ${artTag(t,6)}
-  <div class="nm">${t.name}</div><div class="ty rar-txt ${t.rarity}">${typesLabel(t)}</div></div>`;}
+function cardHTML(inst,extra){const t=inst.template;
+  const prism=FEATURES.prismatic&&ENGINE.isPrismatic(inst.instance_id);
+  return `<div class="card r-${t.rarity} ${inst.frame?'frame-'+inst.frame:''} ${prism?'prismatic':''}" data-iid="${inst.instance_id}">
+  <div class="lv">L${inst.level}</div>${inst.favorite?'<div class="fav">★</div>':''}${prism?'<div class="prism-badge">✦</div>':''}${extra||""}
+  ${artTag(t,6,inst.instance_id)}
+  <div class="nm">${esc(t.name)}</div><div class="ty rar-txt ${t.rarity}">${typesLabel(t)}</div></div>`;}
 function statBars(o,level){
   // Tope teórico por stat = (tope rareza máxima LEGENDARIA) x (arquetipo máx ~1.3),
   // escalado al MISMO nivel que el valor mostrado -> el nivel se cancela y la barra
@@ -411,7 +422,9 @@ async function renderHome(){
     ${evBanner}
     ${pushLine}
     ${dailyCard}
+    ${oracleCard()}
     ${teamCombatHTML()}
+    ${modesGrid()}
     <div class="panel"><b style="font-size:14px">Misiones diarias</b>
       ${missions.map(mrow).join("")}
       ${weeklyM.length?`<div style="border-top:1px solid var(--line);margin-top:8px;padding-top:6px"><b style="font-size:13px">Semanales</b> <span class="dim" style="font-size:10px">se reinician el lunes</span>${weeklyM.map(mrow).join("")}</div>`:''}
@@ -419,7 +432,29 @@ async function renderHome(){
     ${dungeonHomeCard(dg)}`;
   renderCanvases($("#s-home"));
   tickCountdowns();
+  loadOracle();
+  if(FEATURES.worldboss) api('/worldboss').then(b=>{const e=$("#boss-mini");if(e)e.innerHTML=b.defeated?'🏆 ¡derrotado!':`HP ${b.pct}% · ${b.top.length} héroes`;}).catch(()=>{});
   $("#s-home").querySelectorAll(".card").forEach(c=>c.onclick=()=>openDetail(c.dataset.iid));
+}
+// Profecía del Oráculo (lote de mañana). Se carga async tras el primer render.
+function oracleCard(){
+  if(!FEATURES.oracle) return '';
+  return `<div class="panel" id="oracle-card" style="border-color:var(--epi);padding:9px 11px;font-size:12px">
+    🔮 <b style="color:var(--epi)">El Oráculo</b> <span class="dim" id="oracle-text">consulta los astros…</span></div>`;
+}
+async function loadOracle(){
+  if(!FEATURES.oracle)return; const el=$("#oracle-text"); if(!el)return;
+  try{ const o=await api('/oracle'); el.innerHTML=`«${esc(o.text)}»`; }catch(e){ el.textContent='el futuro es incierto.'; }
+}
+// Rejilla de MODOS de juego innovadores (puzzle, jefe mundial, némesis, arena).
+function modesGrid(){
+  const tiles=[];
+  if(FEATURES.puzzle) tiles.push(`<div class="mode-tile" data-act="openPuzzle"><span class="mi">🧩</span><b>Puzzle Diario</b><span class="dim">mín. turnos · igual para todos</span></div>`);
+  if(FEATURES.worldboss) tiles.push(`<div class="mode-tile" data-act="openBoss"><span class="mi">🐉</span><b>Jefe Mundial</b><span class="dim" id="boss-mini">raid cooperativa</span></div>`);
+  if(FEATURES.nemesis) tiles.push(`<div class="mode-tile" data-act="openNemesis"><span class="mi">😈</span><b>Tu Némesis</b><span class="dim" id="nem-mini">rival recurrente</span></div>`);
+  if(FEATURES.arena) tiles.push(`<div class="mode-tile" data-act="openArena"><span class="mi">⚔️</span><b>Arena Sellada</b><span class="dim">draft · sin colección</span></div>`);
+  if(!tiles.length) return '';
+  return `<div class="modes">${tiles.join('')}</div>`;
 }
 // Bloque "Tu equipo" + botón de combate PvP (en INICIO).
 function teamPower(team){
@@ -534,6 +569,158 @@ async function claimMission(key){
     await refreshMe(); refreshChips(); renderHome(); toast('+'+r.reward+'🪙'); SFX.play('claim'); }
   catch(e){ toast('Aún no completada'); }
 }
+
+/* ============== MECÁNICAS INNOVADORAS (UI cliente) ============== */
+// -- PUZZLE DIARIO: equipo y enemigos fijos, gana en MENOS turnos --------------
+async function openPuzzle(){
+  let p; try{ p=await api('/puzzle'); }catch(e){ toast('Puzzle no disponible'); return; }
+  const best=p.best?`Tu récord: <b style="color:var(--gold)">${p.best.turns} turnos</b> (${p.best.hpLeft} HP)`:'Sin resolver aún';
+  const rk=(p.ranking&&p.ranking.rows||[]).slice(0,5).map(r=>`<div class="rank-row ${r.me?'me':''}" style="padding:4px 6px;font-size:12px"><span class="pos">${r.pos}</span><span class="nm">${esc(r.name)}</span><span style="color:var(--gold)">${r.turns}t</span></div>`).join('')||'<div class="dim" style="font-size:12px;padding:6px">Sé el primero en resolverlo.</div>';
+  openOverlay(`<div class="center">
+    <div style="font-family:var(--pixel);font-size:13px;color:var(--cyan);margin-bottom:6px">🧩 PUZZLE DIARIO</div>
+    <div class="dim mb8" style="font-size:13px">El MISMO reto para todo el mundo hoy. Gana en el mínimo de turnos.<br>${best}</div>
+    <div class="dim" style="font-size:11px;margin-bottom:8px">Tu equipo (fijo) vs enemigos (fijos) · nivel ${p.level}</div>
+    <button class="btn mag" data-act="puzzlePlay">▶ JUGAR EL PUZZLE</button>
+    <div class="mt8" style="text-align:left"><b style="font-size:12px">🏆 Mejores de hoy</b>${rk}</div>
+    <button class="btn sm ghost mt8" data-act="close">CERRAR</button></div>`);
+  PUZZLE=p;
+}
+let PUZZLE=null;
+function puzzlePlay(){
+  if(!PUZZLE)return; const p=PUZZLE; closeOverlay();
+  startLocalCombat({team:p.team,enemy:p.enemy,seed:p.seed,mode:'puzzle',title:'PUZZLE',
+    onResolve:(decisions)=>{
+      api('/puzzle/solve',{method:'POST',body:{decisions}}).then(r=>{
+        CB=null;
+        SFX.play(r.solved?'win':'lose');
+        const rk=(r.ranking&&r.ranking.me)?`Posición: <b style="color:var(--cyan)">#${r.ranking.me.pos}</b>`:'';
+        openOverlay(`<div class="center">
+          <div style="font-family:var(--pixel);font-size:15px;color:${r.solved?'var(--gold)':'var(--ink-dim)'};margin-bottom:8px">${r.solved?'¡RESUELTO!':'NO LO LOGRASTE'}</div>
+          <div style="font-size:40px">${r.solved?'🧩':'💀'}</div>
+          ${r.solved?`<div class="mt8">En <b style="color:var(--cyan)">${r.turns} turnos</b> · ${r.hpLeft} HP restante<br>${rk}</div>
+            <div class="panel mt8" style="font-size:12px">Comparte: <b>AIGRONS Puzzle — ${r.turns} turnos 🧩</b></div>
+            <button class="btn mt8" data-act="puzzleShare" data-arg="${r.turns}">📤 COMPARTIR</button>`:'<div class="dim mt8" style="font-size:13px">Cambia el orden de tus habilidades e inténtalo otra vez.</div>'}
+          <button class="btn ghost mt8" data-act="goHome">VOLVER</button></div>`);
+      }).catch(()=>{ toast('Error al validar'); CB=null; go('home'); });
+    }});
+}
+function puzzleShare(turns){
+  const txt=`AIGRONS Puzzle Diario — resuelto en ${turns} turnos 🧩 ¿puedes hacerlo mejor?`;
+  if(navigator.share){ navigator.share({text:txt}).catch(()=>{}); }
+  else { navigator.clipboard&&navigator.clipboard.writeText(txt); toast('Copiado al portapapeles'); }
+}
+
+// -- JEFE MUNDIAL: raid cooperativa con HP global ------------------------------
+async function openBoss(){
+  let b; try{ b=await api('/worldboss'); }catch(e){ toast('Jefe no disponible'); return; }
+  const top=(b.top||[]).slice(0,5).map(x=>`<div class="rank-row ${x.me?'me':''}" style="padding:4px 6px;font-size:12px"><span class="pos">${x.pos}</span><span class="nm">${esc(x.name)}</span><span style="color:var(--magenta)">${fmtBig(x.damage)}</span></div>`).join('')||'<div class="dim" style="font-size:12px;padding:6px">Nadie le ha pegado aún. ¡Sé el primero!</div>';
+  openOverlay(`<div class="center">
+    <div style="font-family:var(--pixel);font-size:13px;color:var(--red);margin-bottom:4px">🐉 ${esc(b.name)}</div>
+    <div class="dim" style="font-size:11px">Jefe Mundial · tipo ${b.type} · toda la comunidad colabora</div>
+    <div class="boss-hp"><i style="width:${b.pct}%"></i><span>${fmtBig(b.hpLeft)} / ${fmtBig(b.hpMax)} HP</span></div>
+    ${b.defeated?'<div style="color:var(--gold);font-weight:700">🏆 ¡La comunidad lo derrotó!</div>':`<button class="btn mag" data-act="bossFight">⚔️ GOLPEAR — ⚡1</button>`}
+    <div class="dim mt8" style="font-size:11px">Tu daño total: <b style="color:var(--magenta)">${fmtBig(b.myDamage)}</b> (${b.myHits} golpes)</div>
+    <div class="mt8" style="text-align:left"><b style="font-size:12px">🏆 Top héroes</b>${top}</div>
+    <button class="btn sm ghost mt8" data-act="close">CERRAR</button></div>`);
+}
+function bossFight(){
+  closeOverlay();
+  const A=S.team.map(instById).filter(Boolean);
+  if(!A.length){ toast('Necesitas equipo'); return; }
+  // El cliente anima un combate "de práctica" contra 3 avatares del jefe; el
+  // servidor recalcula el daño real. Pedimos los stats del jefe vía /nemesis? No:
+  // reusamos el equipo del jugador y dejamos que el servidor mida el daño.
+  api('/worldboss',{}).then(()=>{
+    // Combate ilustrativo: tu equipo vs un trío genérico (el daño cuenta en server).
+    const enemy=A.map(u=>({...publicUnitLocal(u)})); // espejo visual; daño lo da el server
+    startLocalCombat({team:A.map(publicUnitLocal),enemy,seed:(Math.random()*1e9)|0,mode:'boss',title:'JEFE MUNDIAL',
+      onResolve:(decisions)=>{
+        api('/worldboss/hit',{method:'POST',body:{decisions}}).then(r=>{
+          CB=null; refreshMe().then(refreshChips);
+          SFX.play('crit'); buzz(60);
+          openOverlay(`<div class="center">
+            <div style="font-family:var(--pixel);font-size:14px;color:var(--magenta);margin-bottom:8px">💥 ¡GOLPE!</div>
+            <div style="font-size:40px">🐉</div>
+            <div class="mt8">Daño infligido: <b style="color:var(--magenta)">${fmtBig(r.dmg||0)}</b></div>
+            ${r.justDefeated?'<div style="color:var(--gold);font-weight:700;margin-top:6px">🏆 ¡LO HAS REMATADO!</div>':`<div class="boss-hp mt8"><i style="width:${r.boss.pct}%"></i><span>${r.boss.pct}%</span></div>`}
+            <button class="btn mt8" data-act="openBoss">SEGUIR</button>
+            <button class="btn ghost mt8" data-act="goHome">VOLVER</button></div>`);
+        }).catch(e=>{ toast(e.status===402?'Sin energía ⚡':'Error'); CB=null; go('home'); });
+      }});
+  });
+}
+
+// -- NÉMESIS: rival recurrente ------------------------------------------------
+async function openNemesis(){
+  let n; try{ n=await api('/nemesis'); }catch(e){ toast('Némesis no disponible'); return; }
+  registerUnitArt(n.enemy);
+  const enemyCards=n.enemy.map(u=>`<div class="card" style="border-color:var(--red)">${artTag(tpl(u.tplId),5)}<div class="nm">${esc(u.name)}</div><div class="ty dim">Nv${u.level}</div></div>`).join('');
+  openOverlay(`<div class="center">
+    <div style="font-family:var(--pixel);font-size:14px;color:var(--red);margin-bottom:4px">😈 ${esc(n.name)}</div>
+    <div class="dim" style="font-size:11px">Tu némesis · nivel ${n.level} (tier ${n.tier})</div>
+    <div class="dim mb8" style="font-size:12px">Te ha ganado <b style="color:var(--red)">${n.winsVsMe}</b> · la has vencido <b style="color:var(--green)">${n.myWins}</b><br>Eligió su equipo para <b>contrarrestar el tuyo</b>.</div>
+    <div class="grid" style="margin-bottom:10px">${enemyCards}</div>
+    <button class="btn mag" data-act="nemesisFight">⚔️ ENFRENTARLA — ⚡1</button>
+    <button class="btn sm ghost mt8" data-act="close">CERRAR</button></div>`);
+  renderCanvases($("#modal"));
+  NEM=n;
+}
+let NEM=null;
+function nemesisFight(){
+  if(!NEM)return; closeOverlay();
+  const A=S.team.map(instById).filter(Boolean);
+  if(!A.length){ toast('Necesitas equipo'); return; }
+  startLocalCombat({team:A.map(publicUnitLocal),enemy:NEM.enemy,seed:(Math.random()*1e9)|0,mode:'nemesis',title:'NÉMESIS',
+    onResolve:(decisions)=>{
+      api('/nemesis/fight',{method:'POST',body:{decisions}}).then(r=>{
+        CB=null; refreshMe().then(refreshChips);
+        SFX.play(r.win?'win':'lose'); buzz(r.win?[40,60,80]:60);
+        openOverlay(`<div class="center">
+          <div style="font-family:var(--pixel);font-size:15px;color:${r.win?'var(--gold)':'var(--red)'};margin-bottom:8px">${r.win?'¡NÉMESIS DERROTADA!':'TE HA VENCIDO'}</div>
+          <div style="font-size:40px">${r.win?'🏅':'😈'}</div>
+          <div class="mt8">${r.win?`Huye herida… volverá más fuerte (tier ${r.nemesis.newTier}). <br>🪙 +${r.coins}`:'Entrena y vuelve a por ella.'}</div>
+          ${r.win?'<div class="dim mt8" style="font-size:11px">🏅 Logro: cazador de némesis</div>':''}
+          <button class="btn mt8" data-act="goHome">VOLVER</button></div>`);
+      }).catch(e=>{ toast(e.status===402?'Sin energía ⚡':e.status===400?'Equipo vacío':'Error'); CB=null; go('home'); });
+    }});
+}
+
+// -- ARENA SELLADA: draft de 3 de 6 del lote, sin tu colección -----------------
+let arenaDraft=null, arenaPicks=[];
+async function openArena(){
+  let d; try{ d=await api('/arena/draft'); }catch(e){ toast('Arena no disponible'); return; }
+  arenaDraft=d; arenaPicks=[];
+  renderArenaDraft();
+}
+function renderArenaDraft(){
+  const cands=arenaDraft.candidates.map((c,i)=>{const sel=arenaPicks.includes(i);
+    registerTpl(c);
+    return `<div class="card r-${c.rarity}" data-act="arenaPick" data-arg="${i}" style="${sel?'outline:3px solid var(--cyan);outline-offset:-3px':''}">
+      ${sel?`<div class="badge">${arenaPicks.indexOf(i)+1}</div>`:''}${artTag(c,5)}
+      <div class="nm">${esc(c.name)}</div><div class="ty rar-txt ${c.rarity}">${c.rarity}</div></div>`;}).join('');
+  openOverlay(`<div>
+    <div class="center mb8"><b style="font-size:14px">⚔️ ARENA SELLADA</b>
+      <div class="dim" style="font-size:11px">Elige 3 de 6 del lote de hoy. Sin tu colección: habilidad pura. (${arenaPicks.length}/3)</div></div>
+    <div class="grid">${cands}</div>
+    <button class="btn mag mt8" style="width:100%" data-act="arenaStart" ${arenaPicks.length===3?'':'disabled'}>⚔️ BUSCAR RIVAL</button>
+    <button class="btn sm ghost mt8" style="width:100%" data-act="close">CANCELAR</button></div>`);
+  renderCanvases($("#modal"));
+}
+function arenaPick(i){ i=+i; const k=arenaPicks.indexOf(i);
+  if(k>=0)arenaPicks.splice(k,1); else if(arenaPicks.length<3)arenaPicks.push(i); else{toast('Ya tienes 3');return;}
+  renderArenaDraft();
+}
+function arenaStart(){
+  if(arenaPicks.length!==3)return;
+  const ids=arenaPicks.map(i=>arenaDraft.candidates[i].id);
+  closeOverlay();
+  // Reusa el PvP en vivo con modo arena: el servidor monta el equipo desde estos ids.
+  startLivePvp(null,'NEUTRAL',null,{arena:ids});
+}
+
+const fmtBig=(n)=>n>=1e6?(n/1e6).toFixed(1)+'M':n>=1e3?(n/1e3).toFixed(1)+'k':String(n|0);
+// Stats públicos de una unidad local (para re-alimentar startLocalCombat).
+function publicUnitLocal(u){ return {uid:u.uid,tplId:u.tplId,name:u.name,type:u.type,types:u.types,ability:u.ability,level:u.level,hpMax:u.hpMax,atkP:u.atkP,atkS:u.atkS,defP:u.defP,defS:u.defS,spd:u.spd,startEnergy:u.startEnergy||0}; }
 
 /* ====================== PERFIL + LOGROS + REPLAYS ====================== */
 async function openProfile(){
@@ -865,13 +1052,15 @@ function pvpWsUrl(){
   if(API_BASE) return API_BASE.replace(/^http/,'ws')+'/pvp?token='+tok;
   return (location.protocol==='https:'?'wss':'ws')+'://'+location.host+'/pvp?token='+tok;
 }
-function startLivePvp(captain,stance,code){
+function startLivePvp(captain,stance,code,extra){
+  extra=extra||{};
+  const arena=extra.arena||null; // modo Arena Sellada: equipo drafteado (ids)
   if(!S.user||S.user.energy<1){toast('Sin energía ⚡');return;}
-  if(!S.team.length){toast('Equipo vacío');return;}
+  if(!arena&&!S.team.length){toast('Equipo vacío');return;}
   if(PVP){return;}
   let ws; try{ ws=new WebSocket(pvpWsUrl()); }catch(e){ toast('PvP no disponible'); return; }
-  PVP={ws,status:'connecting',captain:captain||S.team[0],stance:stance||'NEUTRAL',code:code||null};
-  pvpQueueUI(code?`Reto privado · código <b style="color:var(--cyan);font-family:var(--pixel)">${code}</b>`:'Conectando…');
+  PVP={ws,status:'connecting',captain:captain||S.team[0],stance:stance||'NEUTRAL',code:code||null,arena};
+  pvpQueueUI(arena?'⚔️ Arena · buscando rival…':code?`Reto privado · código <b style="color:var(--cyan);font-family:var(--pixel)">${code}</b>`:'Conectando…');
   ws.onmessage=(ev)=>{ let m;try{m=JSON.parse(ev.data);}catch(e){return;} pvpOnMessage(m); };
   ws.onclose=()=>{ const wasPlaying=PVP&&(PVP.status==='match'); PVP=null; if(wasPlaying&&CB&&CB.live&&!CB.ended){ pvpReconnect(1); } };
   ws.onerror=()=>{};
@@ -904,7 +1093,7 @@ function pvpQueueUI(msg){
 function pvpStatus(msg){ const e=$('#pvp-status'); if(e)e.textContent=msg; }
 function pvpOnMessage(m){
   if(!PVP)return;
-  if(m.t==='hello'){ PVP.status='queue'; pvpSend({t:'queue',captain:PVP.captain,stance:PVP.stance,code:PVP.code||undefined}); if(!PVP.code)pvpStatus('Buscando rival…'); }
+  if(m.t==='hello'){ PVP.status='queue'; pvpSend({t:'queue',captain:PVP.captain,stance:PVP.stance,code:PVP.code||undefined,arena:PVP.arena||undefined}); if(!PVP.code)pvpStatus('Buscando rival…'); }
   else if(m.t==='queued'){ if(!PVP.code)pvpStatus('Buscando rival…'); }
   else if(m.t==='error'){
     if(m.msg==='resume_failed'){ toast('La partida ya terminó'); PVP=null; CB=null; closeOverlay(); go('home'); return; }
@@ -1410,8 +1599,9 @@ function finishBattle(){
     const cmp=(anim,eng)=>anim.forEach((u,i)=>{ if(Math.round(u.hp)!==Math.round(eng[i].hp)) console.warn('AIGRONS: HP≠motor', u.team, u.name, Math.round(u.hp), Math.round(eng[i].hp), CB.decisions); });
     cmp(CB.A,A2); cmp(CB.B,B2);
   }catch(e){}
-  const battleId=CB.battleId, decisions=CB.decisions, mode=CB.mode;
+  const battleId=CB.battleId, decisions=CB.decisions, mode=CB.mode, onResolve=CB.onResolve;
   setTimeout(()=>{
+    if(typeof onResolve==='function'){ onResolve(decisions); return; } // modos genéricos (puzzle/boss/némesis/arena)
     if(mode==='dungeon'){
       api('/dungeon/battle',{method:'POST',body:{decisions}})
         .then(r=>{ CB=null; refreshMe().then(refreshChips); D=r.state; showDungeonResult(r); })
@@ -1422,6 +1612,22 @@ function finishBattle(){
         .catch(err=>{ toast('Error al resolver el combate'); CB=null; go('home'); });
     }
   },650);
+}
+// Combate local PvE genérico (puzzle/jefe/némesis/arena): mismas unidades A/B,
+// planificador y animación de siempre; al acabar llama onResolve(decisions) para
+// que cada modo valide en su endpoint. teamUnits/enemyUnits = stats públicos.
+function startLocalCombat(opts){
+  const A=opts.team.map((s,i)=>mkUnit(s,'A',i));
+  const B=opts.enemy.map((s,i)=>mkUnit(s,'B',i));
+  registerUnitArt(opts.team); registerUnitArt(opts.enemy);
+  const seed=(opts.seed|0)||((Math.random()*0x7fffffff)|0);
+  CB={A,B,seed,mode:opts.mode||'local',pvp:false,rng:mulberry32(seed>>>0),
+      turn:0,order:[],oi:0,plan:{},planTurn:0,selecting:null,phase:'plan',speed:1,decisions:[],timer:null,planTimer:null,
+      initA:opts.team,initB:opts.enemy,ended:false,onResolve:opts.onResolve,title:opts.title||'COMBATE'};
+  document.querySelectorAll(".screen").forEach(s=>s.classList.remove("active"));
+  $("#s-battle").classList.add("active");
+  buildArena();
+  startCombat();
 }
 function showResult(r){
   const win=r.win;
@@ -1739,6 +1945,10 @@ const ACTIONS={
   goHome:()=>go('home'),
   shareAig:(a)=>shareAig(a),
   openProfile:()=>openProfile(), editName:()=>editName(), claimAch:(a)=>claimAch(a),
+  openPuzzle:()=>openPuzzle(), puzzlePlay:()=>puzzlePlay(), puzzleShare:(a)=>puzzleShare(a),
+  openBoss:()=>openBoss(), bossFight:()=>bossFight(),
+  openNemesis:()=>openNemesis(), nemesisFight:()=>nemesisFight(),
+  openArena:()=>openArena(), arenaPick:(a)=>arenaPick(a), arenaStart:()=>arenaStart(),
   watchReplay:(a)=>watchReplay(a), replaySpeed:()=>replaySpeed(), replayExit:()=>replayExit(),
   setFrame:(a,el)=>setFrame(a,el),
   duelPrivate:()=>duelPrivate(), duelStart:()=>duelStart(),
@@ -1831,6 +2041,7 @@ function gisReady(){ return new Promise(res=>{ let n=0; const t=setInterval(()=>
 async function showLogin(){
   showBoot(); showLoadingSec(false); loginErr('');
   let cfg; try{ cfg=await api('/auth/config'); }catch(e){ loginErr('No se pudo conectar con el servidor.'); showLoadingSec(true); bootMsg('Sin conexión.',true); return; }
+  if(cfg.features) Object.assign(FEATURES,cfg.features);
   const devBox=$("#login-dev"); devBox.innerHTML='';
   if(cfg.allowDev){ devBox.innerHTML=(cfg.googleClientId?'<div class="dim" style="font-size:11px;margin:8px 0">ó</div>':'')+'<button class="btn sm ghost" id="devbtn" style="width:100%">👤 Entrar como invitado</button>'; $("#devbtn").onclick=devLogin; }
   const gbtn=$("#gbtn"); gbtn.innerHTML='';
@@ -1855,7 +2066,7 @@ function devLogin(){ showLoadingSec(true); bootMsg('Entrando…',false); login()
 async function afterAuth(){
   try{ await refreshMe(); }
   catch(e){ if(e.status===401){ TOKEN=''; localStorage.removeItem('aigrons_token'); return showLogin(); } throw e; }
-  await Promise.all([refreshDaily(),refreshCollection(),refreshTeam()]);
+  await Promise.all([loadFeatures(),refreshDaily(),refreshCollection(),refreshTeam()]);
   hideBoot(); go("home"); maybeTutorial();
 }
 async function boot(){

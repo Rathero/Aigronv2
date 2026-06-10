@@ -586,6 +586,82 @@
     return units;
   }
 
+  // ===================== MECÁNICAS INNOVADORAS (deterministas) ===============
+  // Todas derivan de la SEMILLA del día (o de un id), así que cliente y servidor
+  // calculan EXACTAMENTE lo mismo sin comunicarse. El servidor sigue siendo la
+  // autoridad (revalida con el motor); esto solo evita duplicar fórmulas.
+
+  // -- Variantes PRISMÁTICAS: 1% determinista por instancia (cosmético) --------
+  function isPrismatic(instanceId) {
+    if (!instanceId) return false;
+    return (hashStr("prism:" + instanceId) % 100) === 0; // 1%
+  }
+  // Paleta alternativa: rota los canales RGB de forma determinista (cambio de
+  // matiz vistoso y barato) — solo afecta al render, nunca a stats.
+  function prismaticShift(hex, instanceId) {
+    const m = /^#?([0-9a-f]{6})$/i.exec(hex || ""); if (!m) return hex;
+    const v = parseInt(m[1], 16);
+    let r = (v >> 16) & 255, g = (v >> 8) & 255, b = v & 255;
+    const rot = hashStr("prismhue:" + instanceId) % 3;
+    if (rot === 0) { const t = r; r = g; g = b; b = t; }
+    else if (rot === 1) { const t = r; r = b; b = g; g = t; }
+    const boost = (c) => Math.min(255, Math.round(c * 1.15 + 12));
+    return "#" + [boost(r), boost(g), boost(b)].map((c) => c.toString(16).padStart(2, "0")).join("");
+  }
+
+  // -- PUZZLE diario: equipo + enemigos FIJOS del lote de hoy, iguales para todos.
+  function dailyPuzzle(date, templates) {
+    const seed = hashStr("puzzle:" + date) >>> 0;
+    const rng = mulberry32(seed);
+    const ids = templates.map((t) => t.id || t.template_id);
+    const pick = () => ids[Math.floor(rng() * ids.length)];
+    const team = [pick(), pick(), pick()];
+    const enemy = [pick(), pick(), pick()];
+    const level = 8 + (seed % 6); // 8..13, igual para ambos lados (combate justo)
+    return { date, seed, team, enemy, level };
+  }
+
+  // -- NÉMESIS: counter-pick determinista contra los TIPOS de tu equipo.
+  function nemesisTeam(userId, week, myTypes, templates) {
+    const seed = hashStr("nemesis:" + userId + ":" + week) >>> 0;
+    const rng = mulberry32(seed);
+    const counters = templates.filter((t) => {
+      const tt = t.types || [t.type];
+      return tt.some((a) => (myTypes || []).some((d) => typeMult(a, d) > 1));
+    });
+    const pool = counters.length >= 3 ? counters : templates;
+    const out = [], used = {};
+    for (let i = 0; i < 3 && pool.length; i++) {
+      let idx = Math.floor(rng() * pool.length), guard = 0;
+      while (used[idx] && guard++ < 20) idx = Math.floor(rng() * pool.length);
+      used[idx] = 1; out.push(pool[idx]);
+    }
+    return out;
+  }
+  function nemesisName(userId) {
+    const A = ["Vex", "Mor", "Zarn", "Kael", "Drix", "Nyx", "Grom", "Sael"];
+    const B = ["maldur", "thrax", "vorn", "geist", "luk", "rakh", "dien", "mor"];
+    const h = hashStr("nemname:" + userId) >>> 0;
+    return A[h % A.length] + B[(h >>> 8) % B.length];
+  }
+
+  // -- ORÁCULO: profecía determinista del lote de MAÑANA (pista verídica, críptica).
+  function oracleProphecy(date, templates) {
+    const seed = hashStr("oracle:" + date) >>> 0;
+    const rng = mulberry32(seed);
+    const counts = {};
+    templates.forEach((t) => (t.types || [t.type]).forEach((ty) => (counts[ty] = (counts[ty] || 0) + 1)));
+    const top = Object.entries(counts).sort((a, b) => b[1] - a[1])[0];
+    const domType = top ? top[0] : TYPES[seed % TYPES.length];
+    const legendary = templates.filter((t) => t.rarity === "LEGENDARIA").length;
+    const VERBS = ["despierta", "se alza", "susurra", "arde", "se quiebra", "renace"];
+    const OMENS = ["los veloces caerán", "el metal llorará", "tres sombras danzarán",
+      "la marea cambiará", "lo común brillará", "el tiempo se doblará"];
+    const v = VERBS[Math.floor(rng() * VERBS.length)];
+    const o = OMENS[Math.floor(rng() * OMENS.length)];
+    return { date, text: `Cuando ${domType.toLowerCase()} ${v}, ${o}…`, hint: { domType, legendary } };
+  }
+
   // ============================ ROGUELIKE / MAZMORRA =========================
   // Reliquias: modificadores pasivos que se acumulan durante una run. Unos se
   // hornean en stats (stat), otros son flags que el combate lee (mods), otros
@@ -724,5 +800,7 @@
     dealDamage, decBuffs, tickStatus, performAction, aiIntent, turnOrder, stepTurn, intentFromDecision, resolveBattle, botTeamFromSeed,
     // roguelike / mazmorra
     applyRelics, relicRunEffects, dungeonNodeOptions, dungeonEnemyTeam, dungeonDraft,
+    // mecánicas innovadoras (deterministas)
+    isPrismatic, prismaticShift, dailyPuzzle, nemesisTeam, nemesisName, oracleProphecy,
   };
 });

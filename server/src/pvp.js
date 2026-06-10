@@ -21,7 +21,7 @@ const STANCES_OK = ["NEUTRAL", "AGRESIVA", "DEFENSIVA"];
 const BOT_NAMES = ["Centinela IA", "Eco Salvaje", "Espectro Errante", "Domador Fantasma", "Guardián Astral"];
 
 function attachPvp(server, deps) {
-  const { getUser, syncEnergy, buildTeamUnits, awardBattleResult, publicUnit, MATCH_LEVEL_WINDOW, todayTemplates } = deps;
+  const { getUser, syncEnergy, buildTeamUnits, buildArenaUnits, awardBattleResult, publicUnit, MATCH_LEVEL_WINDOW, todayTemplates } = deps;
   // Fallback a BOT: si en ~8s no hay rival humano compatible, combate contra la
   // IA del motor. El botón principal del juego no puede colgarse por liquidez.
   const BOT_WAIT_MS = parseInt(process.env.PVP_BOT_WAIT_MS || "8000", 10);
@@ -65,16 +65,21 @@ function attachPvp(server, deps) {
     const u = await syncEnergy(await getUser(ws.userId));
     if (!u) return send(ws, { t: "error", msg: "user" });
     if (u.energy < 1) return send(ws, { t: "error", msg: "no_energy" });
-    const team = await buildTeamUnits(ws.userId, "A");
+    // ARENA SELLADA: el equipo son los 3 ids drafteados (nivel fijo), no tu
+    // colección — habilidad pura. Solo empareja con otros en cola de arena.
+    const arena = Array.isArray(m.arena) && buildArenaUnits ? m.arena.slice(0, 3) : null;
+    const team = arena ? await buildArenaUnits(arena, "A") : await buildTeamUnits(ws.userId, "A");
     if (!team.length) return send(ws, { t: "error", msg: "empty_team" });
     const level = Math.round(team.reduce((s, x) => s + (x.level || 1), 0) / team.length);
     // Duelo PRIVADO ("reta a un amigo"): con `code` solo se empareja con quien
     // tenga el MISMO código (sin ventana de nivel ni fallback a bot).
     const code = typeof m.code === "string" ? m.code.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 6) : null;
-    const entry = { userId: ws.userId, ws, captain: m.captain, stance: m.stance, level, name: u.display_name, code: code || null };
-    const idx = code
+    const entry = { userId: ws.userId, ws, captain: m.captain, stance: m.stance, level, name: u.display_name, code: code || null, arena };
+    const idx = arena
+      ? queue.findIndex((x) => x.userId !== ws.userId && x.arena)
+      : code
       ? queue.findIndex((x) => x.userId !== ws.userId && x.code === code)
-      : queue.findIndex((x) => x.userId !== ws.userId && !x.code && Math.abs(x.level - level) <= MATCH_LEVEL_WINDOW);
+      : queue.findIndex((x) => x.userId !== ws.userId && !x.code && !x.arena && Math.abs(x.level - level) <= MATCH_LEVEL_WINDOW);
     if (idx >= 0) {
       const other = queue.splice(idx, 1)[0];
       if (other.botTimer) clearTimeout(other.botTimer);
@@ -112,8 +117,8 @@ function attachPvp(server, deps) {
   }
 
   async function startMatch(pA, pB) {
-    const teamA = await buildTeamUnits(pA.userId, "A");
-    const teamB = await buildTeamUnits(pB.userId, "B");
+    const teamA = pA.arena && buildArenaUnits ? await buildArenaUnits(pA.arena, "A") : await buildTeamUnits(pA.userId, "A");
+    const teamB = pB.arena && buildArenaUnits ? await buildArenaUnits(pB.arena, "B") : await buildTeamUnits(pB.userId, "B");
     if (!teamA.length || !teamB.length) {
       send(pA.ws, { t: "error", msg: "team" }); send(pB.ws, { t: "error", msg: "team" }); return;
     }

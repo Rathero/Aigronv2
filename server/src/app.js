@@ -26,6 +26,8 @@ const { startMaintenance } = require("./maintenance");
 const weekly = require("./missions");
 const achievements = require("./achievements");
 const push = require("./push");
+const features = require("./features");
+const innov = require("./innovations");
 const { eventFor } = require("./jobs/generateDailyBatch");
 const { tplBaseStats, tplTypes } = require("./util");
 
@@ -227,6 +229,18 @@ async function buildTeamUnits(userId, team = "A") {
   }).filter(Boolean);
 }
 const teamAvgLevel = (units) => units.length ? Math.round(units.reduce((a, u) => a + (u.level || 1), 0) / units.length) : 3;
+
+// Arena Sellada: monta un equipo de combate desde ids de plantilla del lote de
+// HOY (nivel fijo 12, sin la colección del jugador). Valida que sean del lote.
+const ARENA_LEVEL = 12;
+async function buildArenaUnits(ids, team = "A") {
+  const tpls = await todayTemplates();
+  const byId = {}; tpls.forEach((t) => (byId[t.id] = t));
+  return (ids || []).slice(0, 3).map((id, i) => {
+    const t = byId[id]; if (!t) return null;
+    return combat.buildUnit({ id: t.id, name: t.name, type: t.type, types: t.types, ability: t.ability, base_stats: t.base_stats }, ARENA_LEVEL, team, i);
+  }).filter(Boolean);
+}
 function publicUnit(u) {
   return { uid: u.uid, tplId: u.tplId, name: u.name, type: u.type, types: u.types, ability: u.ability, level: u.level,
     hpMax: u.hpMax, atkP: u.atkP, atkS: u.atkS, defP: u.defP, defS: u.defS, spd: u.spd, startEnergy: u.startEnergy || 0,
@@ -237,8 +251,12 @@ function publicUnit(u) {
 // Config pública para el login: el cliente la pide para inicializar Google
 // Sign-In y saber si el login de invitado (dev) está permitido.
 app.get("/auth/config", (req, res) => {
-  res.json({ googleClientId: auth.GOOGLE_CLIENT_ID, allowDev: auth.ALLOW_DEV_AUTH });
+  res.json({ googleClientId: auth.GOOGLE_CLIENT_ID, allowDev: auth.ALLOW_DEV_AUTH, features: features.flags() });
 });
+// Flags de funcionalidad: el cliente los pide para mostrar/ocultar cada mecánica.
+app.get("/features", (req, res) => res.json(features.flags()));
+// Middleware: 404 si la feature de la ruta está apagada.
+const requireFeature = (key) => (req, res, next) => features.on(key) ? next() : res.status(404).json({ error: "feature_disabled" });
 app.post("/auth/login", wrap(async (req, res) => {
   const { provider = "dev", subject, idToken, displayName } = req.body || {};
   let identity;
@@ -943,6 +961,92 @@ app.get("/admin/stats", wrap(async (req, res) => {
   });
 }));
 
+// ===================== MECÁNICAS INNOVADORAS (endpoints) =====================
+// -- PUZZLE DIARIO: combate-reto idéntico para todos, mín. turnos --------------
+app.get("/puzzle", authMiddleware, requireFeature("puzzle"), wrap(async (req, res) => {
+  const tpls = await todayTemplates();
+  const pz = C.dailyPuzzle(C.todayStr(), tpls);
+  const byId = {}; tpls.forEach((t) => (byId[t.id] = t));
+  const pubUnit = (id, team, i) => publicUnit(combat.buildUnit(byId[id], pz.level, team, i));
+  const best = (await db.query("SELECT turns, hp_left, solved FROM puzzle_results WHERE daily_date=$1 AND user_id=$2", [C.todayStr(), req.userId])).rows[0] || null;
+  res.json({ date: pz.date, seed: pz.seed, level: pz.level,
+    team: pz.team.map((id, i) => pubUnit(id, "A", i)),
+    enemy: pz.enemy.map((id, i) => pubUnit(id, "B", i)),
+    best, ranking: await innov.puzzleRanking(req.userId) });
+}));
+app.post("/puzzle/solve", authMiddleware, requireFeature("puzzle"), wrap(async (req, res) => {
+  const tpls = await todayTemplates();
+  const out = await innov.solvePuzzle(req.userId, (req.body && req.body.decisions) || [], tpls);
+  res.json(Object.assign(out, { ranking: await innov.puzzleRanking(req.userId) }));
+}));
+
+// -- JEFE MUNDIAL: raid cooperativa, HP global compartido ----------------------
+app.get("/worldboss", authMiddleware, requireFeature("worldboss"), wrap(async (req, res) => {
+  res.json(await innov.bossState(req.userId));
+}));
+app.post("/worldboss/hit", authMiddleware, requireFeature("worldboss"), wrap(async (req, res) => {
+  let u = await getUser(req.userId); u = await syncEnergy(u);
+  if (u.energy < 1) return res.status(402).json({ error: "no_energy" });
+  // El golpe al jefe cuesta 1⚡ (como un combate normal).
+  await db.query("UPDATE users SET energy = GREATEST(energy-1,0), energy_updated_at = CASE WHEN energy-1 < $2 THEN now() ELSE energy_updated_at END WHERE id=$1", [req.userId, C.ENERGY_MAX]);
+  const tpls = await todayTemplates();
+  const out = await innov.hitBoss(req.userId, (req.body && req.body.decisions) || [], tpls, u);
+  res.json(out);
+}));
+
+// -- NÉMESIS: rival IA recurrente con counter-pick e historia ------------------
+app.get("/nemesis", authMiddleware, requireFeature("nemesis"), wrap(async (req, res) => {
+  const tpls = await todayTemplates();
+  const enc = await innov.nemesisEncounter(req.userId, tpls);
+  res.json({ name: enc.name, tier: enc.tier, winsVsMe: enc.winsVsMe, myWins: enc.myWins, level: enc.level,
+    enemy: enc.enemy.map(publicUnit) });
+}));
+app.post("/nemesis/fight", authMiddleware, requireFeature("nemesis"), wrap(async (req, res) => {
+  let u = await getUser(req.userId); u = await syncEnergy(u);
+  if (u.energy < 1) return res.status(402).json({ error: "no_energy" });
+  const A = await buildTeamUnits(req.userId);
+  if (!A.length) return res.status(400).json({ error: "empty_team" });
+  const tpls = await todayTemplates();
+  const enc = await innov.nemesisEncounter(req.userId, tpls);
+  const seed = (C.hashStr("nemfight:" + req.userId + ":" + Date.now()) >>> 0);
+  const safe = innov.sanitizeDecisions((req.body && req.body.decisions) || []);
+  const B = enc.enemy.map((e, i) => combat.unitFromStats(publicUnit(e), "B", i));
+  const result = combat.resolveBattle(A, B, seed, safe);
+  const win = result.winner === "A";
+  const nem = await innov.nemesisResult(req.userId, win);
+  const award = await awardBattleResult({ user: u, win, abilitiesUsed: 0, seed });
+  // Derrotar a la némesis concede su marco único una vez.
+  if (win) await db.query("INSERT INTO achievements (user_id, key) VALUES ($1,'nemesis_slayer') ON CONFLICT DO NOTHING", [req.userId]);
+  res.json({ win, nemesis: nem, coins: award.coins, leaguePoints: award.leaguePoints, league: award.league, energy: award.energy,
+    log: result.log, seed, team: A.map(publicUnit), enemy: B.map(publicUnit) });
+}));
+
+// -- ORÁCULO: profecía determinista del lote de MAÑANA -------------------------
+app.get("/oracle", authMiddleware, requireFeature("oracle"), wrap(async (req, res) => {
+  // Profecía de MAÑANA: si el lote de mañana aún no existe, se deriva igual
+  // (determinista por fecha) generándolo en memoria sin persistir.
+  const tomorrow = C.todayStr(new Date(Date.now() + 86400000));
+  let tpls = (await db.query("SELECT type, type2, rarity FROM creature_templates WHERE batch_date=$1 AND is_fusion=false", [tomorrow])).rows
+    .map((x) => ({ type: x.type, types: x.type2 ? [x.type, x.type2] : [x.type], rarity: x.rarity }));
+  if (!tpls.length) tpls = C.dailyBatch(tomorrow, DAILY_N);
+  res.json(C.oracleProphecy(tomorrow, tpls));
+}));
+
+// -- ARENA SELLADA: draft del lote, PvP sin colección (cola con flag) ----------
+// El emparejamiento/draft viven en el WebSocket /pvp (modo arena); este endpoint
+// solo entrega los 6 candidatos del draft del día (deterministas, compartidos).
+app.get("/arena/draft", authMiddleware, requireFeature("arena"), wrap(async (req, res) => {
+  const tpls = await todayTemplates();
+  const seed = C.hashStr("arena:" + C.todayStr()) >>> 0;
+  const rng = C.mulberry32(seed);
+  const pool = []; const used = {};
+  while (pool.length < 6 && pool.length < tpls.length) {
+    const i = Math.floor(rng() * tpls.length);
+    if (!used[i]) { used[i] = 1; pool.push(tpls[i]); }
+  }
+  res.json({ date: C.todayStr(), candidates: pool.map((t) => ({ id: t.id, name: t.name, type: t.type, types: t.types, rarity: t.rarity, ability: t.ability, art_seed: t.art_seed, image_url: t.image_url, base_stats: t.base_stats })) });
+}));
+
 // --------------------------------- HEALTH ------------------------------------
 app.get("/health", wrap(async (req, res) => {
   await db.query("SELECT 1");
@@ -973,7 +1077,7 @@ if (require.main === module) {
   // PvP en vivo (WebSocket en /pvp, mismo puerto). Inyecta los helpers compartidos.
   try {
     const { attachPvp } = require("./pvp");
-    attachPvp(server, { db, getUser, syncEnergy, buildTeamUnits, awardBattleResult, publicUnit, MATCH_LEVEL_WINDOW, todayTemplates });
+    attachPvp(server, { db, getUser, syncEnergy, buildTeamUnits, buildArenaUnits, awardBattleResult, publicUnit, MATCH_LEVEL_WINDOW, todayTemplates });
     console.log("PvP en vivo (WebSocket) activo en /pvp");
   } catch (e) {
     console.warn("[pvp] no se pudo activar el WebSocket:", e.message);

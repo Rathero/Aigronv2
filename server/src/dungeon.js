@@ -13,6 +13,7 @@ const E = require("../../web/engine.js");
 const db = require("./db");
 const C = require("./config");
 const weekly = require("./missions");
+const features = require("./features");
 
 const COMBAT_KINDS = ["COMBATE", "ELITE", "JEFE"];
 
@@ -134,8 +135,20 @@ async function chooseNode(userId, choiceIdx, templates) {
 
   if (COMBAT_KINDS.includes(node.type)) {
     const baseLevel = E.dungeonDiff(row.difficulty || "NORMAL").level;
-    const enemy = E.dungeonEnemyTeam(row.seed, row.depth, node.type, templates, baseLevel);
-    s.pending = { kind: node.type, enemy: enemy.map(publicEnemyStats), battleSeed: battleSeedFor(row.seed, row.depth) };
+    s.pending = { kind: node.type, battleSeed: battleSeedFor(row.seed, row.depth) };
+    // ECO: en nodos de combate normal, ~35% de probabilidad de enfrentar el
+    // equipo CAÍDO de otro jugador (snapshot real) en vez de enemigos generados.
+    let echo = null;
+    if (features.on("echoes") && node.type === "COMBATE" && (E.hashStr("echoroll:" + row.seed + ":" + row.depth) % 100) < 35) {
+      echo = await pickEcho(userId, row.depth).catch(() => null);
+    }
+    if (echo) {
+      s.pending.enemy = echo.team;       // snapshot escalado, ya listo para combate
+      s.pending.echo = { id: echo.id, owner: echo.owner_name, bounty: echo.coins_bounty };
+    } else {
+      const enemy = E.dungeonEnemyTeam(row.seed, row.depth, node.type, templates, baseLevel);
+      s.pending.enemy = enemy.map(publicEnemyStats);
+    }
     s.stage = "combat";
   } else if (node.type === "DESCANSO") {
     healTeam(s, 0.4);
@@ -186,6 +199,13 @@ async function resolveCombat(userId, decisions) {
   if (win) {
     const eff = E.relicRunEffects(s.relics);
     let coinGain = Math.round((8 + row.depth * 4 + (kind === "ELITE" ? 15 : 0) + (kind === "JEFE" ? 50 : 0)) * eff.coinMult * diff.coinMult);
+    // ECO vengado: botín extra del equipo caído + aviso de a quién vengaste.
+    if (s.pending.echo) {
+      coinGain += s.pending.echo.bounty || 0;
+      const owner = await avengeEcho(s.pending.echo.id).catch(() => null);
+      out.avenged = { owner: s.pending.echo.owner, bounty: s.pending.echo.bounty || 0 };
+      if (owner) out.avenged.depth = owner.depth;
+    }
     s.coins += coinGain;
     if (eff.healAfter) healTeam(s, eff.healAfter);
     out.coins = coinGain;
@@ -201,6 +221,12 @@ async function resolveCombat(userId, decisions) {
   } else {
     row.status = "dead"; s.stage = "done"; s.pending = null;
     out.dead = true;
+    // ECO: tu equipo caído se convierte en un encuentro en las runs de OTROS
+    // ese día (multijugador asíncrono fantasma). Solo si llegaste a un nodo
+    // razonable, para que valga la pena vengarlo.
+    if (features.on("echoes") && row.depth >= 2) {
+      await createEcho(userId, row, s).catch(() => {});
+    }
   }
   s.lastResult = out;
 
@@ -330,4 +356,34 @@ async function ranking(userId, difficulty) {
   return { difficulty: diffId, rows: r.rows.map((x, i) => ({ pos: i + 1, name: x.name, depth: x.best_depth, cleared: x.cleared, me: x.user_id === userId })) };
 }
 
-module.exports = { startRun, getRun, chooseNode, resolveCombat, abandonRun, draftRelic, skipDraft, shopAction, ranking, publicState };
+// ===================== ECOS DE LA MAZMORRA (fantasmas) =======================
+// Guarda el equipo caído como un eco del día (snapshot escalado, listo para
+// combate como equipo B). Botín = monedas acumuladas en la run + bonus por nodo.
+async function createEcho(userId, row, s) {
+  const u = await db.query("SELECT display_name FROM users WHERE id=$1", [userId]);
+  const name = (u.rows[0] && u.rows[0].display_name) || "Caído";
+  const teamSnap = s.team.map((m) => memberStats(m)); // stats escalados (con HP máx)
+  const bounty = Math.round((s.coins || 0) * 0.5) + row.depth * 8;
+  await db.query(
+    `INSERT INTO dungeon_echoes (daily_date, user_id, owner_name, depth, difficulty, team, coins_bounty)
+     VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+    [C.todayStr(), userId, name, row.depth, row.difficulty || "NORMAL", JSON.stringify(teamSnap), bounty]
+  );
+}
+// Elige un eco de OTRO jugador cercano en profundidad para un encuentro (o null).
+async function pickEcho(userId, depth) {
+  const r = await db.query(
+    `SELECT * FROM dungeon_echoes
+      WHERE daily_date=$1 AND user_id<>$2 AND depth BETWEEN $3 AND $4
+      ORDER BY random() LIMIT 1`,
+    [C.todayStr(), userId, Math.max(0, depth - 1), depth + 2]
+  );
+  return r.rows[0] || null;
+}
+// Marca un eco como vengado (derrotado por otro): +avenged y notifica al dueño.
+async function avengeEcho(echoId) {
+  const r = await db.query("UPDATE dungeon_echoes SET avenged = avenged + 1 WHERE id=$1 RETURNING user_id, owner_name, depth", [echoId]);
+  return r.rows[0] || null;
+}
+
+module.exports = { startRun, getRun, chooseNode, resolveCombat, abandonRun, draftRelic, skipDraft, shopAction, ranking, publicState, createEcho, pickEcho, avengeEcho };

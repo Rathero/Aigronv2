@@ -218,6 +218,69 @@ CREATE TABLE IF NOT EXISTS achievements (
   PRIMARY KEY (user_id, key)
 );
 
+-- ===================== MECÁNICAS INNOVADORAS (estado) =======================
+-- Puzzle Diario: una entrada por (usuario, día). Guarda el mejor resultado
+-- (menos turnos = mejor; desempata HP restante). Ranking diario por turnos.
+CREATE TABLE IF NOT EXISTS puzzle_results (
+  daily_date DATE NOT NULL,
+  user_id    UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  turns      INT  NOT NULL,
+  hp_left    INT  NOT NULL DEFAULT 0,
+  solved     BOOLEAN NOT NULL DEFAULT false,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (daily_date, user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_puzzle_rank ON puzzle_results(daily_date, solved, turns ASC, hp_left DESC);
+
+-- Ecos de la Mazmorra: equipos caídos (snapshot) que aparecen como encuentros
+-- en las runs de OTROS jugadores ese día. avenged = veces que lo han derrotado.
+CREATE TABLE IF NOT EXISTS dungeon_echoes (
+  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  daily_date  DATE NOT NULL,
+  user_id     UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  owner_name  TEXT NOT NULL,
+  depth       INT  NOT NULL,
+  difficulty  TEXT NOT NULL,
+  team        JSONB NOT NULL,   -- snapshot del equipo caído (stats escalados)
+  coins_bounty INT NOT NULL DEFAULT 0,
+  avenged     INT  NOT NULL DEFAULT 0,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_echoes_day ON dungeon_echoes(daily_date, depth);
+
+-- Jefe Mundial: un evento por ventana (week_start). HP global compartido; el
+-- daño se acumula de toda la comunidad. contributions = daño por usuario.
+CREATE TABLE IF NOT EXISTS world_boss (
+  id          TEXT PRIMARY KEY,            -- 'boss:<week_start>'
+  week_start  DATE NOT NULL,
+  name        TEXT NOT NULL,
+  type        TEXT NOT NULL,
+  hp_max      BIGINT NOT NULL,
+  hp_left     BIGINT NOT NULL,
+  defeated_at TIMESTAMPTZ,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS world_boss_contrib (
+  boss_id    TEXT NOT NULL REFERENCES world_boss(id) ON DELETE CASCADE,
+  user_id    UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  damage     BIGINT NOT NULL DEFAULT 0,
+  hits       INT    NOT NULL DEFAULT 0,
+  rewarded   BOOLEAN NOT NULL DEFAULT false,
+  PRIMARY KEY (boss_id, user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_wbcontrib ON world_boss_contrib(boss_id, damage DESC);
+
+-- Némesis: rival IA recurrente por usuario. Persiste el marcador y "tier" que
+-- sube cuando le ganas (vuelve más fuerte).
+CREATE TABLE IF NOT EXISTS nemesis (
+  user_id    UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  name       TEXT NOT NULL,
+  tier       INT  NOT NULL DEFAULT 1,
+  wins_vs_me INT  NOT NULL DEFAULT 0,   -- veces que la némesis me ha ganado
+  my_wins    INT  NOT NULL DEFAULT 0,   -- veces que la he derrotado
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 -- Suscripciones Web Push (recordatorio diario del lote, cierres de liga...).
 CREATE TABLE IF NOT EXISTS push_subs (
   user_id    UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,

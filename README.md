@@ -239,7 +239,25 @@ Todas requieren `Authorization: Bearer <token>` salvo `/auth/login`.
 | GET  | `/achievements` · POST `/achievements/claim` | Logros (progreso desde contadores) y reclamo |
 | GET  | `/frames` · PUT `/creature/:id/frame` | Marcos cosméticos desbloqueables (liga/victorias) |
 | GET  | `/push/key` · POST `/push/subscribe` · `/push/unsubscribe` | Web Push (recordatorio diario del lote) |
+| GET  | `/features` | Flags de las 7 mecánicas (el cliente oculta lo apagado) |
+| GET  | `/puzzle` · POST `/puzzle/solve` | Puzzle Diario (combate fijo igual para todos; ranking por mín. turnos) |
+| GET  | `/worldboss` · POST `/worldboss/hit` | Jefe Mundial (HP global compartido; golpe cuesta ⚡1) |
+| GET  | `/nemesis` · POST `/nemesis/fight` | Némesis (rival IA con counter-pick; sube de tier al perder contra ti) |
+| GET  | `/oracle` | Profecía determinista del lote de MAÑANA |
+| GET  | `/arena/draft` | 6 candidatos del lote para Arena Sellada (draft en /pvp) |
 | GET  | `/health` | Healthcheck (usado por Docker / balanceadores) |
+
+**Mecánicas innovadoras** (todas detrás de flags `FEATURE_*`, on por defecto; ver
+`.env.example`). Deterministas en el motor (`web/engine.js`: `dailyPuzzle`,
+`nemesisTeam/Name`, `oracleProphecy`, `isPrismatic/prismaticShift`) para que cliente y
+servidor coincidan sin comunicarse; el servidor revalida los combates.
+- **Puzzle Diario**: equipo y enemigos fijos del lote, gana en mínimo de turnos; ranking + compartir estilo Wordle.
+- **Ecos en la Mazmorra**: tu equipo caído (≥nodo 2) se guarda como `dungeon_echoes` y aparece (~35%) como encuentro en runs de otros; vengarlo da botín.
+- **Jefe Mundial**: `world_boss` con HP global; toda la comunidad pega; top contribuidores.
+- **Némesis**: `nemesis` por usuario, counter-pick de tipos, sube de tier (más fuerte) cada vez que la derrotas.
+- **Prismáticas**: 1% determinista por instancia, paleta rotada (cosmético, cero ventaja).
+- **El Oráculo**: profecía críptica pero verídica del lote de mañana (tipo dominante).
+- **Arena Sellada**: draft de 3 de 6 del lote en el PvP en vivo (modo `arena`), sin tu colección.
 
 **PvP en vivo (WebSocket /pvp)**: `queue` admite `code` (duelo privado: solo empareja
 con el mismo código, sin ventana de nivel ni bot); `resume` reanuda tras un corte.

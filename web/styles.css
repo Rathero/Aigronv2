@@ -158,6 +158,24 @@ h2.title small{font-family:var(--ui);font-size:13px;color:var(--ink-dim);font-we
 .card .fav~.tag-new{top:16px} /* si además es favorito, NUEVO baja para no taparlo */
 .filters .sortf{font-size:11px;padding:4px 7px}
 
+/* rejilla de modos innovadores en INICIO */
+.modes{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px}
+.mode-tile{border:2px solid var(--line);background:var(--panel);padding:10px;cursor:pointer;display:flex;flex-direction:column;gap:2px;transition:transform .08s}
+.mode-tile:active{transform:scale(.97)}
+.mode-tile .mi{font-size:22px}
+.mode-tile b{font-size:13px}
+.mode-tile .dim{font-size:10px}
+
+/* variante PRISMÁTICA: aura animada + badge ✦ (cosmético, cero ventaja) */
+.card.prismatic{animation:prism 3s linear infinite}
+@keyframes prism{0%{box-shadow:0 0 10px rgba(255,77,157,.5)}33%{box-shadow:0 0 12px rgba(52,245,228,.6)}66%{box-shadow:0 0 12px rgba(255,210,63,.6)}100%{box-shadow:0 0 10px rgba(255,77,157,.5)}}
+.card .prism-badge{position:absolute;top:2px;left:2px;font-size:11px;color:#fff;text-shadow:0 0 4px var(--magenta),0 0 8px var(--cyan);z-index:2;animation:tw 1.2s steps(4) infinite}
+
+/* jefe mundial: barra de HP global */
+.boss-hp{height:18px;background:#0a0818;border:2px solid var(--line);overflow:hidden;position:relative;margin:8px 0}
+.boss-hp i{display:block;height:100%;background:linear-gradient(90deg,var(--red),var(--magenta));transition:width .5s}
+.boss-hp span{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;text-shadow:0 0 3px #000}
+
 /* marcos COSMÉTICOS (desbloqueables por liga/victorias; cero ventaja) */
 .card.frame-plata{border-color:#cfd6e4;box-shadow:0 0 8px rgba(207,214,228,.4)}
 .card.frame-oro{border-color:var(--gold);box-shadow:0 0 10px rgba(255,210,63,.45)}

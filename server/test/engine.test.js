@@ -365,3 +365,44 @@ test("las decisiones del jugador influyen en el combate (timing importa)", () =>
   }
   assert.ok(anyDiff, "las decisiones deberían afectar el resultado en algún seed");
 });
+
+// ===================== MECÁNICAS INNOVADORAS (deterministas) =================
+test("prismáticas: ~1% determinista y estable", () => {
+  let n = 0;
+  for (let i = 0; i < 2000; i++) if (E.isPrismatic("inst_" + i)) n++;
+  assert.ok(n >= 5 && n <= 45, `prismáticas fuera de rango razonable: ${n}/2000`);
+  assert.equal(E.isPrismatic("inst_7"), E.isPrismatic("inst_7"), "estable para el mismo id");
+  // El shift no rompe el formato hex y cambia el color.
+  const c = E.prismaticShift("#34f5e4", "inst_7");
+  assert.match(c, /^#[0-9a-f]{6}$/i);
+});
+
+test("puzzle diario: determinista e idéntico para todos", () => {
+  const tpls = E.dailyBatch("2026-06-10", 20);
+  const a = E.dailyPuzzle("2026-06-10", tpls);
+  const b = E.dailyPuzzle("2026-06-10", tpls);
+  assert.deepEqual(a, b, "mismo día -> mismo puzzle");
+  assert.equal(a.team.length, 3); assert.equal(a.enemy.length, 3);
+  assert.ok(a.level >= 8 && a.level <= 13, "nivel en rango");
+  const c = E.dailyPuzzle("2026-06-11", tpls);
+  assert.notEqual(a.seed, c.seed, "otro día -> otro puzzle");
+});
+
+test("némesis: counter-pick determinista y nombre estable", () => {
+  const tpls = E.dailyBatch("2026-06-10", 30);
+  const t1 = E.nemesisTeam("user-x", "2026-W24", ["HIELO"], tpls);
+  const t2 = E.nemesisTeam("user-x", "2026-W24", ["HIELO"], tpls);
+  assert.equal(t1.length, 3);
+  assert.deepEqual(t1.map((x) => x.id), t2.map((x) => x.id), "determinista");
+  const nm = E.nemesisName("user-x");
+  assert.match(nm, /^[A-Za-z]+$/, "nombre sin 'undefined'");
+  assert.equal(nm, E.nemesisName("user-x"), "estable");
+});
+
+test("oráculo: profecía determinista con pista verídica", () => {
+  const tpls = E.dailyBatch("2026-06-11", 20);
+  const o1 = E.oracleProphecy("2026-06-11", tpls);
+  const o2 = E.oracleProphecy("2026-06-11", tpls);
+  assert.equal(o1.text, o2.text, "determinista");
+  assert.ok(o1.text.length > 10 && o1.hint && o1.hint.domType, "tiene texto y pista");
+});
