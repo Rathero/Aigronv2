@@ -39,7 +39,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     };
     let art = null;
     for (let tries = 1; tries <= 3; tries++) {
-      try { art = await provider.generate(concept, { rarity: t.rarity, templateId: t.template_id }); break; }
+      try { art = await provider.generate(concept, { rarity: t.rarity, templateId: t.template_id, transparent: true }); break; }
       catch (e) {
         if (/429|quota|rate|RESOURCE_EXHAUSTED/i.test(e.message) && tries < 3) {
           console.log(`  ${t.template_id}: límite de cuota, espero 20s…`);

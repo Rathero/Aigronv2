@@ -18,16 +18,23 @@
 const E = require("../../../web/engine.js");
 
 // ---------------------------- Construcción de prompt -------------------------
-// Estilo UNIFICADO acorde a la app: pixel-art retro neón sobre fondo oscuro
-// (el mismo lenguaje visual que los sprites procedurales 16×16 y la UI neón).
-function buildImagePrompt(concept, rarity) {
+// Estilo UNIFICADO acorde a la app: pixel-art retro neón. Con `transparent` el
+// fondo pasa a VERDE CROMA puro (luego se elimina en transparency.js): así los
+// aigrons flotan sobre la UI como los sprites procedurales, sin bloque cuadrado.
+const CHROMA_NOTE =
+  " The subject is isolated on a flat solid uniform pure green (#00FF00) chroma-key " +
+  "background filling the whole canvas: no gradients, no shadows, no glow on the " +
+  "background itself, and absolutely no pure-green tones inside the creature.";
+function buildImagePrompt(concept, rarity, transparent) {
+  const bgPhrase = transparent ? "" : " on a dark near-black background";
   const base =
     `16-bit pixel art sprite of ${concept.visual_description}. ` +
     `A single centered full-body collectible monster, retro video-game creature. ` +
-    `${concept.palette} colors with a vivid neon glow on a dark near-black background. ` +
+    `${concept.palette} colors with a vivid neon glow${bgPhrase}. ` +
     `Crisp visible square pixels, limited palette, clean pixel edges, subtle neon rim light, ` +
     `front-facing, bold readable silhouette, slight dithering. ` +
-    `No text, no watermark, no humans, no border, no UI, no grid.`;
+    `No text, no watermark, no humans, no border, no UI, no grid.` +
+    (transparent ? CHROMA_NOTE : "");
   if (rarity === "LEGENDARIA") return base + " Legendary tier: ornate details, glowing golden accents, epic radiant aura.";
   if (rarity === "EPICA") return base + " Epic tier: vivid magenta/purple neon glow, fancy details.";
   if (rarity === "RARA") return base + " Rare tier: cool cyan/blue neon glow.";
@@ -89,12 +96,14 @@ function makeOpenAIProvider() {
     name: "openai",
     async generate(concept, opts) {
       const oa = getClient();
-      const prompt = buildImagePrompt(concept, opts.rarity);
+      const prompt = opts.prompt || buildImagePrompt(concept, opts.rarity, opts.transparent);
 
       // 1. Generar imagen. gpt-image-1 devuelve b64 por defecto; dall-e necesita
       //    response_format explícito.
       const model = process.env.IMAGE_MODEL || "gpt-image-1";
       const params = { model, prompt, size: "1024x1024", n: 1 };
+      // gpt-image-1 soporta fondo transparente NATIVO (sin croma ni post-proceso).
+      if (opts.transparent && !/^dall-e/.test(model)) { params.background = "transparent"; params.output_format = "png"; }
       if (/^dall-e/.test(model)) params.response_format = "b64_json";
       const img = await oa.images.generate(params);
       const b64 = img.data && img.data[0] && img.data[0].b64_json;
@@ -164,7 +173,9 @@ function makeGeminiProvider() {
     name: "gemini",
     async generate(concept, opts) {
       const model = process.env.GEMINI_IMAGE_MODEL || "gemini-2.5-flash-image"; // gratis (capa gratuita)
-      const prompt = opts.prompt || buildImagePrompt(concept, opts.rarity);
+      let prompt = opts.prompt || buildImagePrompt(concept, opts.rarity, opts.transparent);
+      // Prompt externo (boss, fusión): añade la instrucción de croma si procede.
+      if (opts.prompt && opts.transparent && !prompt.includes("chroma-key")) prompt += CHROMA_NOTE;
       const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${KEY}`;
       // Imágenes de referencia (p. ej. fusión: las dos criaturas padre) -> entrada multimodal.
       const reqParts = [{ text: prompt }];
@@ -179,8 +190,15 @@ function makeGeminiProvider() {
       const parts = (data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts) || [];
       const imgPart = parts.find((p) => p.inlineData && p.inlineData.data);
       if (!imgPart) throw new Error("respuesta de gemini sin imagen");
-      const buffer = Buffer.from(imgPart.inlineData.data, "base64");
-      const ext = (imgPart.inlineData.mimeType || "image/png").includes("jpeg") ? "jpg" : "png";
+      let buffer = Buffer.from(imgPart.inlineData.data, "base64");
+      let ext = (imgPart.inlineData.mimeType || "image/png").includes("jpeg") ? "jpg" : "png";
+      // Fondo transparente: elimina el verde croma pedido en el prompt (pngjs).
+      if (opts.transparent && ext === "png") {
+        try {
+          const tr = require("./transparency");
+          if (tr.available()) buffer = tr.chromaKeyGreen(buffer);
+        } catch (e) { console.warn(`[ai] croma falló (${opts.templateId}): ${e.message}`); }
+      }
 
       // Filtro de calidad/seguridad opcional (gemini texto+visión). AI_VISION_FILTER=off lo salta.
       let score = 0.8;

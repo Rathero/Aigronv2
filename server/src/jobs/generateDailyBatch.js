@@ -84,7 +84,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 async function generateArt(provider, t) {
   for (let tries = 1; tries <= 3; tries++) {
     try {
-      return await provider.generate(conceptFromTemplate(t), { rarity: t.rarity, seed: t.art_seed, templateId: t.id });
+      return await provider.generate(conceptFromTemplate(t), { rarity: t.rarity, seed: t.art_seed, templateId: t.id, transparent: true });
     } catch (e) {
       if (/429|quota|rate|RESOURCE_EXHAUSTED/i.test(e.message) && tries < 3) {
         console.warn(`[batch] ${t.id}: límite de cuota, espero 20s…`);

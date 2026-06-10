@@ -124,7 +124,7 @@ async function ensureBossArt() {
   try {
     const fs = require("fs"); const path = require("path");
     fs.mkdirSync(path.join(__dirname, "../../web/art/ui"), { recursive: true });
-    const r = await provider.generate({}, { prompt, rarity: "LEGENDARIA", templateId: "ui/" + b.id.replace(":", "-") });
+    const r = await provider.generate({}, { prompt, rarity: "LEGENDARIA", templateId: "ui/" + b.id.replace(":", "-"), transparent: true });
     if (r && r.image_url) {
       await db.query("UPDATE world_boss SET image_url=$1 WHERE id=$2", [r.image_url, b.id]);
       console.log(`[jefe] arte generado: ${r.image_url}`);

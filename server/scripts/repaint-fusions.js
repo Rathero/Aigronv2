@@ -46,11 +46,11 @@ function loadRefArt(imageUrl) {
       visual_description: `a hybrid creature fusing a ${descA} and a ${descB}, resulting in a ${f.type.toLowerCase()} elemental creature`,
       palette: f.type.toLowerCase(),
     };
-    const opts = { rarity: f.rarity, templateId: f.template_id };
+    const opts = { rarity: f.rarity, templateId: f.template_id, transparent: true };
     const refs = [pA && loadRefArt(pA.image_url), pB && loadRefArt(pB.image_url)].filter(Boolean);
     if (refs.length === 2) {
       opts.refImages = refs;
-      opts.prompt = `Fuse the TWO creatures shown in the reference images into ONE new hybrid that clearly combines features of BOTH — the ${descA} and the ${descB} (mix their body parts, colors and motifs into a single coherent creature). ` + buildImagePrompt(concept, f.rarity);
+      opts.prompt = `Fuse the TWO creatures shown in the reference images into ONE new hybrid that clearly combines features of BOTH — the ${descA} and the ${descB} (mix their body parts, colors and motifs into a single coherent creature). ` + buildImagePrompt(concept, f.rarity, true);
     }
     let art = null;
     try { art = await provider.generate(concept, opts); } catch (e) { console.warn(`  ${f.template_id}: ${e.message}`); }

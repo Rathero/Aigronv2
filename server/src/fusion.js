@@ -100,11 +100,11 @@ async function getOrCreateFusionTemplate(tA, tB) {
       visual_description: `a hybrid creature fusing a ${descA} and a ${descB}, resulting in a ${type.toLowerCase()} elemental creature`,
       lore, palette: type.toLowerCase(),
     };
-    const opts = { rarity, seed, templateId };
+    const opts = { rarity, seed, templateId, transparent: true };
     const refs = [loadRefArt(tA.image_url), loadRefArt(tB.image_url)].filter(Boolean);
     if (refs.length === 2) {
       opts.refImages = refs;
-      opts.prompt = `Fuse the TWO creatures shown in the reference images into ONE new hybrid that clearly combines features of BOTH — the ${descA} and the ${descB} (mix their body parts, colors and motifs into a single coherent creature). ` + buildImagePrompt(concept, rarity);
+      opts.prompt = `Fuse the TWO creatures shown in the reference images into ONE new hybrid that clearly combines features of BOTH — the ${descA} and the ${descB} (mix their body parts, colors and motifs into a single coherent creature). ` + buildImagePrompt(concept, rarity, true);
     }
     art = await getImageProvider().generate(concept, opts);
   } catch (e) {
