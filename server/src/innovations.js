@@ -99,13 +99,41 @@ async function bossState(userId) {
       WHERE c.boss_id=$1 ORDER BY c.damage DESC LIMIT 10`, [b.id]);
   const mine = (await db.query("SELECT damage, hits FROM world_boss_contrib WHERE boss_id=$1 AND user_id=$2", [b.id, userId])).rows[0];
   return {
-    id: b.id, name: b.name, type: b.type,
+    id: b.id, name: b.name, type: b.type, image: b.image_url || null,
     hpMax: Number(b.hp_max), hpLeft: Number(b.hp_left),
     pct: Math.max(0, Math.round(Number(b.hp_left) / Number(b.hp_max) * 100)),
     defeated: !!b.defeated_at,
     top: top.rows.map((x, i) => ({ pos: i + 1, name: x.name, damage: Number(x.damage), me: x.user_id === userId })),
     myDamage: mine ? Number(mine.damage) : 0, myHits: mine ? mine.hits : 0,
   };
+}
+// Arte IA del jefe de la semana (best-effort, idempotente): solo si hay proveedor
+// de imagen real y el jefe aún no tiene arte. Lo lanza el job de mantenimiento.
+async function ensureBossArt() {
+  const { getImageProvider } = require("./ai/imageProvider");
+  const provider = getImageProvider();
+  if (provider.name === "procedural") return false;
+  const b = await getOrCreateBoss();
+  if (b.image_url) return false;
+  const prompt =
+    `16-bit pixel art of a HUGE menacing world-boss monster named ${b.name}, ` +
+    `a colossal ${b.type.toLowerCase()}-element creature, epic scale, front-facing, ` +
+    `imposing silhouette filling the frame, dark near-black background, ` +
+    `neon palette (cyan #34f5e4, magenta #ff4d9d, gold #ffd23f accents), ` +
+    `crisp square pixels, dramatic rim light. No text, no watermark, no border.`;
+  try {
+    const fs = require("fs"); const path = require("path");
+    fs.mkdirSync(path.join(__dirname, "../../web/art/ui"), { recursive: true });
+    const r = await provider.generate({}, { prompt, rarity: "LEGENDARIA", templateId: "ui/" + b.id.replace(":", "-") });
+    if (r && r.image_url) {
+      await db.query("UPDATE world_boss SET image_url=$1 WHERE id=$2", [r.image_url, b.id]);
+      console.log(`[jefe] arte generado: ${r.image_url}`);
+      return true;
+    }
+  } catch (e) {
+    console.warn("[jefe] no se pudo generar el arte:", e.message);
+  }
+  return false;
 }
 // Construye el ENCUENTRO del jefe (mismo cálculo en GET y en POST): tu equipo,
 // 3 avatares del jefe y un seed determinista por (usuario, jefe, nº de golpe).
@@ -230,7 +258,7 @@ async function teamIdsOf(userId) {
 
 module.exports = {
   solvePuzzle, puzzleRanking,
-  getOrCreateBoss, bossState, bossEncounter, hitBoss,
+  getOrCreateBoss, bossState, bossEncounter, hitBoss, ensureBossArt,
   getNemesis, nemesisEncounter, nemesisResult,
   unitsFromIds, normTpl, sanitizeDecisions,
 };

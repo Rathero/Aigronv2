@@ -19,11 +19,13 @@
 <div id="app">
   <div class="topbar">
     <div class="logo">AI<b>GRONS</b></div>
+    <!-- Iconos pixel SVG propios (currentColor): mismos en todas las plataformas,
+         a diferencia de los emojis, y a juego con la estética del juego. -->
     <div class="chips">
-      <div class="chip coin"><span>🪙</span><span id="c-coins">0</span></div>
-      <div class="chip dust"><span>✨</span><span id="c-dust">0</span></div>
-      <div class="chip gem"><span>💎</span><span id="c-gems">0</span></div>
-      <div class="chip ene"><span>⚡</span><span id="c-ene">5</span><span class="ene-t" id="c-ene-t"></span></div>
+      <div class="chip coin"><span class="ci"><svg viewBox="0 0 10 10" shape-rendering="crispEdges"><path fill="currentColor" d="M3 1h4v1H3zM2 2h6v1H2zM1 3h8v4H1zM2 7h6v1H2zM3 8h4v1H3z"/><path fill="#0a0818" d="M4 3h1v4H4zM5 3h2v1H5zM5 6h2v1H5z"/></svg></span><span id="c-coins">0</span></div>
+      <div class="chip dust"><span class="ci"><svg viewBox="0 0 10 10" shape-rendering="crispEdges"><path fill="currentColor" d="M4 0h2v2H4zM4 8h2v2H4zM0 4h2v2H0zM8 4h2v2H8zM3 3h4v4H3z"/><path fill="#0a0818" d="M4 4h2v2H4z"/></svg></span><span id="c-dust">0</span></div>
+      <div class="chip gem"><span class="ci"><svg viewBox="0 0 10 10" shape-rendering="crispEdges"><path fill="currentColor" d="M3 1h4v1H3zM2 2h6v1H2zM1 3h8v1H1zM2 4h6v1H2zM3 5h4v1H3zM4 6h2v2H4z"/></svg></span><span id="c-gems">0</span></div>
+      <div class="chip ene"><span class="ci"><svg viewBox="0 0 10 10" shape-rendering="crispEdges"><path fill="currentColor" d="M5 0h3L5 4h3l-5 6 1-4H2z"/></svg></span><span id="c-ene">5</span><span class="ene-t" id="c-ene-t"></span></div>
     </div>
     <button class="help" data-act="menuToggle" title="Menú">≡</button>
     <div class="menu" id="topmenu">

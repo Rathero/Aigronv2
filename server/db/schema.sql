@@ -260,6 +260,8 @@ CREATE TABLE IF NOT EXISTS world_boss (
   defeated_at TIMESTAMPTZ,
   created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+-- Arte IA del jefe (generado por el job semanal si hay proveedor; emoji si no).
+ALTER TABLE world_boss ADD COLUMN IF NOT EXISTS image_url TEXT;
 CREATE TABLE IF NOT EXISTS world_boss_contrib (
   boss_id    TEXT NOT NULL REFERENCES world_boss(id) ON DELETE CASCADE,
   user_id    UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,

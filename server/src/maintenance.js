@@ -39,6 +39,11 @@ function startMaintenance(db) {
   const boot = async () => {
     try { await leagues.closeWeekIfDue(db); } catch (e) { console.error("[ligas] error:", e.message); }
     try { await cleanupOldData(db); } catch (e) { console.error("[limpieza] error:", e.message); }
+    // Arte IA del jefe semanal (best-effort: solo con proveedor real y si falta).
+    try {
+      const features = require("./features");
+      if (features.on("worldboss")) await require("./innovations").ensureBossArt();
+    } catch (e) { console.error("[jefe] error:", e.message); }
   };
   boot();
   if (process.env.DISABLE_CRON === "true") return null;

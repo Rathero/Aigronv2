@@ -535,12 +535,24 @@ async function firstFight(){
 // Compartir el aigrón (viralidad): compone una tarjeta PNG (sprite + nombre +
 // rareza + fecha) y usa Web Share si está disponible; si no, descarga.
 const RARITY_COLOR={COMUN:'#8b86b8',RARA:'#43b6ff',EPICA:'#c061ff',LEGENDARIA:'#ffd23f'};
+// Carga opcional de un asset del pack UI (resuelve null si no existe: fallback).
+function loadUiArt(src){
+  return new Promise(res=>{
+    const img=new Image();
+    img.onload=()=>res(img); img.onerror=()=>res(null);
+    setTimeout(()=>res(null),1500); // sin red lenta bloqueando el share
+    img.src=src;
+  });
+}
 async function shareAig(tplId){
   const t=tpl(tplId); if(!t)return;
   const c=document.createElement('canvas'); c.width=480; c.height=600;
   const g=c.getContext('2d'); g.imageSmoothingEnabled=false;
   g.fillStyle='#0a0818'; g.fillRect(0,0,480,600);
-  g.strokeStyle='#3a3270'; g.lineWidth=6; g.strokeRect(10,10,460,580);
+  // Plantilla del pack de arte IA si existe; si no, el diseño plano de siempre.
+  const bg=await loadUiArt('/art/ui/share-bg.png');
+  if(bg) g.drawImage(bg,0,0,480,600);
+  g.strokeStyle='#3a3270'; g.lineWidth=6; if(!bg)g.strokeRect(10,10,460,580);
   g.fillStyle='#34f5e4'; g.font='bold 26px monospace'; g.textAlign='center';
   g.fillText('AIGRONS',240,52);
   const sc=document.createElement('canvas'); drawAigron(sc,t,8); // sprite procedural (sin CORS)
@@ -615,8 +627,11 @@ async function openBoss(){
   let b; try{ b=await api('/worldboss'); }catch(e){ toast('Jefe no disponible'); return; }
   BOSS=b;
   const top=(b.top||[]).slice(0,5).map(x=>`<div class="rank-row ${x.me?'me':''}" style="padding:4px 6px;font-size:12px"><span class="pos">${x.pos}</span><span class="nm">${esc(x.name)}</span><span style="color:var(--magenta)">${fmtBig(x.damage)}</span></div>`).join('')||'<div class="dim" style="font-size:12px;padding:6px">Nadie le ha pegado aún. ¡Sé el primero!</div>';
+  // Arte IA del jefe si el job semanal lo generó; emoji 🐉 si no (fallback).
+  const bossArt=b.image?`<img src="${b.image}" alt="${esc(b.name)}" class="boss-art">`:'<div style="font-size:54px;line-height:1.1">🐉</div>';
   openOverlay(`<div class="center">
-    <div style="font-family:var(--pixel);font-size:13px;color:var(--red);margin-bottom:4px">🐉 ${esc(b.name)}</div>
+    ${bossArt}
+    <div style="font-family:var(--pixel);font-size:13px;color:var(--red);margin:6px 0 4px">${esc(b.name)}</div>
     <div class="dim" style="font-size:11px">Jefe Mundial · tipo ${b.type} · toda la comunidad colabora</div>
     <div class="boss-hp"><i style="width:${b.pct}%"></i><span>${fmtBig(b.hpLeft)} / ${fmtBig(b.hpMax)} HP</span></div>
     ${b.defeated?'<div style="color:var(--gold);font-weight:700">🏆 ¡La comunidad lo derrotó!</div>':`<button class="btn mag" data-act="bossFight">⚔️ GOLPEAR — ⚡1</button>`}
