@@ -613,6 +613,7 @@ function puzzleShare(turns){
 // -- JEFE MUNDIAL: raid cooperativa con HP global ------------------------------
 async function openBoss(){
   let b; try{ b=await api('/worldboss'); }catch(e){ toast('Jefe no disponible'); return; }
+  BOSS=b;
   const top=(b.top||[]).slice(0,5).map(x=>`<div class="rank-row ${x.me?'me':''}" style="padding:4px 6px;font-size:12px"><span class="pos">${x.pos}</span><span class="nm">${esc(x.name)}</span><span style="color:var(--magenta)">${fmtBig(x.damage)}</span></div>`).join('')||'<div class="dim" style="font-size:12px;padding:6px">Nadie le ha pegado aún. ¡Sé el primero!</div>';
   openOverlay(`<div class="center">
     <div style="font-family:var(--pixel);font-size:13px;color:var(--red);margin-bottom:4px">🐉 ${esc(b.name)}</div>
@@ -623,31 +624,28 @@ async function openBoss(){
     <div class="mt8" style="text-align:left"><b style="font-size:12px">🏆 Top héroes</b>${top}</div>
     <button class="btn sm ghost mt8" data-act="close">CERRAR</button></div>`);
 }
+let BOSS=null;
 function bossFight(){
+  // El encuentro (tu equipo + avatares del jefe + seed) viene del SERVIDOR en
+  // GET /worldboss: el cliente anima EXACTAMENTE lo que el servidor validará.
+  if(!BOSS||!BOSS.encounter){ toast('Jefe no disponible'); return; }
+  const enc=BOSS.encounter;
+  if(!enc.team.length){ toast('Necesitas equipo'); return; }
   closeOverlay();
-  const A=S.team.map(instById).filter(Boolean);
-  if(!A.length){ toast('Necesitas equipo'); return; }
-  // El cliente anima un combate "de práctica" contra 3 avatares del jefe; el
-  // servidor recalcula el daño real. Pedimos los stats del jefe vía /nemesis? No:
-  // reusamos el equipo del jugador y dejamos que el servidor mida el daño.
-  api('/worldboss',{}).then(()=>{
-    // Combate ilustrativo: tu equipo vs un trío genérico (el daño cuenta en server).
-    const enemy=A.map(u=>({...publicUnitLocal(u)})); // espejo visual; daño lo da el server
-    startLocalCombat({team:A.map(publicUnitLocal),enemy,seed:(Math.random()*1e9)|0,mode:'boss',title:'JEFE MUNDIAL',
-      onResolve:(decisions)=>{
-        api('/worldboss/hit',{method:'POST',body:{decisions}}).then(r=>{
-          CB=null; refreshMe().then(refreshChips);
-          SFX.play('crit'); buzz(60);
-          openOverlay(`<div class="center">
-            <div style="font-family:var(--pixel);font-size:14px;color:var(--magenta);margin-bottom:8px">💥 ¡GOLPE!</div>
-            <div style="font-size:40px">🐉</div>
-            <div class="mt8">Daño infligido: <b style="color:var(--magenta)">${fmtBig(r.dmg||0)}</b></div>
-            ${r.justDefeated?'<div style="color:var(--gold);font-weight:700;margin-top:6px">🏆 ¡LO HAS REMATADO!</div>':`<div class="boss-hp mt8"><i style="width:${r.boss.pct}%"></i><span>${r.boss.pct}%</span></div>`}
-            <button class="btn mt8" data-act="openBoss">SEGUIR</button>
-            <button class="btn ghost mt8" data-act="goHome">VOLVER</button></div>`);
-        }).catch(e=>{ toast(e.status===402?'Sin energía ⚡':'Error'); CB=null; go('home'); });
-      }});
-  });
+  startLocalCombat({team:enc.team,enemy:enc.enemy,seed:enc.seed,mode:'boss',title:'JEFE MUNDIAL',
+    onResolve:(decisions)=>{
+      api('/worldboss/hit',{method:'POST',body:{decisions}}).then(r=>{
+        CB=null; refreshMe().then(refreshChips);
+        SFX.play('crit'); buzz(60);
+        openOverlay(`<div class="center">
+          <div style="font-family:var(--pixel);font-size:14px;color:var(--magenta);margin-bottom:8px">💥 ¡GOLPE!</div>
+          <div style="font-size:40px">🐉</div>
+          <div class="mt8">Daño infligido: <b style="color:var(--magenta)">${fmtBig(r.dmg||0)}</b></div>
+          ${r.justDefeated?'<div style="color:var(--gold);font-weight:700;margin-top:6px">🏆 ¡LO HAS REMATADO! Recompensa para toda la comunidad.</div>':`<div class="boss-hp mt8"><i style="width:${r.boss.pct}%"></i><span>${r.boss.pct}%</span></div>`}
+          <button class="btn mt8" data-act="openBoss">SEGUIR</button>
+          <button class="btn ghost mt8" data-act="goHome">VOLVER</button></div>`);
+      }).catch(e=>{ toast(e.status===402?'Sin energía ⚡':'Error'); CB=null; go('home'); });
+    }});
 }
 
 // -- NÉMESIS: rival recurrente ------------------------------------------------
@@ -668,9 +666,10 @@ async function openNemesis(){
 let NEM=null;
 function nemesisFight(){
   if(!NEM)return; closeOverlay();
-  const A=S.team.map(instById).filter(Boolean);
-  if(!A.length){ toast('Necesitas equipo'); return; }
-  startLocalCombat({team:A.map(publicUnitLocal),enemy:NEM.enemy,seed:(Math.random()*1e9)|0,mode:'nemesis',title:'NÉMESIS',
+  // Equipo + enemigo + seed vienen del servidor (GET /nemesis): la animación
+  // coincide 1:1 con la validación del POST (mismo encuentro determinista).
+  if(!NEM.team||!NEM.team.length){ toast('Necesitas equipo'); return; }
+  startLocalCombat({team:NEM.team,enemy:NEM.enemy,seed:NEM.seed,mode:'nemesis',title:'NÉMESIS',
     onResolve:(decisions)=>{
       api('/nemesis/fight',{method:'POST',body:{decisions}}).then(r=>{
         CB=null; refreshMe().then(refreshChips);
@@ -719,8 +718,6 @@ function arenaStart(){
 }
 
 const fmtBig=(n)=>n>=1e6?(n/1e6).toFixed(1)+'M':n>=1e3?(n/1e3).toFixed(1)+'k':String(n|0);
-// Stats públicos de una unidad local (para re-alimentar startLocalCombat).
-function publicUnitLocal(u){ return {uid:u.uid,tplId:u.tplId,name:u.name,type:u.type,types:u.types,ability:u.ability,level:u.level,hpMax:u.hpMax,atkP:u.atkP,atkS:u.atkS,defP:u.defP,defS:u.defS,spd:u.spd,startEnergy:u.startEnergy||0}; }
 
 /* ====================== PERFIL + LOGROS + REPLAYS ====================== */
 async function openProfile(){
@@ -1320,7 +1317,7 @@ function buildArena(){
      <div class="fname">${u.name}</div>
      <div class="energy-pips">${'<span class="pip"></span>'.repeat(6)}</div></div>`;
   $("#s-battle").innerHTML=`
-    <h2 class="title">COMBATE ${CB.pvp?'<small>PvP</small>':'<small>PvE</small>'}</h2>
+    <h2 class="title">${esc(CB.title||'COMBATE')} ${CB.pvp?'<small>PvP</small>':'<small>PvE</small>'}</h2>
     <div class="arena">
       <div class="vs">VS</div>
       <div class="side enemy-side">${CB.B.map(fHTML).join("")}</div>
@@ -1942,7 +1939,7 @@ const ACTIONS={
   close:()=>closeOverlay(),
   setFilter:(a)=>setFilter(a),
   setSort:(a)=>setSort(a),
-  goHome:()=>go('home'),
+  goHome:()=>{closeOverlay();go('home');},
   shareAig:(a)=>shareAig(a),
   openProfile:()=>openProfile(), editName:()=>editName(), claimAch:(a)=>claimAch(a),
   openPuzzle:()=>openPuzzle(), puzzlePlay:()=>puzzlePlay(), puzzleShare:(a)=>puzzleShare(a),

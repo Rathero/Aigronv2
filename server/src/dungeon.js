@@ -140,7 +140,7 @@ async function chooseNode(userId, choiceIdx, templates) {
     // equipo CAÍDO de otro jugador (snapshot real) en vez de enemigos generados.
     let echo = null;
     if (features.on("echoes") && node.type === "COMBATE" && (E.hashStr("echoroll:" + row.seed + ":" + row.depth) % 100) < 35) {
-      echo = await pickEcho(userId, row.depth).catch(() => null);
+      echo = await pickEcho(userId, row.depth, row.difficulty).catch(() => null);
     }
     if (echo) {
       s.pending.enemy = echo.team;       // snapshot escalado, ya listo para combate
@@ -362,7 +362,9 @@ async function ranking(userId, difficulty) {
 async function createEcho(userId, row, s) {
   const u = await db.query("SELECT display_name FROM users WHERE id=$1", [userId]);
   const name = (u.rows[0] && u.rows[0].display_name) || "Caído";
-  const teamSnap = s.team.map((m) => memberStats(m)); // stats escalados (con HP máx)
+  // El fantasma "revive": HP a tope (el equipo murió con hp~0; unitFromStats ya
+  // usa hpMax, pero el snapshot lo deja explícito para cualquier consumidor).
+  const teamSnap = s.team.map((m) => Object.assign(memberStats(m), { hp: m.base.hpMax }));
   const bounty = Math.round((s.coins || 0) * 0.5) + row.depth * 8;
   await db.query(
     `INSERT INTO dungeon_echoes (daily_date, user_id, owner_name, depth, difficulty, team, coins_bounty)
@@ -371,12 +373,14 @@ async function createEcho(userId, row, s) {
   );
 }
 // Elige un eco de OTRO jugador cercano en profundidad para un encuentro (o null).
-async function pickEcho(userId, depth) {
+// Filtra por DIFICULTAD: un eco de PESADILLA (nv100) en una run FÁCIL sería un
+// paredón injusto — los niveles del snapshot son los de su dificultad.
+async function pickEcho(userId, depth, difficulty) {
   const r = await db.query(
     `SELECT * FROM dungeon_echoes
-      WHERE daily_date=$1 AND user_id<>$2 AND depth BETWEEN $3 AND $4
+      WHERE daily_date=$1 AND user_id<>$2 AND difficulty=$3 AND depth BETWEEN $4 AND $5
       ORDER BY random() LIMIT 1`,
-    [C.todayStr(), userId, Math.max(0, depth - 1), depth + 2]
+    [C.todayStr(), userId, difficulty || "NORMAL", Math.max(0, depth - 1), depth + 2]
   );
   return r.rows[0] || null;
 }

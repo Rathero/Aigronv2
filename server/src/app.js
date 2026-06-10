@@ -28,7 +28,7 @@ const achievements = require("./achievements");
 const push = require("./push");
 const features = require("./features");
 const innov = require("./innovations");
-const { eventFor } = require("./jobs/generateDailyBatch");
+const { eventFor, composeBatch } = require("./jobs/generateDailyBatch");
 const { tplBaseStats, tplTypes } = require("./util");
 
 const app = express();
@@ -981,8 +981,16 @@ app.post("/puzzle/solve", authMiddleware, requireFeature("puzzle"), wrap(async (
 }));
 
 // -- JEFE MUNDIAL: raid cooperativa, HP global compartido ----------------------
+// El GET incluye el ENCUENTRO (tu equipo + avatares del jefe + seed determinista
+// por nº de golpe): el cliente anima EXACTAMENTE lo que el POST validará.
 app.get("/worldboss", authMiddleware, requireFeature("worldboss"), wrap(async (req, res) => {
-  res.json(await innov.bossState(req.userId));
+  const state = await innov.bossState(req.userId);
+  if (!state.defeated) {
+    const tpls = await todayTemplates();
+    const enc = await innov.bossEncounter(req.userId, tpls);
+    state.encounter = { seed: enc.seed, team: enc.A.map(publicUnit), enemy: enc.B.map(publicUnit) };
+  }
+  res.json(state);
 }));
 app.post("/worldboss/hit", authMiddleware, requireFeature("worldboss"), wrap(async (req, res) => {
   let u = await getUser(req.userId); u = await syncEnergy(u);
@@ -990,16 +998,19 @@ app.post("/worldboss/hit", authMiddleware, requireFeature("worldboss"), wrap(asy
   // El golpe al jefe cuesta 1⚡ (como un combate normal).
   await db.query("UPDATE users SET energy = GREATEST(energy-1,0), energy_updated_at = CASE WHEN energy-1 < $2 THEN now() ELSE energy_updated_at END WHERE id=$1", [req.userId, C.ENERGY_MAX]);
   const tpls = await todayTemplates();
-  const out = await innov.hitBoss(req.userId, (req.body && req.body.decisions) || [], tpls, u);
+  const out = await innov.hitBoss(req.userId, (req.body && req.body.decisions) || [], tpls);
   res.json(out);
 }));
 
 // -- NÉMESIS: rival IA recurrente con counter-pick e historia ------------------
+// GET devuelve TAMBIÉN tu equipo y el seed determinista del encuentro: el
+// cliente anima exactamente el combate que el POST validará (mismo seed/equipos).
 app.get("/nemesis", authMiddleware, requireFeature("nemesis"), wrap(async (req, res) => {
   const tpls = await todayTemplates();
   const enc = await innov.nemesisEncounter(req.userId, tpls);
+  const A = await buildTeamUnits(req.userId);
   res.json({ name: enc.name, tier: enc.tier, winsVsMe: enc.winsVsMe, myWins: enc.myWins, level: enc.level,
-    enemy: enc.enemy.map(publicUnit) });
+    seed: enc.seed, team: A.map(publicUnit), enemy: enc.enemy.map(publicUnit) });
 }));
 app.post("/nemesis/fight", authMiddleware, requireFeature("nemesis"), wrap(async (req, res) => {
   let u = await getUser(req.userId); u = await syncEnergy(u);
@@ -1007,18 +1018,16 @@ app.post("/nemesis/fight", authMiddleware, requireFeature("nemesis"), wrap(async
   const A = await buildTeamUnits(req.userId);
   if (!A.length) return res.status(400).json({ error: "empty_team" });
   const tpls = await todayTemplates();
-  const enc = await innov.nemesisEncounter(req.userId, tpls);
-  const seed = (C.hashStr("nemfight:" + req.userId + ":" + Date.now()) >>> 0);
+  const enc = await innov.nemesisEncounter(req.userId, tpls); // mismo encuentro que el GET
   const safe = innov.sanitizeDecisions((req.body && req.body.decisions) || []);
   const B = enc.enemy.map((e, i) => combat.unitFromStats(publicUnit(e), "B", i));
-  const result = combat.resolveBattle(A, B, seed, safe);
+  const result = combat.resolveBattle(A, B, enc.seed, safe);
   const win = result.winner === "A";
   const nem = await innov.nemesisResult(req.userId, win);
-  const award = await awardBattleResult({ user: u, win, abilitiesUsed: 0, seed });
+  const award = await awardBattleResult({ user: u, win, abilitiesUsed: 0, seed: enc.seed });
   // Derrotar a la némesis concede su marco único una vez.
   if (win) await db.query("INSERT INTO achievements (user_id, key) VALUES ($1,'nemesis_slayer') ON CONFLICT DO NOTHING", [req.userId]);
-  res.json({ win, nemesis: nem, coins: award.coins, leaguePoints: award.leaguePoints, league: award.league, energy: award.energy,
-    log: result.log, seed, team: A.map(publicUnit), enemy: B.map(publicUnit) });
+  res.json({ win, nemesis: nem, coins: award.coins, leaguePoints: award.leaguePoints, league: award.league, energy: award.energy });
 }));
 
 // -- ORÁCULO: profecía determinista del lote de MAÑANA -------------------------
@@ -1028,7 +1037,9 @@ app.get("/oracle", authMiddleware, requireFeature("oracle"), wrap(async (req, re
   const tomorrow = C.todayStr(new Date(Date.now() + 86400000));
   let tpls = (await db.query("SELECT type, type2, rarity FROM creature_templates WHERE batch_date=$1 AND is_fusion=false", [tomorrow])).rows
     .map((x) => ({ type: x.type, types: x.type2 ? [x.type, x.type2] : [x.type], rarity: x.rarity }));
-  if (!tpls.length) tpls = C.dailyBatch(tomorrow, DAILY_N);
+  // composeBatch (no dailyBatch): la MISMA selección por cupos/eventos que usará
+  // el job nocturno, para que la profecía cuadre con el lote que de verdad saldrá.
+  if (!tpls.length) tpls = composeBatch(tomorrow, DAILY_N);
   res.json(C.oracleProphecy(tomorrow, tpls));
 }));
 

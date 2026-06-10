@@ -142,13 +142,16 @@ function attachPvp(server, deps) {
 
   // Combate contra BOT (cola sin liquidez): el bot juega con la IA del motor
   // (stepTurn decide por las unidades B sin decisión) y no recibe recompensas.
+  // En modo ARENA el jugador usa su equipo DRAFTEADO (no su colección) y el bot
+  // sale al mismo nivel fijo del draft.
   async function startBotMatch(p) {
-    const teamA = await buildTeamUnits(p.userId, "A");
+    const teamA = p.arena && buildArenaUnits ? await buildArenaUnits(p.arena, "A") : await buildTeamUnits(p.userId, "A");
     if (!teamA.length) return send(p.ws, { t: "error", msg: "team" });
     E.applyCaptainStance(teamA, capUid(teamA, p.captain), STANCES_OK.includes(p.stance) ? p.stance : "NEUTRAL");
     const seed = Math.floor(Math.random() * 0x7fffffff) >>> 0;
     const tpls = await todayTemplates();
-    const teamB = E.botTeamFromSeed(seed, tpls, p.level);
+    const botLevel = p.arena ? Math.round(teamA.reduce((s, x) => s + (x.level || 1), 0) / teamA.length) : p.level;
+    const teamB = E.botTeamFromSeed(seed, tpls, botLevel);
     E.applyCaptainStance(teamB, teamB[0] && teamB[0].uid, "NEUTRAL");
     const id = "m" + (seq++);
     const bot = { userId: null, ws: null, name: BOT_NAMES[seed % BOT_NAMES.length], bot: true };

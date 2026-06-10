@@ -107,27 +107,38 @@ async function bossState(userId) {
     myDamage: mine ? Number(mine.damage) : 0, myHits: mine ? mine.hits : 0,
   };
 }
-// Golpea al jefe: el cliente manda decisiones, el servidor calcula el daño con
-// el motor (combate contra un "saco" del tipo del jefe) y lo descuenta atómicamente.
-async function hitBoss(userId, decisions, templates, user) {
-  if (!templates.length) throw new Error("no_templates");
+// Construye el ENCUENTRO del jefe (mismo cálculo en GET y en POST): tu equipo,
+// 3 avatares del jefe y un seed determinista por (usuario, jefe, nº de golpe).
+// Así el cliente ANIMA exactamente el combate que el servidor validará.
+async function bossEncounter(userId, templates) {
   const b = await getOrCreateBoss();
-  if (b.defeated_at) return { defeated: true, boss: await bossState(userId) };
   const byId = {}; templates.forEach((t) => (byId[t.id || t.template_id] = normTpl(t)));
-  // Tu equipo real vs 3 sacos del tipo del jefe (mismo nivel): el daño que haces
-  // en 8 turnos = tu "golpe" al jefe. Determinista por usuario+intento.
   const teamIds = (await teamIdsOf(userId)) || templates.slice(0, 3).map((t) => t.id || t.template_id);
-  const seed = (E.hashStr("wbhit:" + userId + ":" + b.id) ^ (b.hp_left & 0xffffff)) >>> 0;
+  const mine = (await db.query("SELECT hits FROM world_boss_contrib WHERE boss_id=$1 AND user_id=$2", [b.id, userId])).rows[0];
+  const hits = mine ? mine.hits : 0;
+  const seed = E.hashStr(`wbhit:${userId}:${b.id}:${hits}`) >>> 0;
   const A = unitsFromIds(teamIds, 12, "A", byId);
-  if (!A.length) throw new Error("empty_team");
   const bossTpl = templates.find((t) => (t.types || [t.type]).includes(b.type)) || templates[0];
-  const Bteam = [0, 1, 2].map((i) => E.buildUnit(normTpl(bossTpl), 12, "B", i));
-  const r = E.resolveBattle(A, Bteam, seed, sanitizeDecisions(decisions));
-  // Daño al jefe = daño total infligido por A (suma de golpes en el log).
+  const Bteam = [0, 1, 2].map((i) => {
+    const u = E.buildUnit(normTpl(bossTpl), 12, "B", i);
+    u.name = b.name; // los avatares llevan el nombre del jefe
+    return u;
+  });
+  return { boss: b, seed, A, B: Bteam };
+}
+// Golpea al jefe: recomputa el MISMO encuentro que vio el cliente (seed por nº
+// de golpe) y descuenta el daño infligido de forma atómica.
+async function hitBoss(userId, decisions, templates) {
+  if (!templates.length) throw new Error("no_templates");
+  const enc = await bossEncounter(userId, templates);
+  const b = enc.boss;
+  if (b.defeated_at) return { defeated: true, boss: await bossState(userId) };
+  if (!enc.A.length) throw new Error("empty_team");
+  const r = E.resolveBattle(enc.A, enc.B, enc.seed, sanitizeDecisions(decisions));
+  // Daño al jefe = daño total infligido por tu equipo (suma de golpes del log).
   let dmg = 0;
   r.log.forEach((e) => { if (e.uid && e.uid[0] === "A") (e.hits || []).forEach((h) => (dmg += h.dmg || 0)); });
   dmg = Math.max(1, Math.round(dmg));
-  // Descuento atómico + contribución (no baja de 0; marca derrotado al llegar).
   const upd = await db.query(
     `UPDATE world_boss SET hp_left = GREATEST(0, hp_left - $1),
        defeated_at = CASE WHEN hp_left - $1 <= 0 AND defeated_at IS NULL THEN now() ELSE defeated_at END
@@ -139,7 +150,19 @@ async function hitBoss(userId, decisions, templates, user) {
   );
   // Recompensa pequeña por golpe (monedas), incentiva participar.
   await db.query("UPDATE users SET coins = coins + 10 WHERE id=$1", [userId]);
-  return { dmg, justDefeated: !!(upd.rows[0].defeated_at && Number(upd.rows[0].hp_left) === 0), boss: await bossState(userId) };
+  const justDefeated = !!(upd.rows[0].defeated_at && Number(upd.rows[0].hp_left) === 0);
+  if (justDefeated) {
+    // Recompensa COMUNITARIA (una vez): +200🪙 a cada contribuidor; +2💎 al top 10.
+    await db.query(
+      `UPDATE users u SET coins = coins + 200 FROM world_boss_contrib c
+        WHERE c.boss_id=$1 AND c.user_id=u.id AND c.rewarded=false`, [b.id]);
+    await db.query(
+      `UPDATE users u SET gems = gems + 2 FROM (
+         SELECT user_id FROM world_boss_contrib WHERE boss_id=$1 ORDER BY damage DESC LIMIT 10
+       ) t WHERE u.id = t.user_id`, [b.id]);
+    await db.query("UPDATE world_boss_contrib SET rewarded=true WHERE boss_id=$1", [b.id]);
+  }
+  return { dmg, justDefeated, boss: await bossState(userId) };
 }
 
 // --------------------------------- NÉMESIS -----------------------------------
@@ -151,17 +174,27 @@ async function getNemesis(userId) {
   }
   return r.rows[0];
 }
-// Construye el equipo de la némesis (counter-pick determinista, escalado por tier).
+// Construye el ENCUENTRO de la némesis (counter-pick determinista, escalado por
+// tier) + un seed estable por (usuario, semana, tier, nº de enfrentamientos):
+// GET y POST computan EXACTAMENTE lo mismo -> la animación del cliente coincide
+// con la validación del servidor (invariante nº1 del juego).
 async function nemesisEncounter(userId, templates) {
   const n = await getNemesis(userId);
   const byId = {}; templates.forEach((t) => (byId[t.id || t.template_id] = normTpl(t)));
+  const rawById = {}; templates.forEach((t) => (rawById[t.id || t.template_id] = t));
   const teamIds = (await teamIdsOf(userId)) || [];
   const myTypes = teamIds.map((id) => byId[id]).filter(Boolean).flatMap((t) => t.types || [t.type]);
   const week = wkStr();
   const picks = E.nemesisTeam(userId, week, myTypes, templates);
   const level = 8 + n.tier * 2; // sube con el tier (vuelve más fuerte)
-  const team = picks.map((t, i) => E.buildUnit(normTpl(t), level, "B", i));
-  return { name: n.name, tier: n.tier, winsVsMe: n.wins_vs_me, myWins: n.my_wins, level,
+  const team = picks.map((t, i) => {
+    const u = E.buildUnit(normTpl(t), level, "B", i);
+    u.imageUrl = (rawById[t.id || t.template_id] || {}).image_url || null;
+    return u;
+  });
+  const fights = n.my_wins + n.wins_vs_me;
+  const seed = E.hashStr(`nemfight:${userId}:${week}:${n.tier}:${fights}`) >>> 0;
+  return { name: n.name, tier: n.tier, winsVsMe: n.wins_vs_me, myWins: n.my_wins, level, seed,
     enemy: team, enemyIds: picks.map((t) => t.id || t.template_id) };
 }
 // Aplica el resultado de un combate contra la némesis.
@@ -197,7 +230,7 @@ async function teamIdsOf(userId) {
 
 module.exports = {
   solvePuzzle, puzzleRanking,
-  getOrCreateBoss, bossState, hitBoss,
+  getOrCreateBoss, bossState, bossEncounter, hitBoss,
   getNemesis, nemesisEncounter, nemesisResult,
   unitsFromIds, normTpl, sanitizeDecisions,
 };
