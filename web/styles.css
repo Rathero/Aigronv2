@@ -6,6 +6,18 @@
   --pixel: 'Press Start 2P', monospace;
   --ui: 'Silkscreen', monospace;
 }
+/* ---------- TEMAS DE FUENTE (selector "Aa" en el menú ≡) ----------
+   El pixel font en texto largo cansa (feedback). Variantes conmutables:
+     crt    — títulos pixel + cuerpo VT323 (terminal retro, minúsculas reales)
+     techno — títulos pixel + cuerpo Chakra Petch (cuadrada, muy legible)
+     clean  — sin pixel salvo el logo: Chakra Petch títulos + Rajdhani cuerpo */
+:root[data-font="crt"]{ --ui:'VT323', monospace; }
+:root[data-font="crt"] body{ font-size:17px; letter-spacing:.3px } /* VT323 rinde pequeña */
+:root[data-font="techno"]{ --ui:'Chakra Petch', sans-serif; }
+:root[data-font="clean"]{ --pixel:'Chakra Petch', sans-serif; --ui:'Rajdhani', sans-serif; }
+:root[data-font="clean"] h2.title{ font-size:17px; font-weight:700 }
+/* La marca conserva SIEMPRE el pixel font (identidad), elija lo que elija el jugador. */
+.logo, #boot .logo{ font-family:'Press Start 2P', monospace !important }
 *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 html,body{height:100%}
 body{
