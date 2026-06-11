@@ -399,3 +399,20 @@ h2.title small{font-family:var(--ui);font-size:13px;color:var(--ink-dim);font-we
 .alb-cell.hl{box-shadow:0 0 0 2px var(--gold) inset}
 .alb-cell canvas,.alb-cell .aigimg{width:46px;height:46px;image-rendering:pixelated;display:block;margin:0 auto}
 .alb-name{display:block;font-size:9px;line-height:1.1;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+/* ----------------------- VARIANTES: shiny ÁUREA + prismática IA ----------- */
+/* La áurea (premio gordo, ~0,25%): tinte/brillo dorado + sheen holográfico que
+   funciona en SPRITE procedural Y en arte IA (canvas e img). */
+.card.aurea{animation:aurea 2.4s linear infinite}
+@keyframes aurea{0%,100%{box-shadow:0 0 14px rgba(255,210,63,.7)}50%{box-shadow:0 0 22px rgba(255,210,63,.95),0 0 30px rgba(255,150,40,.5)}}
+.card .shiny-badge{position:absolute;top:2px;left:2px;font-size:12px;z-index:2;filter:drop-shadow(0 0 4px var(--gold));animation:tw 1s steps(4) infinite}
+.aig-aurea{filter:saturate(1.35) brightness(1.12) drop-shadow(0 0 6px rgba(255,210,63,.85)) hue-rotate(8deg)}
+/* prismática sobre arte IA (antes solo se veía en el sprite procedural) */
+.aig-prism{filter:hue-rotate(150deg) saturate(1.45) drop-shadow(0 0 5px rgba(52,245,228,.7))}
+/* envoltorio con sheen para los reveals/detalle (barrido de luz diagonal) */
+.art-wrap{position:relative;display:inline-block;overflow:hidden;border-radius:8px}
+.art-wrap.aurea::after,.art-wrap.prismatic::after{content:"";position:absolute;inset:0;pointer-events:none;
+  background:linear-gradient(115deg,transparent 35%,rgba(255,255,255,.55) 50%,transparent 65%);
+  background-size:250% 100%;animation:sheen 2.6s ease-in-out infinite}
+.art-wrap.prismatic::after{background:linear-gradient(115deg,transparent 35%,rgba(52,245,228,.5) 50%,transparent 65%);background-size:250% 100%}
+@keyframes sheen{0%{background-position:140% 0}60%,100%{background-position:-40% 0}}

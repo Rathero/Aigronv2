@@ -318,7 +318,9 @@ async function buildTeamUnits(userId, team = "A") {
   const byId = {}; inst.rows.forEach((r) => (byId[r.instance_id] = r));
   return slots.map((iid, i) => {
     const r = byId[iid]; if (!r) return null;
-    const tplLike = { id: r.template_id, name: r.name, type: r.type, types: tplTypes(r), ability: r.ability_id, base_stats: tplBaseStats(r) };
+    // IV por instancia (±6%, deterministas del instance_id): cada captura es
+    // única. Se hornean en las stats de combate; el snapshot las congela igual.
+    const tplLike = { id: r.template_id, name: r.name, type: r.type, types: tplTypes(r), ability: r.ability_id, base_stats: C.applyIV(tplBaseStats(r), iid) };
     const u = combat.buildUnit(tplLike, r.level, team, i);
     u.instanceId = iid; // para mapear el capitán elegido a su uid de combate
     // Arte IA: el RIVAL puede no tener esta plantilla en su caché (lote de otro
@@ -583,10 +585,16 @@ app.get("/collection", authMiddleware, wrap(async (req, res) => {
   );
   res.json(r.rows.map((x) => {
     const b = tplBaseStats(x);
+    const iv = C.ivFor(x.instance_id);
     return {
       instance_id: x.instance_id, level: x.level, favorite: x.favorite, locked: x.locked,
       obtained_at: x.obtained_at, // para el badge NUEVO (obtenido hoy) del cliente
       frame: x.cosmetic_frame,
+      // Singularidad por instancia: "potencial" (media de IV 0..100) y variante
+      // cosmética (áurea/prismática). template.base_stats se mantiene PURO (caché
+      // compartida); el cliente aplica los IV con el instance_id para mostrarlas.
+      potential: iv ? iv.potential : null,
+      variant: C.variantOf(x.instance_id),
       template: {
         id: x.template_id, name: x.name, type: x.type, types: tplTypes(x), rarity: x.rarity, ability: x.ability_id,
         lore: x.lore, art_seed: x.art_seed, image_url: x.image_url, image_thumb_url: x.image_thumb_url,
@@ -630,7 +638,11 @@ app.post("/creature/:id/release", authMiddleware, wrap(async (req, res) => {
   if (inst.locked) return res.status(400).json({ error: "locked" });
   const team = await db.query("SELECT 1 FROM teams WHERE user_id=$1 AND (slot1=$2 OR slot2=$2 OR slot3=$2)", [req.userId, inst.instance_id]);
   if (team.rowCount) return res.status(400).json({ error: "in_team" });
-  const dust = C.RELEASE_DUST[inst.rarity] || 5;
+  // Las variantes cosméticas valen más al liberar (áurea ×4, prismática ×2):
+  // así no "duele" tener un duplicado especial y la rareza se premia.
+  const variant = C.variantOf(inst.instance_id);
+  const VARIANT_MULT = { aurea: 4, prismatica: 2 };
+  const dust = Math.round((C.RELEASE_DUST[inst.rarity] || 5) * (VARIANT_MULT[variant] || 1));
   // El DELETE condicionado a locked=false es la barrera atómica: si dos
   // peticiones liberan a la vez, solo la que borra la fila cobra el polvo.
   const del = await db.query(
@@ -663,9 +675,11 @@ app.put("/team", authMiddleware, wrap(async (req, res) => {
   const own = await db.query("SELECT instance_id, level, template_id FROM creature_instances WHERE user_id=$1 AND instance_id = ANY($2::uuid[])", [req.userId, slots]);
   const valid = own.rows.map((x) => x.instance_id);
   const ordered = slots.filter((s) => valid.includes(s)).slice(0, 3);
+  // instance_id en el snapshot: el rival aplica MIS IV al defenderme (consistencia
+  // atacante/defensor). Snapshots antiguos sin él -> stats de plantilla puras.
   const snapshot = own.rows
     .filter((x) => ordered.includes(x.instance_id))
-    .map((x) => ({ template_id: x.template_id, level: x.level }));
+    .map((x) => ({ template_id: x.template_id, level: x.level, instance_id: x.instance_id }));
   // avg_level materializado: el matchmaking de /battle/find filtra por esta
   // columna indexada en vez de calcular avg() sobre el JSONB de TODOS los equipos.
   const avgLevel = snapshot.length ? snapshot.reduce((a, s) => a + s.level, 0) / snapshot.length : null;
@@ -692,7 +706,7 @@ async function opponentFromSnapshot(snapshot) {
   snapshot.forEach((s, i) => {
     const t = byId[s.template_id];
     if (!t) return;
-    const tplLike = { id: t.template_id, name: t.name, type: t.type, types: tplTypes(t), ability: t.ability_id, base_stats: tplBaseStats(t) };
+    const tplLike = { id: t.template_id, name: t.name, type: t.type, types: tplTypes(t), ability: t.ability_id, base_stats: C.applyIV(tplBaseStats(t), s.instance_id) };
     const u = combat.buildUnit(tplLike, s.level, "B", out.length);
     u.imageUrl = t.image_url; u.imageThumbUrl = t.image_thumb_url;
     out.push(u);

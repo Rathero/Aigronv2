@@ -700,6 +700,44 @@
     return "#" + [boost(r), boost(g), boost(b)].map((c) => c.toString(16).padStart(2, "0")).join("");
   }
 
+  // -- VALORES INDIVIDUALES (IV): cada CAPTURA es única ---------------------
+  // Deriva un pequeño ajuste por stat (±6%) de forma DETERMINISTA del
+  // instance_id (UUID único por captura). No se guarda nada: cliente y servidor
+  // lo recalculan igual -> paridad por construcción. "Potencial" = media 0..100.
+  const IV_STATS = ["hp", "atkP", "atkS", "defP", "defS", "spd"];
+  const IV_SPREAD = 0.06; // ±6%
+  function ivFor(instanceId) {
+    if (!instanceId) return null;
+    const mult = {}; let sum = 0;
+    for (const s of IV_STATS) {
+      const roll = (hashStr("iv:" + s + ":" + instanceId) % 1000) / 999; // 0..1
+      mult[s] = 1 - IV_SPREAD + roll * (IV_SPREAD * 2);                   // 0.94..1.06
+      sum += roll;
+    }
+    return { mult, potential: Math.round((sum / IV_STATS.length) * 100) };
+  }
+  // Aplica los IV a unas base_stats (devuelve copia; sin instanceId, sin cambios).
+  function applyIV(base, instanceId) {
+    const iv = ivFor(instanceId); if (!iv || !base) return base;
+    const out = {};
+    for (const k in base) out[k] = Math.max(1, Math.round(base[k] * (iv.mult[k] || 1)));
+    return out;
+  }
+
+  // -- SHINY ÁUREA: variante MUY rara (~0,25%) por encima de la prismática.
+  // Determinista por instancia. La prismática (1%) sigue siendo la variante
+  // "común-rara"; la áurea es el premio gordo (cosmético, no toca stats).
+  function isShiny(instanceId) {
+    if (!instanceId) return false;
+    return (hashStr("shiny:" + instanceId) % 400) === 0; // ~0,25%
+  }
+  // Variante cosmética efectiva (áurea manda sobre prismática): "aurea" | "prismatica" | null.
+  function variantOf(instanceId) {
+    if (isShiny(instanceId)) return "aurea";
+    if (isPrismatic(instanceId)) return "prismatica";
+    return null;
+  }
+
   // -- PUZZLE diario: equipo + enemigos FIJOS del lote de hoy, iguales para todos.
   function dailyPuzzle(date, templates) {
     const seed = hashStr("puzzle:" + date) >>> 0;
@@ -904,6 +942,6 @@
     // roguelike / mazmorra
     applyRelics, relicRunEffects, dungeonNodeOptions, dungeonEnemyTeam, dungeonDraft, dungeonLevelAt,
     // mecánicas innovadoras (deterministas)
-    isPrismatic, prismaticShift, dailyPuzzle, nemesisTeam, nemesisName, oracleProphecy,
+    isPrismatic, prismaticShift, ivFor, applyIV, isShiny, variantOf, dailyPuzzle, nemesisTeam, nemesisName, oracleProphecy,
   };
 });

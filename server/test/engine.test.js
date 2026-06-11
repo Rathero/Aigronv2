@@ -469,6 +469,39 @@ test("criatura única del día: id determinista y plantilla válida", () => {
   assert.deepEqual(u, E.genTemplate("uniq_2026-06-11"), "= genTemplate del id único");
 });
 
+test("IV por instancia: deterministas, dentro de ±6%, potencial 0..100", () => {
+  const a = E.ivFor("inst-aaaa");
+  const b = E.ivFor("inst-aaaa");
+  assert.deepEqual(a, b, "mismo id -> mismos IV");
+  assert.notDeepEqual(E.ivFor("inst-aaaa").mult, E.ivFor("inst-bbbb").mult, "ids distintos -> IV distintos");
+  for (const k in a.mult) assert.ok(a.mult[k] >= 0.94 - 1e-9 && a.mult[k] <= 1.06 + 1e-9, `${k} en rango`);
+  assert.ok(a.potential >= 0 && a.potential <= 100, "potencial 0..100");
+  assert.equal(E.ivFor(null), null, "sin id -> null");
+  // applyIV: redondea, mínimo 1, no muta el original.
+  const base = { hp: 100, atkP: 50, atkS: 50, defP: 40, defS: 40, spd: 30 };
+  const out = E.applyIV(base, "inst-cccc");
+  assert.notEqual(out, base);
+  assert.equal(base.hp, 100, "no muta el original");
+  for (const k in out) assert.ok(out[k] >= 1, "stat >= 1");
+  assert.deepEqual(E.applyIV(base, null), base, "sin id -> sin cambios");
+});
+
+test("shiny áurea: más rara que la prismática y determinista", () => {
+  let aurea = 0, prism = 0;
+  for (let i = 0; i < 20000; i++) {
+    const id = "shiny-test-" + i;
+    if (E.isShiny(id)) aurea++;
+    if (E.isPrismatic(id)) prism++;
+    // variantOf: áurea manda sobre prismática.
+    if (E.isShiny(id)) assert.equal(E.variantOf(id), "aurea");
+  }
+  assert.ok(aurea > 0 && prism > 0, "ambas aparecen en la muestra");
+  assert.ok(aurea < prism, `áurea (${aurea}) debe ser más rara que prismática (${prism})`);
+  // ~0,25% y ~1% (tolerancia amplia por muestreo).
+  assert.ok(aurea / 20000 < 0.01, "áurea ~0,25%");
+  assert.equal(E.variantOf("shiny-test-0"), E.variantOf("shiny-test-0"), "determinista");
+});
+
 test("lore: artículos concuerdan con tags femeninos (sin 'del niebla')", () => {
   // Recorre muchas plantillas y comprueba que no aparecen concordancias rotas.
   for (let i = 0; i < 300; i++) {

@@ -136,11 +136,16 @@ function registerUnitArt(list){ (list||[]).forEach(s=>{ if(s&&s.tplId&&s.image_u
   TPL[s.tplId]=Object.assign(TPL[s.tplId]||genTemplate(s.tplId),{image_url:s.image_url,image_thumb_url:s.image_thumb_url||null});
 }});}
 /* HTML del arte: imagen IA si existe, si no canvas procedural.
-   instId opcional -> variante prismática (cosmético) si toca y la feature está on. */
+   instId opcional -> variante cosmética (áurea/prismática) si toca y la feature
+   está on. La clase de variante va en el PROPIO elemento (canvas o img) para que
+   el brillo se vea también sobre el arte IA, no solo sobre el sprite procedural. */
 function artTag(t,px,instId){
-  if(t&&t.image_url) return `<img class="aigimg" src="${t.image_url}" alt="${esc(t.name||'')}">`;
-  const prism=(FEATURES.prismatic&&instId&&ENGINE.isPrismatic(instId))?` data-prism="${instId}"`:'';
-  return `<canvas data-aig="${t.id}" data-px="${px}"${prism}></canvas>`;
+  const variant=(FEATURES.prismatic&&instId)?ENGINE.variantOf(instId):null;
+  const vCls=variant==='aurea'?' aig-aurea':(variant==='prismatica'?' aig-prism':'');
+  if(t&&t.image_url) return `<img class="aigimg${vCls}" src="${t.image_url}" alt="${esc(t.name||'')}">`;
+  // El canvas prismático rota la paleta (data-prism); el áureo se tiñe por CSS.
+  const prism=(variant==='prismatica')?` data-prism="${instId}"`:'';
+  return `<canvas class="aig${vCls}" data-aig="${t.id}" data-px="${px}"${prism}></canvas>`;
 }
 /* tipos de una plantilla (1 o 2) */
 function tplTypes(t){ return (t&&t.types&&t.types.length)?t.types:[t&&t.type].filter(Boolean); }
@@ -320,9 +325,12 @@ function abilityEffect(id){const a=ABILITIES[id];return {
   shield:`Da un escudo que absorbe daño (${a.amt*100}% de la vida máxima) ${a.team?"a todo tu equipo":"a esta criatura"} antes de tocar el HP.`,
   drain:`Daña a un enemigo (${a.mult}× tu ataque) y te curas el ${a.drain*100}% del daño hecho.`}[a.kind];}
 function cardHTML(inst,extra){const t=inst.template;
-  const prism=FEATURES.prismatic&&ENGINE.isPrismatic(inst.instance_id);
-  return `<div class="card r-${t.rarity} ${inst.frame?'frame-'+inst.frame:''} ${prism?'prismatic':''}" data-iid="${inst.instance_id}">
-  <div class="lv">L${inst.level}</div>${inst.favorite?'<div class="fav">★</div>':''}${prism?'<div class="prism-badge">✦</div>':''}${extra||""}
+  // Variante cosmética: áurea (premio gordo) o prismática. Badge + clase de brillo.
+  const variant=FEATURES.prismatic?(inst.variant||ENGINE.variantOf(inst.instance_id)):null;
+  const vCls=variant==='aurea'?'aurea':(variant==='prismatica'?'prismatic':'');
+  const vBadge=variant==='aurea'?'<div class="shiny-badge">✨</div>':(variant==='prismatica'?'<div class="prism-badge">✦</div>':'');
+  return `<div class="card r-${t.rarity} ${inst.frame?'frame-'+inst.frame:''} ${vCls}" data-iid="${inst.instance_id}">
+  <div class="lv">L${inst.level}</div>${inst.favorite?'<div class="fav">★</div>':''}${vBadge}${extra||""}
   ${artTag(t,6,inst.instance_id)}
   <div class="nm">${esc(t.name)}</div><div class="ty rar-txt ${t.rarity}">${typesLabel(t)}</div></div>`;}
 function statBars(o,level){
@@ -594,7 +602,13 @@ async function doClaim(){
     await Promise.all([refreshMe(),refreshDaily(),refreshCollection()]);
     refreshChips();
     SFX.play('claim'); buzz([30,40,30,40,80]); if(window.POC&&window.POC.confetti)window.POC.confetti();
-    const rays=(t.rarity==="EPICA"||t.rarity==="LEGENDARIA"||r.first)?'<div class="rays"></div>':'';
+    const iid=r.instance.instance_id;
+    const variant=FEATURES.prismatic?ENGINE.variantOf(iid):null;
+    const pot=(ENGINE.ivFor(iid)||{}).potential||0;
+    if(variant==='aurea'){ SFX.play('claim'); buzz([60,30,60,30,120]); if(window.POC&&window.POC.confetti){window.POC.confetti();setTimeout(window.POC.confetti,300);} }
+    const vBanner=variant==='aurea'?`<div style="color:var(--gold);font-family:var(--pixel);font-size:11px;margin-bottom:6px">✨ ¡ÁUREA! ✨ <span class="dim" style="font-family:var(--ui)">1 de 400</span></div>`
+      :(variant==='prismatica'?`<div style="color:var(--epi);font-weight:700;font-size:13px;margin-bottom:6px">✦ ¡PRISMÁTICA! <span class="dim" style="font-size:10px">1 de 100</span></div>`:'');
+    const rays=(t.rarity==="EPICA"||t.rarity==="LEGENDARIA"||r.first||variant)?'<div class="rays"></div>':'';
     // Primer reclamo de la cuenta: es TU ESTRELLA (nv5, protegida) y 2 crías se
     // unen al equipo — el momento del huevo vuelve a ser el clímax (feedback).
     const firstTxt=r.first?`<div style="color:var(--gold);font-size:13px;font-weight:700;margin-bottom:4px">⭐ ¡Tu estrella! Nv.${r.instance.level} · protegida</div>
@@ -602,13 +616,15 @@ async function doClaim(){
     openOverlay(`<div class="center reveal" style="position:relative">${rays}
       <div style="position:relative;z-index:2">
         <div style="font-family:var(--pixel);font-size:11px;color:var(--cyan);margin-bottom:8px">${r.first?'¡TU PRIMER AIGRÓN!':'¡HA NACIDO!'}</div>
-        ${artTag(t,11)}
+        ${vBanner}
+        <span class="art-wrap ${variant==='aurea'?'aurea':variant==='prismatica'?'prismatic':''}">${artTag(t,11,iid)}</span>
         <div style="font-size:20px;font-weight:700;margin-top:6px">${esc(t.name)}</div>
-        <div class="mb8">${typePills(t)} <span class="rar-txt ${t.rarity}" style="font-weight:700">${t.rarity}</span></div>
+        <div class="mb8">${typePills(t)} <span class="rar-txt ${t.rarity}" style="font-weight:700">${t.rarity}</span>
+          <span class="dim" style="font-size:11px"> · Potencial <b style="color:${pot>=75?'var(--green)':pot>=45?'var(--gold)':'var(--cyan)'}">${pot}%</b></span></div>
         ${firstTxt}
         ${r.duplicate?`<div style="color:var(--cyan);font-size:12px;font-weight:700;margin-bottom:6px">🔁 Repetida del álbum · +${r.dust||0}✨ polvo</div>`:''}
         <div class="dim" style="font-size:13px;margin-bottom:10px">"${esc(t.lore)}"</div>
-        <div style="text-align:left;max-width:220px;margin:0 auto 12px">${statBars(t.base_stats)}</div>
+        <div style="text-align:left;max-width:220px;margin:0 auto 12px">${statBars(ENGINE.applyIV(t.base_stats,iid))}</div>
         ${!localStorage.getItem('aigrons_first_fight_done')?'<button class="btn mag mb8" data-act="firstFight">⚔️ ¡TU PRIMER COMBATE!</button>':''}
         <button class="btn" data-act="toCollection">A LA COLECCIÓN</button>
         <button class="btn ghost cyan mt8" data-act="shareAig" data-arg="${t.id}">📤 COMPARTIR</button>
@@ -991,7 +1007,11 @@ function openDetail(iid){
   const inst=instById(iid);if(!inst)return;const t=inst.template;
   const cost={dust:10*inst.level,coins:50*inst.level};
   const inTeam=S.team.includes(iid);
-  const stats=t.stats||t.base_stats;
+  // Singularidad por instancia: IV (±6%) aplicados a las stats mostradas, y
+  // "potencial" (media 0..100). Cada captura es ligeramente distinta.
+  const stats=ENGINE.applyIV(t.stats||t.base_stats, iid);
+  const pot=(inst.potential!=null)?inst.potential:((ENGINE.ivFor(iid)||{}).potential||0);
+  const variant=inst.variant||(FEATURES.prismatic?ENGINE.variantOf(iid):null);
   const atMax=inst.level>=ENGINE.LEVEL_MAX;
   const canLevel=S.user.dust>=cost.dust&&S.user.coins>=cost.coins&&!atMax;
   // Qué GANAS al subir de nivel (antes de pagar): deltas de stats escalados.
@@ -1006,12 +1026,18 @@ function openDetail(iid){
   const missing=[];
   if(!atMax&&S.user.dust<cost.dust)missing.push(`${cost.dust-S.user.dust}✨`);
   if(!atMax&&S.user.coins<cost.coins)missing.push(`${cost.coins-S.user.coins}🪙`);
-  const releaseDust=ENGINE.RELEASE_DUST[t.rarity]||5;
+  const vMult=variant==='aurea'?4:(variant==='prismatica'?2:1);
+  const releaseDust=Math.round((ENGINE.RELEASE_DUST[t.rarity]||5)*vMult);
+  const vLabel=variant==='aurea'?'<span style="color:var(--gold);font-weight:700">✨ ÁUREA</span>'
+    :(variant==='prismatica'?'<span style="color:var(--epi);font-weight:700">✦ PRISMÁTICA</span>':'');
+  // Color del potencial: verde alto, gris medio, rojo bajo (referencia rápida).
+  const potCol=pot>=75?'var(--green)':pot>=45?'var(--gold)':'var(--dim2,#9a93c7)';
   openOverlay(`<div class="center">
-    ${artTag(t,9)}
+    <span class="art-wrap ${variant==='aurea'?'aurea':variant==='prismatica'?'prismatic':''}">${artTag(t,9,iid)}</span>
     <div style="font-size:20px;font-weight:700;margin-top:4px">${t.name} <span class="dim" style="font-size:13px">Nv.${inst.level}</span></div>
     <div class="mb8">${typePills(t)} <span class="rar-txt ${t.rarity}" style="font-weight:700">${t.rarity}</span>
       <span class="dim" style="font-size:11px"> · ${ENGINE.isPhysical(t.type)?'⚔️ Físico':'✨ Especial'}</span></div>
+    <div class="mb8" style="font-size:12px">${vLabel?vLabel+' · ':''}Potencial <b style="color:${potCol}">${pot}%</b> <span class="dim" style="font-size:10px">(stats únicos de esta criatura)</span></div>
     <div style="text-align:left;margin-bottom:8px">${statBars(stats, t.stats?inst.level:1)}</div>
     <div class="panel" style="text-align:left;margin-bottom:10px">
       <div style="font-weight:700;color:var(--gold);font-size:14px">✨ ${ABILITIES[t.ability].name}
