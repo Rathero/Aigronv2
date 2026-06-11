@@ -42,6 +42,24 @@ test("croma verde: una criatura PLANTA (verde apagado) NO se borra", { skip: !PN
   assert.equal(alphaAt(out, 1, 1), 0, "el verde croma del fondo no");
 });
 
+test("croma verde: fondo con SOMBRA/degradado se elimina (regresión del bug)", { skip: !PNG }, () => {
+  // El bug real: Gemini deja el verde con degradado/sombra; el umbral global
+  // antiguo no lo pillaba y sobraba verde. El flood-fill sí lo quita entero.
+  const grad = new PNG({ width: 48, height: 48 });
+  for (let y = 0; y < 48; y++) for (let x = 0; x < 48; x++) {
+    const i = (y * 48 + x) * 4;
+    const inCreature = x >= 16 && x < 32 && y >= 16 && y < 32;
+    const c = inCreature ? [40, 60, 220] : [18, 110 + ((x + y) % 70), 28]; // bg = verde con degradado
+    grad.data[i] = c[0]; grad.data[i + 1] = c[1]; grad.data[i + 2] = c[2]; grad.data[i + 3] = 255;
+  }
+  const buf = PNG.sync.write(grad);
+  assert.equal(tr.hasGreenBg(buf), true, "se detecta como fondo verde aunque tenga degradado");
+  const out = tr.chromaKeyGreen(buf);
+  assert.equal(alphaAt(out, 1, 1), 0, "esquina (verde sombreado) transparente");
+  assert.equal(alphaAt(out, 2, 40), 0, "otro borde verde sombreado transparente");
+  assert.equal(alphaAt(out, 24, 24), 255, "criatura azul opaca");
+});
+
 test("recorte adaptativo (arte antiguo): fondo oscuro fuera, interior protegido", { skip: !PNG }, () => {
   // Ojo oscuro [12,10,26] DENTRO de la criatura: casi idéntico al fondo, pero al
   // no estar conectado al exterior el flood-fill no debe tocarlo.

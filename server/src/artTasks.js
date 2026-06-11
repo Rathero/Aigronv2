@@ -35,8 +35,17 @@ async function removeArtBackgrounds(opts = {}) {
     if (!file.endsWith(".png")) { out.notProcessable++; continue; } // jpg: regenerar mejor
     try {
       const buf = fs.readFileSync(file);
-      if (tr.hasTransparency(buf)) { out.alreadyTransparent++; continue; }
-      const res = tr.keyEdgesAdaptive(buf, tolerance);
+      // Fondo VERDE croma: re-procesa con el flood-fill AUNQUE ya tenga algo de
+      // alfa (el croma por umbral antiguo dejaba el verde a medio quitar y el
+      // chequeo de "ya transparente" lo saltaba — esa era la causa del bug).
+      let res;
+      if (tr.hasGreenBg(buf)) {
+        res = tr.chromaKeyGreen(buf);
+      } else if (tr.hasTransparency(buf)) {
+        out.alreadyTransparent++; continue;
+      } else {
+        res = tr.keyEdgesAdaptive(buf, tolerance); // fondo oscuro antiguo
+      }
       if (res === buf) { out.failed++; continue; } // descartado por la salvaguarda
       if (!dry) {
         if (!fs.existsSync(file + ".bak")) fs.copyFileSync(file, file + ".bak");

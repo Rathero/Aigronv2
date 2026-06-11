@@ -27,23 +27,71 @@ function hasTransparency(buffer) {
   return false;
 }
 
-// --------- arte NUEVO: croma verde (#00FF00) pedido en el prompt -------------
+// ¿Es un píxel "verde de fondo" (croma)? El croma es verde-LUZ: g domina y r,b
+// son BAJOS en absoluto (#00FF00 y sus sombras/degradados: [20,120,30]…). Los
+// verdes NATURALES de PLANTA ([58,125,44]) llevan más rojo/azul -> no cuelan.
+// Así pillamos el fondo con sombra (causa del bug) sin comernos a las plantas.
+function isBgGreen(d, i) {
+  const r = d[i], g = d[i + 1], b = d[i + 2];
+  return g > 90 && g - r > 40 && g - b > 40 && r < 55 && b < 70;
+}
+// ¿La imagen tiene un FONDO verde croma? (>25% del borde es verde dominante).
+// Sirve para decidir si re-procesar aunque ya tenga algo de alfa.
+function hasGreenBg(buffer) {
+  if (!PNG) return false;
+  const png = PNG.sync.read(buffer);
+  const { width: W, height: H, data: d } = png;
+  let green = 0, total = 0;
+  const test = (i) => { total++; if (d[i + 3] > 0 && isBgGreen(d, i)) green++; };
+  for (let x = 0; x < W; x += 2) { test((x) * 4); test(((H - 1) * W + x) * 4); }
+  for (let y = 0; y < H; y += 2) { test((y * W) * 4); test((y * W + W - 1) * 4); }
+  return total > 0 && green / total > 0.25;
+}
+
+// --------- arte NUEVO: croma verde (#00FF00) por FLOOD-FILL desde los bordes --
+// Mucho más robusto que el umbral global anterior: elimina solo la región verde
+// CONTIGUA al exterior (resiste degradados/sombra del fondo) sin comerse el
+// interior; luego barre verdes puros sueltos y hace despill del halo de borde.
 function chromaKeyGreen(buffer) {
   if (!PNG) return buffer;
   const png = PNG.sync.read(buffer);
-  const d = png.data;
-  for (let i = 0; i < d.length; i += 4) {
-    const r = d[i], g = d[i + 1], b = d[i + 2];
-    // Verde-dominante y saturado -> fondo (los aigrons evitan verde puro por prompt).
-    if (g > 150 && g > r + 70 && g > b + 70) {
-      d[i + 3] = 0;
-    } else {
-      // Halo de borde con sangrado de croma: solo píxeles CASI verde puro
-      // (distancia a #00FF00); los verdes naturales (PLANTA) quedan intactos.
-      const dist = Math.sqrt(r * r + (255 - g) * (255 - g) + b * b);
-      if (dist < 110) { d[i + 1] = Math.max(r, b); d[i + 3] = Math.min(d[i + 3], 140); }
-    }
+  const { width: W, height: H, data: d } = png;
+  const N = W * H;
+  // 1. Flood-fill desde TODOS los píxeles del borde sobre verde de fondo.
+  const seen = new Uint8Array(N);
+  const queue = [];
+  for (let x = 0; x < W; x++) { queue.push(x, (H - 1) * W + x); }
+  for (let y = 0; y < H; y++) { queue.push(y * W, y * W + W - 1); }
+  let removed = 0;
+  while (queue.length) {
+    const p = queue.pop();
+    if (seen[p]) continue;
+    seen[p] = 1;
+    const i = p * 4;
+    if (!isBgGreen(d, i)) continue;
+    d[i + 3] = 0; removed++;
+    const x = p % W, y = (p / W) | 0;
+    if (x > 0) queue.push(p - 1);
+    if (x < W - 1) queue.push(p + 1);
+    if (y > 0) queue.push(p - W);
+    if (y < H - 1) queue.push(p + W);
   }
+  // 2. Verdes PUROS sueltos (no contiguos al borde): restos de croma cerca de
+  //    #00FF00 (los verdes naturales de PLANTA son menos saturados y sobreviven).
+  for (let p = 0; p < N; p++) {
+    const i = p * 4; if (d[i + 3] === 0) continue;
+    if (d[i + 1] > 150 && d[i + 1] - d[i] > 90 && d[i + 1] - d[i + 2] > 90) { d[i + 3] = 0; removed++; }
+  }
+  // 3. Despill: a los píxeles opacos que tocan un transparente y tienen tinte
+  //    verde, se les neutraliza el verde (quita el halo croma del contorno).
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const p = y * W + x, i = p * 4; if (d[i + 3] === 0) continue;
+    const adj = (d[((y) * W + Math.max(0, x - 1)) * 4 + 3] === 0) || (d[((y) * W + Math.min(W - 1, x + 1)) * 4 + 3] === 0) ||
+                (d[(Math.max(0, y - 1) * W + x) * 4 + 3] === 0) || (d[(Math.min(H - 1, y + 1) * W + x) * 4 + 3] === 0);
+    if (adj && d[i + 1] > d[i] && d[i + 1] > d[i + 2]) d[i + 1] = Math.max(d[i], d[i + 2]);
+  }
+  // Salvaguarda: si se comió casi todo, el key falló -> devolver el original.
+  if (removed > N * 0.985) return buffer;
   return PNG.sync.write(png);
 }
 
@@ -87,4 +135,4 @@ function keyEdgesAdaptive(buffer, tolerance = 42) {
   return PNG.sync.write(png);
 }
 
-module.exports = { available, hasTransparency, chromaKeyGreen, keyEdgesAdaptive };
+module.exports = { available, hasTransparency, hasGreenBg, chromaKeyGreen, keyEdgesAdaptive };
