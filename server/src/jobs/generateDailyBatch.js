@@ -19,20 +19,9 @@ const E = require("../generator"); // motor compartido (genTemplate, TYPES, hash
 const { getImageProvider } = require("../ai/imageProvider");
 
 // ----------------------------- EVENTOS TEMÁTICOS -----------------------------
-// El lote de algunos días tiene tema (retención + algo que comentar):
-//   Sábado : "Sábado de <TIPO>" — ~40% del lote es de un tipo (determinista por fecha).
-//   Domingo: "Domingo Legendario" — 2 legendarias garantizadas (en vez de ~1).
-// Determinista: cliente y servidor pueden derivarlo solo de la fecha.
-function eventFor(dateStr) {
-  const d = new Date(dateStr + "T00:00:00");
-  const dow = d.getDay();
-  if (dow === 6) {
-    const t = E.TYPES[E.hashStr("event:" + dateStr) % E.TYPES.length];
-    return { kind: "type", type: t, share: 0.4, name: `Sábado de ${t}`, emoji: "🔥" };
-  }
-  if (dow === 0) return { kind: "legendary", min: 2, name: "Domingo Legendario", emoji: "👑" };
-  return null;
-}
+// El evento temático del día vive ahora en el MOTOR (E.dailyEvent), fuente única
+// para cliente y servidor. Se re-exporta como eventFor por compatibilidad.
+const eventFor = E.dailyEvent;
 
 // Composición por CUPOS: escanea candidatos deterministas (date_0000..) y los
 // selecciona hasta clavar la curva de rareza exacta (60/25/12/3, ver README §6)
@@ -146,4 +135,72 @@ async function generateDailyBatch(date, n) {
   return { date, total: list.length, accepted, inserted, rejected, acceptRate, dist };
 }
 
-module.exports = { generateDailyBatch, eventFor, composeBatch };
+// Inserta UNA plantilla (sin/ con arte). batchDate=clave de temporada (mes) para
+// el álbum, o la fecha del día para la criatura única. art=null -> el cliente
+// dibuja el sprite procedural desde art_seed (el arte IA puede rellenarse luego).
+async function insertTemplate(t, batchDate, kind, art) {
+  const s = t.base_stats;
+  const r = await db.query(
+    `INSERT INTO creature_templates
+       (template_id, batch_date, kind, name, species_tags, type, type2, rarity,
+        base_hp, base_atk, base_def, base_spd, base_atk_p, base_atk_s, base_def_p, base_def_s,
+        ability_id, lore, image_url, image_thumb_url, art_seed, quality_score)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22)
+     ON CONFLICT (template_id) DO NOTHING`,
+    [
+      t.id, batchDate, kind, t.name, t.tags, t.type, (t.types && t.types[1]) || null, t.rarity,
+      s.hp, s.atkP, s.defP, s.spd,
+      s.atkP, s.atkS, s.defP, s.defS,
+      t.ability, t.lore,
+      art ? art.image_url : null, art ? art.image_thumb_url : null, t.art_seed, art ? art.quality_score : null,
+    ]
+  );
+  return r.rowCount;
+}
+
+// Genera (o completa) el ÁLBUM mensual de una temporada. Las plantillas son
+// deterministas: se insertan al instante SIN arte (image_url=null) para no
+// bloquear; con opts.withArt (cron/admin) se genera el arte IA además.
+async function generateSeason(sKey, n, opts = {}) {
+  const list = E.composeSeason(sKey, n);
+  const provider = getImageProvider();
+  const withArt = opts.withArt && provider.name !== "procedural";
+  const delayMs = withArt ? parseInt(process.env.GEN_DELAY_MS || "2500", 10) : 0;
+  let inserted = 0, withImage = 0;
+  const dist = {};
+  for (const t of list) {
+    let art = null;
+    if (withArt) {
+      // Solo genera arte si la fila no lo tiene ya (idempotente / reanudable).
+      const ex = await db.query("SELECT image_url FROM creature_templates WHERE template_id=$1", [t.id]);
+      if (!ex.rowCount || !ex.rows[0].image_url) { art = await generateArt(provider, t); if (delayMs) await sleep(delayMs); }
+    }
+    inserted += await insertTemplate(t, sKey, "season", art);
+    if (art) {
+      withImage++;
+      await db.query("UPDATE creature_templates SET image_url=$2, image_thumb_url=$3, quality_score=$4 WHERE template_id=$1 AND image_url IS NULL",
+        [t.id, art.image_url, art.image_thumb_url, art.quality_score]);
+    }
+    dist[t.rarity] = (dist[t.rarity] || 0) + 1;
+  }
+  console.log(`[season ${sKey}] proveedor=${provider.name} álbum=${list.length}, insertadas ${inserted}, con arte ${withImage}. Rareza:`, dist);
+  return { season: sKey, total: list.length, inserted, withImage, dist };
+}
+
+// La criatura ÚNICA del día (pieza exclusiva/FOMO): una sola plantilla con su
+// propio arte. batch_date = el día (kind='unique'), separada del álbum mensual.
+async function generateDailyUnique(date, opts = {}) {
+  const t = E.dailyUnique(date);
+  const provider = getImageProvider();
+  let art = null;
+  if (opts.withArt !== false && provider.name !== "procedural") {
+    const ex = await db.query("SELECT image_url FROM creature_templates WHERE template_id=$1", [t.id]);
+    if (!ex.rowCount || !ex.rows[0].image_url) art = await generateArt(provider, t);
+  }
+  const inserted = await insertTemplate(t, date, "unique", art);
+  if (art) await db.query("UPDATE creature_templates SET image_url=$2, image_thumb_url=$3, quality_score=$4 WHERE template_id=$1 AND image_url IS NULL",
+    [t.id, art.image_url, art.image_thumb_url, art.quality_score]);
+  return { date, id: t.id, inserted, withImage: art ? 1 : 0 };
+}
+
+module.exports = { generateDailyBatch, eventFor, composeBatch, generateSeason, generateDailyUnique };

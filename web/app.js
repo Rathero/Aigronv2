@@ -104,6 +104,18 @@ function drawAigron(canvas,tpl,px,prismId){
     ctx.fillStyle=c; ctx.fillRect(x*px,y*px,px,px);
   }
 }
+// Silueta: el MISMO sprite determinista pintado en un solo tono oscuro. Para el
+// álbum (criaturas aún no poseídas): se intuye la forma sin desvelarla.
+function drawSilhouette(canvas,t,px){
+  px=px||6; const N=16;
+  canvas.width=N*px; canvas.height=N*px;
+  const ctx=canvas.getContext("2d"); ctx.imageSmoothingEnabled=false;
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  const key=t.id||("s"+spriteSeed(t));
+  const g=_spriteCache[key]||(_spriteCache[key]=buildSprite(t));
+  ctx.fillStyle="#15122e";
+  for(let y=0;y<N;y++)for(let x=0;x<N;x++){ if(colorFor(g[y][x],t)) ctx.fillRect(x*px,y*px,px,px); }
+}
 function drawEgg(canvas,px){
   px=px||8;const N=16;canvas.width=N*px;canvas.height=N*px;
   const ctx=canvas.getContext("2d");ctx.imageSmoothingEnabled=false;ctx.clearRect(0,0,N*px,N*px);
@@ -169,7 +181,7 @@ const S={user:null,daily:null,collection:[],team:[]};
 const FEATURES={puzzle:true,echoes:true,worldboss:true,nemesis:true,prismatic:true,oracle:true,arena:true};
 async function loadFeatures(){ try{ const f=await api('/features'); Object.assign(FEATURES,f); }catch(e){} }
 async function refreshMe(){ S.user=await api('/me'); }
-async function refreshDaily(){ S.daily=await api('/daily'); (S.daily.batch||[]).forEach(registerTpl); }
+async function refreshDaily(){ S.daily=await api('/daily'); (S.daily.highlights||[]).forEach(registerTpl); }
 async function refreshCollection(){ const c=await api('/collection'); c.forEach(x=>registerTpl(x.template)); S.collection=c; }
 async function refreshTeam(){ const t=await api('/team'); S.team=[t.slot1,t.slot2,t.slot3].filter(Boolean); }
 function instById(id){ return S.collection.find(c=>c.instance_id===id); }
@@ -278,6 +290,7 @@ function closeOverlay(){$("#overlay").classList.remove("show");}
 $("#overlay").addEventListener("click",e=>{if(e.target.id==="overlay")closeOverlay();});
 function renderCanvases(root){
   root.querySelectorAll("canvas[data-aig]").forEach(c=>{if(c._done)return;drawAigron(c,tpl(c.dataset.aig),parseInt(c.dataset.px||"8"),c.dataset.prism);c._done=1;});
+  root.querySelectorAll("canvas[data-sil]").forEach(c=>{if(c._done)return;drawSilhouette(c,tpl(c.dataset.sil),parseInt(c.dataset.px||"6"));c._done=1;});
   root.querySelectorAll("canvas[data-egg]").forEach(c=>{if(c._done)return;drawEgg(c,parseInt(c.dataset.px||"8"));c._done=1;});
 }
 // Versión CORTA (para el planificador de combate).
@@ -386,31 +399,20 @@ async function renderHome(){
   announceUnlocks();
   const claimed=S.daily&&S.daily.claimed;
   let dg=null; if(unlocked('dungeon')){ try{ dg=await api('/dungeon'); }catch(e){} }
-  // Meta de COLECCIÓN del día: cuántos aigrons del lote de hoy tienes ya.
-  // Convierte el lote compartido en un objetivo diario medible.
-  let loteLine='';
-  if(S.daily&&S.daily.count){
-    const owned=new Set(S.collection.filter(i=>i.template.id&&i.template.id.indexOf(S.daily.date+'_')===0).map(i=>i.template.id)).size;
-    const pct=Math.min(100,Math.round(owned/S.daily.count*100));
-    loteLine=`<div class="mis ${owned>=S.daily.count?'done':''}" style="margin:8px 0 0">
-      <div class="mrow"><span>📖 Lote de hoy</span><span class="dim">${owned}/${S.daily.count}${owned>=S.daily.count?' 🏆':''}</span></div>
-      <div class="mis-bar"><i style="width:${pct}%"></i></div></div>`;
-  }
   // Reclamado: banda compacta con cuenta atrás (anticipación) en vez de un
   // panel grande "sin nada que hacer" ocupando el espacio premium.
   const dailyCard=claimed?
     `<div class="panel">
        <div class="daily-compact">
-         <span>🎁 Nuevo lote en <b id="next-batch">--</b></span>
+         <span>🎁 Huevo de mañana en <b id="next-batch">--</b></span>
          <span>🔥 Racha: <b style="color:var(--gold)">${S.user.streak}</b> día${S.user.streak===1?'':'s'}</span>
-       </div>${loteLine}
+       </div>
      </div>`:
     `<div class="daily panel glow-cyan"><div class="halo"></div>
        <div class="tc"><b style="font-size:14px;color:var(--cyan)">AIGRÓN DEL DÍA</b></div>
        <canvas class="egg" data-egg="1" data-px="8"></canvas>
-       <div class="subtle tc mb8">Hoy ha nacido un lote único. Reclama el tuyo gratis.</div>
+       <div class="subtle tc mb8">Abre tu huevo gratis: una criatura del álbum de este mes.</div>
        <button class="btn mag" data-act="doClaim">ABRIR — GRATIS</button>
-       ${loteLine}
      </div>`;
   const missions=(S.user.missions)||[];
   const weeklyM=unlocked('weekly')?((S.user.weeklyMissions)||[]):[];
@@ -426,18 +428,20 @@ async function renderHome(){
   // Aviso push (suave, una vez): tras reclamar, ofrece el recordatorio diario.
   const canAskPush=claimed&&!localStorage.getItem('aigrons_push_asked')&&('Notification' in window)&&Notification.permission==='default'&&('serviceWorker' in navigator);
   const pushLine=canAskPush?`<div class="panel" style="padding:8px 10px;font-size:12px;display:flex;align-items:center;gap:8px">
-     <span style="flex:1">🔔 ¿Te avisamos cuando nazca el lote de mañana?</span>
+     <span style="flex:1">🔔 ¿Te avisamos del huevo de mañana?</span>
      <button class="btn sm" style="padding:4px 8px" data-act="pushEnable">SÍ</button>
      <button class="btn sm ghost" style="padding:4px 8px" data-act="pushSkip">NO</button></div>`:'';
-  // Banner de EVENTO del lote (sábado temático / domingo legendario).
+  // Banner de EVENTO del día (sábado temático / domingo legendario).
   const ev=unlocked('oracle')&&S.daily&&S.daily.event;
-  const evBanner=ev?`<div class="panel" style="padding:8px 10px;border-color:var(--gold);font-size:13px">${ev.emoji||'⚡'} <b style="color:var(--gold)">EVENTO:</b> ${ev.name}${ev.kind==='legendary'?' — legendarias extra en el lote':''}</div>`:'';
+  const evBanner=ev?`<div class="panel" style="padding:8px 10px;border-color:var(--gold);font-size:13px">${ev.emoji||'⚡'} <b style="color:var(--gold)">EVENTO:</b> ${ev.name}${ev.kind==='legendary'?' — legendarias extra en el destacado':''}</div>`:'';
   $("#s-home").innerHTML=`
     <h2 class="title" data-act="openProfile" style="cursor:pointer">${esc((S.user.displayName||'INICIO').toUpperCase())} <small class="dim" style="font-size:10px">👤 perfil</small></h2>
     ${leagueBarHTML()}
     ${evBanner}
     ${pushLine}
     ${dailyCard}
+    ${albumHomeCard()}
+    ${uniqueHomeCard()}
     ${oracleCard()}
     ${teamCombatHTML()}
     ${modesGrid()}
@@ -449,8 +453,97 @@ async function renderHome(){
   renderCanvases($("#s-home"));
   tickCountdowns();
   loadOracle();
+  loadAlbumMini();
   if(FEATURES.worldboss&&unlocked('modes')) api('/worldboss').then(b=>{const e=$("#boss-mini");if(e)e.innerHTML=b.defeated?'🏆 ¡derrotado!':`HP ${b.pct}% · ${b.top.length} héroes`;}).catch(()=>{});
   $("#s-home").querySelectorAll(".card").forEach(c=>c.onclick=()=>openDetail(c.dataset.iid));
+}
+// ----------------------- ÁLBUM mensual (vista de temporada) ------------------
+// El catálogo coleccionable es MENSUAL: este card abre el álbum del mes con
+// todas las criaturas (poseídas a color, el resto como silueta) y el progreso.
+function albumHomeCard(){
+  const lbl=(S.daily&&S.daily.season&&S.daily.season.label)||'este mes';
+  return `<div class="panel album-card" data-act="openAlbum" style="cursor:pointer;border-color:var(--cyan)">
+    <div class="mrow"><span>📖 <b style="color:var(--cyan)">Álbum de ${esc(lbl)}</b></span><span class="dim" id="album-mini">…</span></div>
+    <div class="mis-bar"><i id="album-bar" style="width:0%"></i></div>
+    <div class="dim" style="font-size:11px;margin-top:4px">Colecciónalas todas este mes · cambia el mes que viene</div>
+  </div>`;
+}
+async function loadAlbumMini(){
+  const el=$("#album-mini"); if(!el)return;
+  try{ const s=await api('/season'); S.season=s;
+    el.innerHTML=`${s.owned}/${s.total}${s.complete?' 🏆':''}`;
+    const bar=$("#album-bar"); if(bar) bar.style.width=Math.round(s.owned/s.total*100)+'%';
+  }catch(e){ el.textContent=''; }
+}
+// Criatura ÚNICA del día (pieza exclusiva/FOMO): card en home.
+function uniqueHomeCard(){
+  const u=S.daily&&S.daily.unique; if(!u)return '';
+  const tag=u.owned?'<span class="dim">ya es tuya ✔</span>':`<span style="color:var(--gold)">cázala hoy</span>`;
+  return `<div class="panel" data-act="openUnique" style="cursor:pointer;border-color:var(--epi)">
+    <div class="mrow"><span>✨ <b style="color:var(--epi)">Criatura única del día</b></span>${tag}</div>
+    <div class="dim" style="font-size:11px;margin-top:2px">Una sola, exclusiva de hoy. Mañana cambia.</div>
+  </div>`;
+}
+async function openAlbum(){
+  openOverlay(`<div class="center"><div class="dim">Cargando álbum…</div></div>`);
+  let s; try{ s=await api('/season'); S.season=s; }catch(e){ toast('No se pudo cargar el álbum'); closeOverlay(); return; }
+  const RAR_ORD={LEGENDARIA:0,EPICA:1,RARA:2,COMUN:3};
+  const entries=s.entries.slice().sort((a,b)=>(RAR_ORD[a.rarity]-RAR_ORD[b.rarity])||(a.owned===b.owned?0:a.owned?-1:1));
+  const cells=entries.map(e=>{
+    if(e.owned){ registerTpl(e); return `<div class="alb-cell owned ${e.rarity}${e.highlight?' hl':''}" title="${esc(e.name)}">
+      ${e.image_url?`<img class="aigimg" src="${e.image_url}" alt="">`:`<canvas data-aig="${e.id}" data-px="5"></canvas>`}
+      <span class="alb-name">${esc(e.name)}</span></div>`; }
+    return `<div class="alb-cell ${e.rarity}${e.highlight?' hl':''}" title="???">
+      <canvas data-sil="${e.id}" data-px="5"></canvas><span class="alb-name dim">???</span></div>`;
+  }).join('');
+  const reward=s.complete&&!s.rewardClaimed
+    ? `<button class="btn gold mb8" data-act="claimAlbum">🏆 ¡ÁLBUM COMPLETO! Reclama +${s.reward.coins}🪙 +${s.reward.gems}💎</button>`
+    : (s.rewardClaimed?`<div class="dim mb8" style="font-size:12px">🏆 Recompensa del álbum ya reclamada</div>`:'');
+  openOverlay(`<div class="album-modal">
+    <div class="mrow" style="margin-bottom:8px"><b style="font-size:16px;color:var(--cyan)">Álbum de ${esc(s.season.label)}</b>
+      <span class="dim">${s.owned}/${s.total}</span></div>
+    <div class="mis-bar" style="margin-bottom:10px"><i style="width:${Math.round(s.owned/s.total*100)}%"></i></div>
+    ${reward}
+    <div class="dim" style="font-size:11px;margin-bottom:8px">⭐ marco = destacada hoy (más probable en el huevo y la tienda)</div>
+    <div class="alb-grid">${cells}</div>
+    <button class="btn ghost mt8" data-act="close">CERRAR</button>
+  </div>`);
+  renderCanvases($("#overlay"));
+}
+async function claimAlbum(){
+  try{ const r=await api('/season/claim',{method:'POST'}); S.user=Object.assign(S.user||{},r.user); refreshChips();
+    SFX.play('claim'); if(window.POC&&window.POC.confetti)window.POC.confetti();
+    toast(`🏆 +${r.reward.coins}🪙 +${r.reward.gems}💎`); openAlbum(); }
+  catch(e){ toast('No se pudo reclamar'); }
+}
+async function openUnique(){
+  openOverlay(`<div class="center"><div class="dim">Cargando…</div></div>`);
+  let d; try{ d=await api('/daily/unique'); }catch(e){ toast('No disponible'); closeOverlay(); return; }
+  const t=registerTpl(d.creature);
+  const btn=d.owned
+    ? `<div style="color:var(--gold);font-weight:700;margin-bottom:8px">✔ Ya es tuya</div>`
+    : `<button class="btn gold mb8" data-act="claimUnique">CAZAR — ${d.cost}🪙</button>`;
+  openOverlay(`<div class="center reveal" style="position:relative">
+    <div class="rays"></div>
+    <div style="position:relative;z-index:2">
+      <div style="font-family:var(--pixel);font-size:11px;color:var(--epi);margin-bottom:8px">✨ ÚNICA DEL DÍA</div>
+      ${artTag(t,11)}
+      <div style="font-size:20px;font-weight:700;margin-top:6px">${esc(t.name)}</div>
+      <div class="mb8">${typePills(t)} <span class="rar-txt ${t.rarity}" style="font-weight:700">${t.rarity}</span></div>
+      <div class="dim" style="font-size:13px;margin-bottom:10px">"${esc(t.lore)}"</div>
+      <div style="text-align:left;max-width:220px;margin:0 auto 12px">${statBars(t.base_stats)}</div>
+      <div class="dim" style="font-size:11px;margin-bottom:8px">Exclusiva de hoy. Mañana llega otra distinta.</div>
+      ${btn}
+      <button class="btn ghost" data-act="close">CERRAR</button>
+    </div></div>`);
+  renderCanvases($("#overlay"));
+}
+async function claimUnique(){
+  try{ const r=await api('/daily/unique/claim',{method:'POST'}); S.user=Object.assign(S.user||{},r.user);
+    await refreshCollection(); refreshChips(); SFX.play('claim'); buzz([30,40,30,40,80]);
+    if(window.POC&&window.POC.confetti)window.POC.confetti();
+    toast('✨ ¡Es tuya!'); await refreshDaily(); closeOverlay(); if($("#s-home").classList.contains('active'))renderHome(); }
+  catch(e){ toast(e.data&&e.data.error==='insufficient'?'No tienes monedas suficientes':'No se pudo cazar'); }
 }
 // Profecía del Oráculo (lote de mañana). Se carga async tras el primer render.
 function oracleCard(){
@@ -513,6 +606,7 @@ async function doClaim(){
         <div style="font-size:20px;font-weight:700;margin-top:6px">${esc(t.name)}</div>
         <div class="mb8">${typePills(t)} <span class="rar-txt ${t.rarity}" style="font-weight:700">${t.rarity}</span></div>
         ${firstTxt}
+        ${r.duplicate?`<div style="color:var(--cyan);font-size:12px;font-weight:700;margin-bottom:6px">🔁 Repetida del álbum · +${r.dust||0}✨ polvo</div>`:''}
         <div class="dim" style="font-size:13px;margin-bottom:10px">"${esc(t.lore)}"</div>
         <div style="text-align:left;max-width:220px;margin:0 auto 12px">${statBars(t.base_stats)}</div>
         ${!localStorage.getItem('aigrons_first_fight_done')?'<button class="btn mag mb8" data-act="firstFight">⚔️ ¡TU PRIMER COMBATE!</button>':''}
@@ -583,7 +677,7 @@ async function shareAig(tplId){
   g.fillStyle=RARITY_COLOR[t.rarity]||'#8b86b8'; g.font='bold 20px monospace';
   g.fillText(`${t.rarity} · ${typesLabel(t)}`,240,518);
   g.fillStyle='#aaa2dc'; g.font='16px monospace';
-  g.fillText(`Lote del ${(S.daily&&S.daily.date)||''} · aigrons.app`,240,556);
+  g.fillText(`Álbum de ${(S.daily&&S.daily.season&&S.daily.season.label)||''} · aigrons.app`,240,556);
   c.toBlob(async(b)=>{
     if(!b){toast('No se pudo crear la imagen');return;}
     const file=new File([b],'aigron-'+(t.name||'hoy')+'.png',{type:'image/png'});
@@ -736,7 +830,7 @@ function renderArenaDraft(){
       <div class="nm">${esc(c.name)}</div><div class="ty rar-txt ${c.rarity}">${c.rarity}</div></div>`;}).join('');
   openOverlay(`<div>
     <div class="center mb8"><b style="font-size:14px">⚔️ ARENA SELLADA</b>
-      <div class="dim" style="font-size:11px">Elige 3 de 6 del lote de hoy. Sin tu colección: habilidad pura. (${arenaPicks.length}/3)</div></div>
+      <div class="dim" style="font-size:11px">Elige 3 de 6 del destacado de hoy. Sin tu colección: habilidad pura. (${arenaPicks.length}/3)</div></div>
     <div class="grid">${cands}</div>
     <button class="btn mag mt8" style="width:100%" data-act="arenaStart" ${arenaPicks.length===3?'':'disabled'}>⚔️ BUSCAR RIVAL</button>
     <button class="btn sm ghost mt8" style="width:100%" data-act="close">CANCELAR</button></div>`);
@@ -1776,7 +1870,7 @@ async function renderDungeon(){
     // semilla que usará el servidor): elegir camino con información.
     const preview=(kind)=>{
       try{
-        const tpls=(S.daily&&S.daily.batch)||[];
+        const tpls=(S.daily&&S.daily.highlights)||[];
         if(!tpls.length||D.seed==null)return '';
         const en=E.dungeonEnemyTeam(D.seed,D.depth,kind,tpls,D.diffLevel||1);
         return `<div style="font-size:11px;margin-top:3px">${en.map(u=>{const t=tpl(u.tplId)||{};
@@ -1926,7 +2020,7 @@ async function renderRanking(){
       <div class="rank-row me"><span class="pos">${me.pos}</span><span class="nm">Tú</span>
       <span style="color:var(--gold);font-weight:700">${me.score}${rankTab==='diario'?' ✕':' pts'}</span></div>`;
   }
-  const sub=rankTab==='diario'?'<div class="dim mb8" style="font-size:13px">Con el lote de HOY (igual para todos), ¿quién ganó más combates?</div>'
+  const sub=rankTab==='diario'?'<div class="dim mb8" style="font-size:13px">Con el destacado de HOY (igual para todos), ¿quién ganó más combates?</div>'
     :rankTab==='fama'?`<div class="dim mb8" style="font-size:13px">👑 Salón de la fama: el top de la última semana cerrada${hofWeek?` (${hofWeek})`:''}.</div>`
     :`<div class="dim mb8" style="font-size:13px">Top global por puntos. Tú: <b style="color:var(--gold)">${S.user.league}</b> · <b style="color:var(--cyan)">${S.user.leaguePoints} pts</b>.</div>`;
   $("#s-ranking").innerHTML=`
@@ -1954,8 +2048,8 @@ async function renderShop(){
   const canEnergy=S.user.gems>=20&&S.user.energy<S.user.energyMax;
   $("#s-shop").innerHTML=`
     <h2 class="title">TIENDA <small class="dim">sin sorpresas tóxicas</small></h2>
-    ${item("🥚","Tirada extra del lote de hoy",
-      `Aigrón aleatorio · <b style="color:var(--gold)">100🪙</b> · quedan <b style="color:${rollsLeft>0?'var(--cyan)':'var(--red)'}">${rollsLeft}/${S.user.rollsMax||10}</b> hoy`,
+    ${item("🥚","Tirada extra del álbum",
+      `Aigrón del álbum (destacados más probables) · <b style="color:var(--gold)">100🪙</b> · quedan <b style="color:${rollsLeft>0?'var(--cyan)':'var(--red)'}">${rollsLeft}/${S.user.rollsMax||10}</b> hoy`,
       rollsLeft<=0?"MAÑANA":"TIRAR","shopRoll","","",!canRoll)}
     ${item("⚡","Recargar energía",`Energía al máximo (${S.user.energyMax}⚡) · <b style="color:var(--magenta)">20💎</b>`,
       S.user.energy>=S.user.energyMax?"LLENA":"RECARGAR","purchase","energy_refill","",!canEnergy)}
@@ -2007,6 +2101,8 @@ const ACTIONS={
   goHome:()=>{closeOverlay();go('home');},
   shareAig:(a)=>shareAig(a),
   openProfile:()=>openProfile(), editName:()=>editName(), claimAch:(a)=>claimAch(a),
+  openAlbum:()=>openAlbum(), claimAlbum:()=>claimAlbum(),
+  openUnique:()=>openUnique(), claimUnique:()=>claimUnique(),
   openPuzzle:()=>openPuzzle(), puzzlePlay:()=>puzzlePlay(), puzzleShare:(a)=>puzzleShare(a),
   openBoss:()=>openBoss(), bossFight:()=>bossFight(),
   openNemesis:()=>openNemesis(), nemesisFight:()=>nemesisFight(),
@@ -2062,8 +2158,8 @@ document.getElementById("app").addEventListener("click",e=>{
 
 /* ====================== TUTORIAL (primer login) ====================== */
 const TUTORIAL=[
-  {ic:'🥚', t:'Bienvenido a AIGRONS', h:`Cada día nace un <b>lote nuevo</b> de criaturas únicas. <b>Reclama una gratis</b>, combate para ganar más, colecciónalas y compite en el <b>ranking diario</b> — el mismo lote para todos, así que es justo.`},
-  {ic:'🎁', t:'Tu aigrón diario', h:`En <b>Inicio</b>, toca <b>ABRIR — GRATIS</b> una vez al día. Entra cada día para subir tu <b>racha</b> y completa <b>misiones</b> para ganar monedas.`},
+  {ic:'🥚', t:'Bienvenido a AIGRONS', h:`Cada mes hay un <b>álbum nuevo</b> de criaturas únicas. <b>Reclama una gratis cada día</b>, combate para ganar más, y compite en el <b>ranking diario</b> — el mismo destacado para todos, así que es justo.`},
+  {ic:'🎁', t:'Tu aigrón diario', h:`En <b>Inicio</b>, toca <b>ABRIR — GRATIS</b> una vez al día: sale una criatura del <b>álbum del mes</b>. Entra cada día para subir tu <b>racha</b> y <b>completar el álbum</b> antes de que cambie de mes.`},
   {ic:'📖', t:'Colección', h:`Toca un aigrón para <b>subir de nivel</b>, marcarlo <b>favorito</b>, <b>fusionar</b> dos en uno nuevo, o <b>liberar</b> duplicados a cambio de polvo.`},
   {ic:'🛡️', t:'Tu equipo', h:`En <b>Combate → EDITAR</b> elige <b>3 aigrons</b>. Los <b>tipos</b> mandan: cada uno es fuerte contra unos y débil contra otros (piedra-papel-tijera).`},
   {ic:'🎯', t:'Combate · preparación', h:`Antes de luchar eliges:<br>• <b>Capitán</b>: +15% a sus stats y +6% a todo el equipo.<br>• <b>Estancia</b>: ⚔️ Agresiva (+ATK, −DEF), 🛡️ Defensiva (+DEF, +1⚡ inicial) o ⚖️ Neutral.<br>Cada combate gasta <b>1⚡</b> (se recarga sola con el tiempo).`},

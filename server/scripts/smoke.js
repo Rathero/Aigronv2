@@ -39,8 +39,20 @@ async function loginAs(subject) {
   ok(Array.isArray(me.data.missions) && me.data.missions.length === 3, "/me trae 3 misiones");
 
   const daily = await api(t1, "/daily");
-  ok(daily.status === 200 && daily.data.batch.length > 0, "/daily trae lote (" + daily.data.batch.length + ")");
+  ok(daily.status === 200 && daily.data.season && daily.data.season.key, "/daily trae temporada (" + (daily.data.season && daily.data.season.label) + ")");
   ok(daily.data.claimed === false, "daily no reclamado aún");
+  ok(!("batch" in daily.data), "/daily NO expone el lote disponible");
+
+  // Álbum de temporada: pool mensual con progreso (al inicio, 0 poseídos).
+  const season = await api(t1, "/season");
+  ok(season.status === 200 && season.data.total > 50 && Array.isArray(season.data.entries), "/season trae el álbum (" + (season.data.total) + ")");
+  ok(season.data.owned === 0 && season.data.entries.some((e) => e.owned === false && !e.name), "no poseídas son siluetas (sin nombre)");
+  ok(season.data.entries.some((e) => e.highlight), "el álbum marca los destacados del día");
+
+  // Criatura única del día: existe y aún no es del jugador.
+  const uniq = await api(t1, "/daily/unique");
+  ok(uniq.status === 200 && uniq.data.creature && uniq.data.creature.id.startsWith("uniq_"), "/daily/unique trae la criatura única");
+  ok(uniq.data.owned === false && uniq.data.cost > 0, "la única no es tuya aún (cuesta " + uniq.data.cost + ")");
 
   const claim = await api(t1, "/daily/claim", { method: "POST" });
   ok(claim.status === 200 && claim.data.instance, "/daily/claim crea instancia");
@@ -149,6 +161,15 @@ async function loginAs(subject) {
   ok(["cleared", "dead"].includes(st.status), "la run termina (status=" + st.status + ", depth=" + st.depth + ")");
   const dgRank = await api(t1, "/dungeon/ranking?difficulty=NORMAL");
   ok(dgRank.status === 200 && Array.isArray(dgRank.data.rows), "/dungeon/ranking ok");
+
+  // Criatura única: reclamarla cuesta monedas y solo se puede una vez al día.
+  // (A estas alturas el saldo puede estar agotado por tiradas/fusión: 402 también
+  // es válido. Si se concede, el segundo intento debe rechazarse.)
+  const uc = await api(t1, "/daily/unique/claim", { method: "POST" });
+  ok((uc.status === 200 && uc.data.instance && uc.data.instance.template.id.startsWith("uniq_")) || uc.status === 402,
+    "/daily/unique/claim concede la única o rechaza por saldo (" + uc.status + ")");
+  const uc2 = await api(t1, "/daily/unique/claim", { method: "POST" });
+  ok(uc.status === 200 ? uc2.status === 400 : uc2.status === 402, "la única no se reclama dos veces");
 
   console.log(`\nResultado: ${pass} ok, ${fail} fallos`);
   process.exit(fail ? 1 : 0);

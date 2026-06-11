@@ -10,7 +10,7 @@
 // =============================================================================
 const E = require("../../web/engine.js");
 
-module.exports = {
-  genTemplate: E.genTemplate,
-  dailyBatch: E.dailyBatch,
-};
+// Re-exporta el motor completo (igual que config.js): el job de generación usa
+// además seasonKey/composeSeason/dailyEvent/dailyUnique/TYPES/hashStr… Exponerlo
+// entero evita desincronizaciones y mantiene la paridad por construcción.
+module.exports = E;

@@ -15,7 +15,9 @@ function tomorrowStr() {
   return C.todayStr(new Date(Date.now() + 86400000));
 }
 
-function startCron(generateDailyBatch, dailyN) {
+// `job(date)` se invoca cada noche con la fecha de MAÑANA: rellena el arte del
+// álbum del mes (idempotente) y genera la criatura única del día siguiente.
+function startCron(job) {
   if (process.env.DISABLE_CRON === "true") {
     console.log("[cron] desactivado (DISABLE_CRON=true)");
     return null;
@@ -38,15 +40,15 @@ function startCron(generateDailyBatch, dailyN) {
     async () => {
       const date = tomorrowStr();
       try {
-        console.log(`[cron] generando lote de ${date}...`);
-        await generateDailyBatch(date, dailyN);
+        console.log(`[cron] generando temporada + única de ${date}...`);
+        await job(date);
       } catch (e) {
         console.error(`[cron] error generando ${date}:`, e.message);
       }
     },
     { timezone: tz }
   );
-  console.log(`[cron] activo: "${expr}" (${tz}) -> genera el lote de mañana`);
+  console.log(`[cron] activo: "${expr}" (${tz}) -> rellena álbum del mes + única de mañana`);
   return task;
 }
 

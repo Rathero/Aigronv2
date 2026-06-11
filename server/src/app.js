@@ -17,7 +17,7 @@ const C = require("./config");
 const combat = require("./combat");
 const auth = require("./auth");
 const { sign, authMiddleware, verifyIdentity } = auth;
-const { generateDailyBatch } = require("./jobs/generateDailyBatch");
+const { generateSeason, generateDailyUnique } = require("./jobs/generateDailyBatch");
 const { startCron } = require("./cron");
 const { fuse } = require("./fusion");
 const dungeon = require("./dungeon");
@@ -28,7 +28,7 @@ const achievements = require("./achievements");
 const push = require("./push");
 const features = require("./features");
 const innov = require("./innovations");
-const { eventFor, composeBatch } = require("./jobs/generateDailyBatch");
+const { eventFor } = require("./jobs/generateDailyBatch");
 const { tplBaseStats, tplTypes } = require("./util");
 
 const app = express();
@@ -87,7 +87,12 @@ app.use(generalLimiter);
 // Sirve el frontend en / para probar en local (http://localhost:3000)
 app.use(express.static(path.join(__dirname, "../../web")));
 
-const DAILY_N = parseInt(process.env.DAILY_BATCH_SIZE || "30", 10);
+// El catálogo coleccionable es MENSUAL: un álbum grande (~180) que cambia cada
+// mes. Sobre él rota un destacado diario (~18) que alimenta puzzle/mazmorra/
+// arena/oráculo y pondera el huevo/tienda.
+const SEASON_N = parseInt(process.env.SEASON_SIZE || "180", 10);
+const HIGHLIGHT_N = parseInt(process.env.HIGHLIGHT_SIZE || "18", 10);
+const PITY_THRESHOLD = parseInt(process.env.PITY_THRESHOLD || "8", 10);
 
 // --------------------------------- helpers ----------------------------------
 const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
@@ -98,34 +103,124 @@ const leagueOrdSql = (col) =>
 function yesterdayStr() {
   return C.todayStr(new Date(Date.now() - 86400000));
 }
-async function ensureDailyBatch(date) {
-  const r = await db.query("SELECT 1 FROM creature_templates WHERE batch_date=$1 AND is_fusion=false LIMIT 1", [date]);
-  if (r.rowCount > 0) return;
-  // Advisory lock: a medianoche TODOS los clientes piden /daily a la vez
-  // (thundering herd); sin el lock varios procesos generarían el lote en paralelo.
-  const client = await db.pool.connect();
-  try {
-    await client.query("SELECT pg_advisory_lock(hashtext($1))", ["gen:" + date]);
-    const again = await db.query("SELECT 1 FROM creature_templates WHERE batch_date=$1 AND is_fusion=false LIMIT 1", [date]);
-    if (again.rowCount === 0) await generateDailyBatch(date, DAILY_N);
-  } finally {
-    await client.query("SELECT pg_advisory_unlock(hashtext($1))", ["gen:" + date]).catch(() => {});
-    client.release();
-  }
-}
-async function todayTemplates() {
-  const date = C.todayStr();
-  await ensureDailyBatch(date);
-  const r = await db.query(
-    "SELECT template_id,name,type,type2,rarity,ability_id,base_hp,base_atk,base_def,base_spd,base_atk_p,base_atk_s,base_def_p,base_def_s,art_seed,lore,image_url,image_thumb_url FROM creature_templates WHERE batch_date=$1 AND is_fusion=false ORDER BY template_id",
-    [date]
-  );
-  return r.rows.map((x) => ({
+const TPL_COLS = "template_id,name,type,type2,rarity,ability_id,base_hp,base_atk,base_def,base_spd,base_atk_p,base_atk_s,base_def_p,base_def_s,art_seed,lore,image_url,image_thumb_url";
+function rowToTpl(x) {
+  return {
     id: x.template_id, name: x.name, type: x.type, types: tplTypes(x), rarity: x.rarity, ability: x.ability_id,
     art_seed: x.art_seed, lore: x.lore, image_url: x.image_url, image_thumb_url: x.image_thumb_url,
     base_stats: tplBaseStats(x),
-  }));
+  };
 }
+// Garantiza que el ÁLBUM mensual existe (lo inserta al instante SIN arte: las
+// plantillas son deterministas; el arte IA se rellena luego vía cron/admin). El
+// advisory lock evita que varios clientes lo generen a la vez tras el cambio de mes.
+async function ensureSeason(sKey) {
+  const r = await db.query("SELECT 1 FROM creature_templates WHERE batch_date=$1 AND kind='season' AND is_fusion=false LIMIT 1", [sKey]);
+  if (r.rowCount > 0) return;
+  const client = await db.pool.connect();
+  try {
+    await client.query("SELECT pg_advisory_lock(hashtext($1))", ["season:" + sKey]);
+    const again = await db.query("SELECT 1 FROM creature_templates WHERE batch_date=$1 AND kind='season' AND is_fusion=false LIMIT 1", [sKey]);
+    if (again.rowCount === 0) await generateSeason(sKey, SEASON_N, { withArt: false });
+  } finally {
+    await client.query("SELECT pg_advisory_unlock(hashtext($1))", ["season:" + sKey]).catch(() => {});
+    client.release();
+  }
+}
+// El ÁLBUM de la temporada actual (pool completo ~180). Sustituye al antiguo
+// "lote de hoy": es la base coleccionable estable del mes.
+async function seasonTemplates(date) {
+  const sKey = C.seasonKey(date || C.todayStr());
+  await ensureSeason(sKey);
+  const r = await db.query(
+    `SELECT ${TPL_COLS} FROM creature_templates WHERE batch_date=$1 AND kind='season' AND is_fusion=false ORDER BY template_id`,
+    [sKey]
+  );
+  return r.rows.map(rowToTpl);
+}
+// El DESTACADO del día: subconjunto rotatorio (~18) del álbum, determinista por
+// fecha. Es lo que alimenta puzzle/mazmorra/arena/oráculo/bots (variedad diaria
+// sobre un álbum estable). Antes esto era el "lote de hoy" entero.
+async function dailyTemplates(date) {
+  const day = date || C.todayStr();
+  const pool = await seasonTemplates(day);
+  return C.dailyHighlights(day, pool, HIGHLIGHT_N);
+}
+// Compat: algunos módulos esperan `todayTemplates`. Apunta al destacado del día.
+const todayTemplates = dailyTemplates;
+
+// Ids del álbum de la temporada que el usuario YA posee (para el pity y el álbum).
+async function ownedSeasonIds(userId, sKey) {
+  const r = await db.query(
+    `SELECT DISTINCT t.template_id FROM creature_instances ci
+       JOIN creature_templates t ON t.template_id = ci.template_id
+      WHERE ci.user_id=$1 AND t.batch_date=$2 AND t.kind='season'`,
+    [userId, sKey]
+  );
+  return new Set(r.rows.map((x) => x.template_id));
+}
+// Tira una criatura del álbum con: (1) sesgo hacia el destacado del día (x3),
+// (2) duplicado -> polvo extra, (3) pity suave: al acumular PITY_THRESHOLD
+// duplicados, garantiza una NO poseída (preferiblemente del destacado). Devuelve
+// { template, duplicate, dust }. Persiste pity_count y, si toca, el polvo.
+async function drawFromSeason(u) {
+  const sKey = C.seasonKey();
+  const pool = await seasonTemplates();
+  const highlights = C.dailyHighlights(C.todayStr(), pool, HIGHLIGHT_N);
+  const hiIds = new Set(highlights.map((t) => t.id));
+  const owned = await ownedSeasonIds(u.id, sKey);
+
+  let template = null, forced = false;
+  if ((u.pity_count || 0) >= PITY_THRESHOLD) {
+    const unowned = pool.filter((t) => !owned.has(t.id));
+    if (unowned.length) {
+      const hu = unowned.filter((t) => hiIds.has(t.id));
+      const cand = hu.length ? hu : unowned;
+      template = cand[Math.floor(Math.random() * cand.length)];
+      forced = true;
+    }
+  }
+  if (!template) {
+    // Lista ponderada: destacados x3, resto x1 (determinismo no aplica: la tirada
+    // es aleatoria por diseño; lo determinista es QUÉ hay disponible).
+    const weighted = [];
+    for (const t of pool) { weighted.push(t); if (hiIds.has(t.id)) { weighted.push(t); weighted.push(t); } }
+    template = weighted[Math.floor(Math.random() * weighted.length)];
+  }
+  const duplicate = owned.has(template.id);
+  const newPity = (forced || !duplicate) ? 0 : (u.pity_count || 0) + 1;
+  await db.query("UPDATE users SET pity_count=$1 WHERE id=$2", [newPity, u.id]);
+  let dust = 0;
+  if (duplicate) {
+    dust = C.RELEASE_DUST[template.rarity] || 5;
+    await db.query("UPDATE users SET dust=dust+$1 WHERE id=$2", [dust, u.id]);
+  }
+  return { template, duplicate, dust };
+}
+
+// Garantiza la criatura ÚNICA del día (kind='unique', batch_date=fecha). Se
+// inserta al instante sin arte (procedural); el arte IA lo rellena cron/admin.
+async function ensureDailyUnique(date) {
+  const id = C.dailyUniqueId(date);
+  const r = await db.query("SELECT 1 FROM creature_templates WHERE template_id=$1", [id]);
+  if (r.rowCount > 0) return;
+  const client = await db.pool.connect();
+  try {
+    await client.query("SELECT pg_advisory_lock(hashtext($1))", ["uniq:" + date]);
+    const again = await db.query("SELECT 1 FROM creature_templates WHERE template_id=$1", [id]);
+    if (again.rowCount === 0) await generateDailyUnique(date, { withArt: false });
+  } finally {
+    await client.query("SELECT pg_advisory_unlock(hashtext($1))", ["uniq:" + date]).catch(() => {});
+    client.release();
+  }
+}
+async function dailyUniqueTemplate(date) {
+  const day = date || C.todayStr();
+  await ensureDailyUnique(day);
+  const r = await db.query(`SELECT ${TPL_COLS} FROM creature_templates WHERE template_id=$1`, [C.dailyUniqueId(day)]);
+  return r.rows[0] ? rowToTpl(r.rows[0]) : null;
+}
+const UNIQUE_COST = parseInt(process.env.DAILY_UNIQUE_COST || "200", 10);
 async function getUser(id) {
   const r = await db.query("SELECT * FROM users WHERE id=$1", [id]);
   return r.rows[0];
@@ -159,6 +254,9 @@ function userPublic(u) {
     rollsToday: u.rolls_date && C.todayStr(new Date(u.rolls_date)) === C.todayStr() ? u.rolls_today : 0,
     rollsMax: 10,
     claimedToday: !!(u.last_claim_date && C.todayStr(new Date(u.last_claim_date)) === C.todayStr()),
+    // Pity (suavizado anti-repetidos): cuántos duplicados llevas y el umbral que
+    // garantiza una criatura nueva. El cliente lo muestra como barra de progreso.
+    pity: u.pity_count || 0, pityMax: PITY_THRESHOLD,
   };
 }
 
@@ -295,15 +393,32 @@ app.get("/me", authMiddleware, wrap(async (req, res) => {
 }));
 
 // ---------------------------------- DAILY ------------------------------------
+// El huevo del día. NO expone el lote disponible (el álbum es mensual y se ve en
+// su propia vista): solo lo necesario para el huevo + la temporada actual + si
+// queda por reclamar la criatura única del día.
 app.get("/daily", authMiddleware, wrap(async (req, res) => {
   const u = await getUser(req.userId);
-  const list = await todayTemplates();
-  res.json({ date: C.todayStr(), count: list.length, claimed: userPublic(u).claimedToday, nextBatchAt: nextBatchAt(), event: eventFor(C.todayStr()), batch: list });
+  const today = C.todayStr();
+  const sKey = C.seasonKey(today);
+  const ownsUnique = (await db.query(
+    "SELECT 1 FROM creature_instances WHERE user_id=$1 AND template_id=$2 LIMIT 1", [u.id, C.dailyUniqueId(today)]
+  )).rowCount > 0;
+  // `highlights` = el DESTACADO del día (rotación curada ~18), NO el álbum
+  // completo: alimenta previews deterministas del cliente (p.ej. mazmorra) y se
+  // marca en el álbum. El pool mensual entero solo se ve en la vista de álbum.
+  res.json({
+    date: today,
+    claimed: userPublic(u).claimedToday,
+    nextBatchAt: nextBatchAt(),
+    event: eventFor(today),
+    season: { key: sKey, label: C.seasonLabel(today) },
+    unique: { available: !ownsUnique, owned: ownsUnique, cost: UNIQUE_COST },
+    highlights: await dailyTemplates(today),
+  });
 }));
 
 app.post("/daily/claim", authMiddleware, wrap(async (req, res) => {
   const u = await getUser(req.userId);
-  const list = await todayTemplates(); // antes de marcar el reclamo: si falla, no se pierde la tirada
   // Marca el reclamo de forma ATÓMICA (un solo UPDATE condicional): dos
   // peticiones concurrentes no pueden reclamar dos veces el mismo día.
   const streak = u.last_claim_date && C.todayStr(new Date(u.last_claim_date)) === yesterdayStr() ? u.daily_streak + 1 : 1;
@@ -316,12 +431,22 @@ app.post("/daily/claim", authMiddleware, wrap(async (req, res) => {
   );
   if (!claim.rowCount) return res.status(400).json({ error: "already_claimed" });
   // PRIMER reclamo de la cuenta = "tu estrella" (vía Pokémon, feedback de
-  // jugadores): rareza garantizada >COMÚN si el lote la tiene, nivel 5,
-  // favorita+protegida, y 2 crías de nivel 1 se unen para completar el equipo.
+  // jugadores): rareza garantizada >COMÚN del álbum, nivel 5, favorita+protegida,
+  // y 2 crías de nivel 1 (del destacado del día) se unen para completar el equipo.
+  // Reclamos posteriores: tirada del álbum con pity (anti-repetidos) y polvo por
+  // duplicado.
   const cnt = await db.query("SELECT COUNT(*)::int AS n FROM creature_instances WHERE user_id=$1", [u.id]);
   const isFirst = cnt.rows[0].n === 0;
-  const pool = isFirst ? (list.filter((x) => x.rarity !== "COMUN").length ? list.filter((x) => x.rarity !== "COMUN") : list) : list;
-  const t = pool[Math.floor(Math.random() * pool.length)];
+  let t, duplicate = false, dust = 0;
+  if (isFirst) {
+    const seasonPool = await seasonTemplates();
+    const nonCommon = seasonPool.filter((x) => x.rarity !== "COMUN");
+    const starPool = nonCommon.length ? nonCommon : seasonPool;
+    t = starPool[Math.floor(Math.random() * starPool.length)];
+  } else {
+    const drawn = await drawFromSeason(u);
+    t = drawn.template; duplicate = drawn.duplicate; dust = drawn.dust;
+  }
   let ins;
   const companions = [];
   try {
@@ -330,6 +455,7 @@ app.post("/daily/claim", authMiddleware, wrap(async (req, res) => {
       [u.id, t.id, isFirst ? 5 : 1, isFirst]
     );
     if (isFirst) {
+      const list = await dailyTemplates();
       const commons = list.filter((x) => x.id !== t.id);
       for (let i = 0; i < 2 && commons.length; i++) {
         const c = commons.splice(Math.floor(Math.random() * commons.length), 1)[0];
@@ -345,7 +471,79 @@ app.post("/daily/claim", authMiddleware, wrap(async (req, res) => {
   }
   await bumpMission(u.id, "claims", 1);
   res.json({ instance: { instance_id: ins.rows[0].instance_id, level: ins.rows[0].level, template: t }, streak,
-    first: isFirst || undefined, companions: isFirst ? companions : undefined });
+    first: isFirst || undefined, companions: isFirst ? companions : undefined,
+    duplicate: duplicate || undefined, dust: dust || undefined });
+}));
+
+// --------------------------------- ÁLBUM (temporada) -------------------------
+// El ÁLBUM mensual: todas las criaturas de la temporada, marcando cuáles posees
+// (silueta si no). Es el catálogo coleccionable estable del mes + su progreso y
+// la recompensa por completarlo. Marca también el DESTACADO del día (rotación).
+const ALBUM_REWARD = { coins: 1000, gems: 30 };
+app.get("/season", authMiddleware, wrap(async (req, res) => {
+  const today = C.todayStr();
+  const sKey = C.seasonKey(today);
+  const pool = await seasonTemplates(today);
+  const owned = await ownedSeasonIds(req.userId, sKey);
+  const hiIds = new Set(C.dailyHighlights(today, pool, HIGHLIGHT_N).map((t) => t.id));
+  const claimedKey = "album_" + sKey;
+  const rewardClaimed = (await db.query("SELECT 1 FROM achievements WHERE user_id=$1 AND key=$2", [req.userId, claimedKey])).rowCount > 0;
+  const entries = pool.map((t) => {
+    const have = owned.has(t.id);
+    // Las no poseídas se entregan como SILUETA: sin nombre/lore, solo rareza y
+    // art_seed (el cliente dibuja la silueta del sprite procedural).
+    return have
+      ? { id: t.id, owned: true, highlight: hiIds.has(t.id), name: t.name, type: t.type, types: t.types, rarity: t.rarity, ability: t.ability, art_seed: t.art_seed, image_url: t.image_url, image_thumb_url: t.image_thumb_url, base_stats: t.base_stats }
+      : { id: t.id, owned: false, highlight: hiIds.has(t.id), rarity: t.rarity, art_seed: t.art_seed };
+  });
+  res.json({
+    season: { key: sKey, label: C.seasonLabel(today) },
+    total: pool.length, owned: owned.size,
+    complete: owned.size >= pool.length,
+    reward: ALBUM_REWARD, rewardClaimed,
+    entries,
+  });
+}));
+// Recompensa por completar el álbum del mes (una vez por temporada).
+app.post("/season/claim", authMiddleware, wrap(async (req, res) => {
+  const sKey = C.seasonKey();
+  const pool = await seasonTemplates();
+  const owned = await ownedSeasonIds(req.userId, sKey);
+  if (owned.size < pool.length) return res.status(400).json({ error: "incomplete", owned: owned.size, total: pool.length });
+  const claimedKey = "album_" + sKey;
+  // INSERT condicional = barrera atómica anti-doble-cobro.
+  const ins = await db.query("INSERT INTO achievements (user_id, key) VALUES ($1,$2) ON CONFLICT DO NOTHING RETURNING key", [req.userId, claimedKey]);
+  if (!ins.rowCount) return res.status(400).json({ error: "already_claimed" });
+  await db.query("UPDATE users SET coins=coins+$1, gems=gems+$2 WHERE id=$3", [ALBUM_REWARD.coins, ALBUM_REWARD.gems, req.userId]);
+  res.json({ reward: ALBUM_REWARD, user: userPublic(await getUser(req.userId)) });
+}));
+
+// --------------------------- CRIATURA ÚNICA DEL DÍA --------------------------
+// Pieza exclusiva del día (caza/FOMO): una sola criatura, con su propio arte,
+// reclamable HOY a cambio de monedas. Mañana cambia: si no la cogiste, la pierdes.
+app.get("/daily/unique", authMiddleware, wrap(async (req, res) => {
+  const today = C.todayStr();
+  const t = await dailyUniqueTemplate(today);
+  const owned = (await db.query("SELECT 1 FROM creature_instances WHERE user_id=$1 AND template_id=$2 LIMIT 1", [req.userId, t.id])).rowCount > 0;
+  res.json({ date: today, cost: UNIQUE_COST, owned, nextBatchAt: nextBatchAt(),
+    creature: { id: t.id, name: t.name, type: t.type, types: t.types, rarity: t.rarity, ability: t.ability, lore: t.lore, art_seed: t.art_seed, image_url: t.image_url, image_thumb_url: t.image_thumb_url, base_stats: t.base_stats } });
+}));
+app.post("/daily/unique/claim", authMiddleware, wrap(async (req, res) => {
+  const today = C.todayStr();
+  const t = await dailyUniqueTemplate(today);
+  const already = await db.query("SELECT 1 FROM creature_instances WHERE user_id=$1 AND template_id=$2 LIMIT 1", [req.userId, t.id]);
+  if (already.rowCount) return res.status(400).json({ error: "already_owned" });
+  // Cobro atómico en monedas (UPDATE condicional = sin saldo negativo en carrera).
+  const pay = await db.query("UPDATE users SET coins=coins-$1 WHERE id=$2 AND coins>=$1 RETURNING id", [UNIQUE_COST, req.userId]);
+  if (!pay.rowCount) return res.status(402).json({ error: "insufficient" });
+  let ins;
+  try {
+    ins = await db.query("INSERT INTO creature_instances (user_id, template_id, favorite) VALUES ($1,$2,true) RETURNING instance_id", [req.userId, t.id]);
+  } catch (e) {
+    await db.query("UPDATE users SET coins=coins+$1 WHERE id=$2", [UNIQUE_COST, req.userId]).catch(() => {});
+    throw e;
+  }
+  res.json({ instance: { instance_id: ins.rows[0].instance_id, level: 1, template: t }, user: userPublic(await getUser(req.userId)) });
 }));
 
 // -------------------------------- MISSIONS -----------------------------------
@@ -726,8 +924,9 @@ app.post("/shop/roll", authMiddleware, wrap(async (req, res) => {
     if (now.rolls_today >= 10) return res.status(429).json({ error: "daily_cap" });
     return res.status(402).json({ error: "insufficient" });
   }
-  const list = await todayTemplates();
-  const t = list[Math.floor(Math.random() * list.length)];
+  // Tirada del álbum con sesgo al destacado + pity + polvo por duplicado.
+  const drawn = await drawFromSeason(u);
+  const t = drawn.template;
   let ins;
   try {
     ins = await db.query("INSERT INTO creature_instances (user_id, template_id) VALUES ($1,$2) RETURNING instance_id", [u.id, t.id]);
@@ -736,7 +935,7 @@ app.post("/shop/roll", authMiddleware, wrap(async (req, res) => {
     await db.query("UPDATE users SET coins=coins+100, rolls_today=GREATEST(rolls_today-1,0) WHERE id=$1", [u.id]).catch(() => {});
     throw e;
   }
-  res.json({ instance_id: ins.rows[0].instance_id, template: t });
+  res.json({ instance_id: ins.rows[0].instance_id, template: t, duplicate: drawn.duplicate || undefined, dust: drawn.dust || undefined });
 }));
 
 // Compra de gemas / pase (dinero real): en producción valida el recibo de
@@ -1039,16 +1238,13 @@ app.post("/nemesis/fight", authMiddleware, requireFeature("nemesis"), wrap(async
   res.json({ win, nemesis: nem, coins: award.coins, leaguePoints: award.leaguePoints, league: award.league, energy: award.energy });
 }));
 
-// -- ORÁCULO: profecía determinista del lote de MAÑANA -------------------------
+// -- ORÁCULO: profecía determinista del DESTACADO de MAÑANA --------------------
 app.get("/oracle", authMiddleware, requireFeature("oracle"), wrap(async (req, res) => {
-  // Profecía de MAÑANA: si el lote de mañana aún no existe, se deriva igual
-  // (determinista por fecha) generándolo en memoria sin persistir.
+  // Profecía del destacado de MAÑANA (rotación determinista sobre el álbum del
+  // mes). Como el destacado se deriva de la fecha, la pista cuadra con lo que
+  // de verdad saldrá mañana.
   const tomorrow = C.todayStr(new Date(Date.now() + 86400000));
-  let tpls = (await db.query("SELECT type, type2, rarity FROM creature_templates WHERE batch_date=$1 AND is_fusion=false", [tomorrow])).rows
-    .map((x) => ({ type: x.type, types: x.type2 ? [x.type, x.type2] : [x.type], rarity: x.rarity }));
-  // composeBatch (no dailyBatch): la MISMA selección por cupos/eventos que usará
-  // el job nocturno, para que la profecía cuadre con el lote que de verdad saldrá.
-  if (!tpls.length) tpls = composeBatch(tomorrow, DAILY_N);
+  const tpls = await dailyTemplates(tomorrow);
   res.json(C.oracleProphecy(tomorrow, tpls));
 }));
 
@@ -1072,6 +1268,8 @@ app.get("/arena/draft", authMiddleware, requireFeature("arena"), wrap(async (req
 //   POST /admin/tasks/remove-art-backgrounds[?dryRun=1&tolerance=42]
 //   POST /admin/tasks/gen-ui-assets[?variants=3&only=icon,arena]
 //   POST /admin/tasks/boss-art            (arte del jefe de esta semana)
+//   POST /admin/tasks/season-art[?month=YYYY-MM]  (arte del álbum del mes)
+//   POST /admin/tasks/unique-art[?date=YYYY-MM-DD] (arte de la criatura única)
 //   GET  /admin/tasks                     (estado de todas)
 const artTasks = require("./artTasks");
 const _adminTasks = {}; // name -> { status, startedAt, finishedAt, result|error }
@@ -1084,6 +1282,10 @@ const ADMIN_TASKS = {
   "remove-art-backgrounds": (q) => artTasks.removeArtBackgrounds({ dryRun: q.dryRun === "1", tolerance: q.tolerance }),
   "gen-ui-assets": (q) => artTasks.generateUiAssets({ variants: q.variants, only: (q.only || "").split(",").filter(Boolean) }),
   "boss-art": () => require("./innovations").ensureBossArt().then((ok) => ({ generated: ok })),
+  // Rellena el arte IA del ÁLBUM del mes indicado (?month=YYYY-MM, def: actual).
+  "season-art": (q) => generateSeason(C.seasonKey((q.month ? q.month + "-01" : C.todayStr())), SEASON_N, { withArt: true }),
+  // Genera el arte de la criatura ÚNICA del día (?date=YYYY-MM-DD, def: hoy).
+  "unique-art": (q) => generateDailyUnique(q.date || C.todayStr(), { withArt: true }),
 };
 app.post("/admin/tasks/:task", requireAdmin, (req, res) => {
   const name = req.params.task;
@@ -1123,7 +1325,13 @@ let server;
 if (require.main === module) {
   // Escuchar en 0.0.0.0 (requisito de Railway/PaaS para que el proxy llegue a la app).
   server = app.listen(PORT, "0.0.0.0", () => console.log(`AIGRONS API escuchando en 0.0.0.0:${PORT} (frontend en /)`));
-  startCron(generateDailyBatch, DAILY_N);
+  // Cron nocturno: rellena el arte IA del álbum del mes (idempotente) y genera la
+  // criatura única del día siguiente. El álbum en sí se crea perezosamente al
+  // primer acceso del mes (sin arte), así que esto solo es enriquecimiento.
+  startCron(async (date) => {
+    await generateSeason(C.seasonKey(date), SEASON_N, { withArt: true });
+    await generateDailyUnique(date, { withArt: true });
+  });
   startMaintenance(db); // limpieza de tablas + cierre semanal de ligas
   push.initPush(db).then(() => push.startPushCron(db)).catch((e) => console.warn("[push]", e.message));
 

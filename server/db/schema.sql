@@ -51,6 +51,13 @@ ALTER TABLE creature_templates ADD COLUMN IF NOT EXISTS base_atk_s INT;
 ALTER TABLE creature_templates ADD COLUMN IF NOT EXISTS base_def_p INT;
 ALTER TABLE creature_templates ADD COLUMN IF NOT EXISTS base_def_s INT;
 ALTER TABLE creature_templates ADD COLUMN IF NOT EXISTS type2 TEXT;  -- segundo tipo (opcional)
+-- Naturaleza de la plantilla: 'season' (álbum mensual, batch_date=día 1 del mes),
+-- 'unique' (criatura exclusiva del día, batch_date=ese día) o 'daily' (lotes
+-- diarios legacy). El álbum coleccionable filtra por kind='season'. El DEFAULT es
+-- 'daily' a propósito: las filas PREEXISTENTES son lotes diarios antiguos, NUNCA
+-- temporadas; así un lote viejo fechado el día 1 no se confunde con el álbum.
+-- generateSeason/generateDailyUnique insertan kind explícito ('season'/'unique').
+ALTER TABLE creature_templates ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'daily';
 
 CREATE TABLE IF NOT EXISTS creature_instances (
   instance_id    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -196,6 +203,9 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS best_streak      INT  NOT NULL DEFAUL
 ALTER TABLE users ADD COLUMN IF NOT EXISTS best_league      TEXT NOT NULL DEFAULT 'BRONCE';
 ALTER TABLE users ADD COLUMN IF NOT EXISTS dungeons_cleared INT  NOT NULL DEFAULT 0;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS fusions_done     INT  NOT NULL DEFAULT 0;
+-- Contador de "pity" (suavizado anti-repetidos): sube con cada duplicado del
+-- huevo/tienda y, al llegar al umbral, garantiza una criatura aún no poseída.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS pity_count       INT  NOT NULL DEFAULT 0;
 
 -- Misiones SEMANALES (las diarias retienen el día; estas retienen la semana).
 CREATE TABLE IF NOT EXISTS weekly_missions (

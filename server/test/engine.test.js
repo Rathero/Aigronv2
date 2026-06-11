@@ -423,6 +423,52 @@ test("mazmorra: la dificultad es una RAMPA (empieza ~25% y supera el nivel en el
   assert.ok(Math.max(...lvl0) <= start + 1, "nodo 0 cerca del nivel de arranque");
 });
 
+test("temporada: clave mensual, etiqueta y composición por cupos", () => {
+  assert.equal(E.seasonKey("2026-06-11"), "2026-06-01", "clave = día 1 del mes");
+  assert.equal(E.seasonKey("2026-12-31"), "2026-12-01");
+  assert.equal(E.seasonLabel("2026-06-11"), "junio 2026");
+  const a = E.composeSeason("2026-06-01", 180);
+  const b = E.composeSeason("2026-06-01", 180);
+  assert.equal(a.length, 180, "tamaño exacto del álbum");
+  assert.deepEqual(a.map((t) => t.id), b.map((t) => t.id), "determinista");
+  // Curva de rareza: hay de las cuatro y el orden común>rara>épica>legendaria.
+  const by = {}; a.forEach((t) => (by[t.rarity] = (by[t.rarity] || 0) + 1));
+  assert.ok(by.LEGENDARIA >= 2 && by.EPICA >= 2 && by.RARA >= 2 && by.COMUN > 0, "todas las rarezas presentes");
+  assert.ok(by.COMUN > by.RARA && by.RARA > by.EPICA, "curva descendente");
+  // ids únicos
+  assert.equal(new Set(a.map((t) => t.id)).size, 180, "sin duplicados");
+});
+
+test("destacado diario: subconjunto determinista del álbum, rota por fecha", () => {
+  const pool = E.composeSeason("2026-06-01", 180);
+  const h1 = E.dailyHighlights("2026-06-10", pool, 18);
+  const h2 = E.dailyHighlights("2026-06-10", pool, 18);
+  assert.equal(h1.length, 18);
+  assert.deepEqual(h1.map((t) => t.id), h2.map((t) => t.id), "mismo día -> mismo destacado");
+  const h3 = E.dailyHighlights("2026-06-11", pool, 18);
+  assert.notDeepEqual(h1.map((t) => t.id), h3.map((t) => t.id), "otro día -> otro destacado");
+  // Todos los destacados pertenecen al álbum.
+  const ids = new Set(pool.map((t) => t.id));
+  assert.ok(h1.every((t) => ids.has(t.id)), "subconjunto del álbum");
+  // Domingo legendario (2026-06-07 es domingo): >=2 legendarias en el destacado.
+  const dom = E.dailyHighlights("2026-06-07", pool, 18);
+  assert.ok(dom.filter((t) => t.rarity === "LEGENDARIA").length >= 2, "domingo legendario garantiza >=2");
+  // Sábado temático (2026-06-06 es sábado): sesga hacia el tipo del evento.
+  const ev = E.dailyEvent("2026-06-06");
+  assert.equal(ev.kind, "type");
+  const sat = E.dailyHighlights("2026-06-06", pool, 18);
+  const typed = sat.filter((t) => (t.types || [t.type]).includes(ev.type)).length;
+  const baseShare = pool.filter((t) => (t.types || [t.type]).includes(ev.type)).length / pool.length * 18;
+  assert.ok(typed >= baseShare, "sábado sesga hacia su tipo");
+});
+
+test("criatura única del día: id determinista y plantilla válida", () => {
+  assert.equal(E.dailyUniqueId("2026-06-11"), "uniq_2026-06-11");
+  const u = E.dailyUnique("2026-06-11");
+  assert.equal(u.id, "uniq_2026-06-11");
+  assert.deepEqual(u, E.genTemplate("uniq_2026-06-11"), "= genTemplate del id único");
+});
+
 test("lore: artículos concuerdan con tags femeninos (sin 'del niebla')", () => {
   // Recorre muchas plantillas y comprueba que no aparecen concordancias rotas.
   for (let i = 0; i < 300; i++) {

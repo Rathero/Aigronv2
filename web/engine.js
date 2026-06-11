@@ -280,6 +280,91 @@
     return out;
   }
 
+  // ============================ TEMPORADA (mensual) ==========================
+  // El catálogo coleccionable (el "álbum") es MENSUAL, no diario: un lote grande
+  // (~180) que cambia cada mes. Cada mes se identifica por su día 1 ("clave de
+  // temporada"), que actúa como batch_date en BD. Sobre ese álbum estable rota un
+  // subconjunto DESTACADO diario (highlights) que alimenta puzzle/mazmorra/arena/
+  // oráculo y pondera el huevo/tiradas. Todo determinista -> paridad por fecha.
+  const MESES_ES = ["enero", "febrero", "marzo", "abril", "mayo", "junio",
+    "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"];
+  // Clave de temporada = primer día del mes de `date` ("YYYY-MM-01").
+  function seasonKey(date) {
+    const s = (date || todayStr()).slice(0, 7);
+    return s + "-01";
+  }
+  // Etiqueta legible: "junio 2026".
+  function seasonLabel(date) {
+    const s = (date || todayStr());
+    const y = s.slice(0, 4), m = parseInt(s.slice(5, 7), 10) - 1;
+    return MESES_ES[m] + " " + y;
+  }
+
+  // EVENTO temático del día (retención + algo que comentar). Determinista por
+  // fecha, así que cliente y servidor lo derivan igual. Antes vivía en el job;
+  // aquí es la fuente única (el job la re-exporta como eventFor por compat).
+  //   Sábado : "Sábado de <TIPO>" — el destacado del día sesga hacia ese tipo.
+  //   Domingo: "Domingo Legendario" — ≥2 legendarias garantizadas en el destacado.
+  function dailyEvent(date) {
+    const d = new Date(date + "T00:00:00");
+    const dow = d.getDay();
+    if (dow === 6) {
+      const t = TYPES[hashStr("event:" + date) % TYPES.length];
+      return { kind: "type", type: t, share: 0.4, name: "Sábado de " + t, emoji: "🔥" };
+    }
+    if (dow === 0) return { kind: "legendary", min: 2, name: "Domingo Legendario", emoji: "👑" };
+    return null;
+  }
+
+  // Compone el álbum de una temporada por CUPOS de rareza (curva 60/25/12/3,
+  // README §6): escanea ids deterministas "<seasonKey>_NNNN" hasta clavar la
+  // curva. Sin sesgo de evento (eso es flavor diario, no del álbum estable).
+  function composeSeason(sKey, n) {
+    const want = {
+      LEGENDARIA: Math.max(2, Math.round(n * 0.03)),
+      EPICA: Math.max(2, Math.round(n * 0.12)),
+      RARA: Math.max(2, Math.round(n * 0.25)),
+    };
+    want.COMUN = Math.max(0, n - want.LEGENDARIA - want.EPICA - want.RARA);
+    const out = [], picked = { COMUN: 0, RARA: 0, EPICA: 0, LEGENDARIA: 0 };
+    for (let i = 0; i < n * 16 && out.length < n; i++) {
+      const t = genTemplate(sKey + "_" + String(i).padStart(4, "0"));
+      if (picked[t.rarity] >= want[t.rarity]) continue;
+      out.push(t); picked[t.rarity]++;
+    }
+    return out;
+  }
+
+  // Subconjunto DESTACADO del día: k criaturas del álbum `list`, deterministas
+  // por fecha y sesgadas por el evento. Devuelve plantillas (subconjunto de list).
+  function dailyHighlights(date, list, k) {
+    if (!list || !list.length) return [];
+    k = Math.min(k || 0, list.length);
+    const rng = mulberry32(hashStr("hl:" + date) >>> 0);
+    const idxs = list.map((_, i) => i);
+    for (let i = idxs.length - 1; i > 0; i--) { // Fisher-Yates determinista
+      const j = Math.floor(rng() * (i + 1));
+      const t = idxs[i]; idxs[i] = idxs[j]; idxs[j] = t;
+    }
+    let order = idxs;
+    const ev = dailyEvent(date);
+    if (ev && ev.kind === "type") {
+      const want = Math.round(k * (ev.share || 0.4));
+      const typed = [], rest = [];
+      for (const i of idxs) (((list[i].types || [list[i].type]).includes(ev.type)) ? typed : rest).push(i);
+      order = typed.slice(0, want).concat(rest, typed.slice(want));
+    } else if (ev && ev.kind === "legendary") {
+      const minL = ev.min || 2, legs = [], rest = [];
+      for (const i of idxs) ((list[i].rarity === "LEGENDARIA") ? legs : rest).push(i);
+      order = legs.slice(0, minL).concat(rest, legs.slice(minL));
+    }
+    return order.slice(0, k).map((i) => list[i]);
+  }
+
+  // La criatura ÚNICA del día (exclusiva, pieza de "caza"/FOMO): id determinista.
+  function dailyUniqueId(date) { return "uniq_" + (date || todayStr()); }
+  function dailyUnique(date) { return genTemplate(dailyUniqueId(date)); }
+
   // ================================ COMBATE =================================
   // Una unidad de combate. `tpl` lleva { id, name, type, ability, base_stats }.
   function buildUnit(tpl, level, team, idx) {
@@ -812,6 +897,7 @@
     // funciones puras
     typeMult, typeEff, typesOf, levelCost, computeLeague, mulberry32, hashStr,
     genName, genLore, pickRange, scaled, todayStr, genTemplate, dailyBatch,
+    seasonKey, seasonLabel, dailyEvent, composeSeason, dailyHighlights, dailyUniqueId, dailyUnique,
     // combate
     buildUnit, unitFromStats, applyCaptainStance, STANCES, pickTarget, resolveTarget,
     dealDamage, decBuffs, tickStatus, performAction, aiIntent, turnOrder, stepTurn, intentFromDecision, resolveBattle, botTeamFromSeed,
