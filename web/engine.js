@@ -113,6 +113,31 @@
     return base;
   }
 
+  // ------------------- Normalización de presupuesto (balance) ----------------
+  // Dos aigrons de la MISMA rareza deben tener una suma de stats parecida (no
+  // idéntica): sin esto, la tirada uniforme por stat creaba hasta ±35% de
+  // diferencia de presupuesto. Tras dibujar stats y arquetipo, se REESCALA el
+  // bloque al presupuesto de su rareza con un jitter determinista de ±4%.
+  // El HP pesa 1/8 (sus valores son ~8x los demás). NO consume rng() -> el
+  // invariante de orden de tiradas de genTemplate se mantiene intacto.
+  const statBudget = (s) => s.hp / 8 + s.atkP + s.atkS + s.defP + s.defS + s.spd;
+  const RARITY_BUDGET = {};
+  for (const r in RANGES) {
+    const mid = (k) => (RANGES[r][k][0] + RANGES[r][k][1]) / 2;
+    RARITY_BUDGET[r] = mid("hp") / 8 + mid("atkP") + mid("atkS") + mid("defP") + mid("defS") + mid("spd");
+  }
+  function normalizeBudget(s, rarity, id) {
+    const jitter = 1 + ((hashStr("bal:" + id) % 9) - 4) / 100; // ±4%, determinista por id
+    const f = (RARITY_BUDGET[rarity] * jitter) / statBudget(s);
+    s.hp = Math.max(1, Math.round(s.hp * f));
+    s.atkP = Math.max(1, Math.round(s.atkP * f));
+    s.atkS = Math.max(1, Math.round(s.atkS * f));
+    s.defP = Math.max(1, Math.round(s.defP * f));
+    s.defS = Math.max(1, Math.round(s.defS * f));
+    s.spd = Math.max(1, Math.round(s.spd * f));
+    return s;
+  }
+
   // --------------------------------- Habilidades -----------------------------
   const ABILITIES = {
     ERUPCION_LENTA: { name: "Erupción", cost: 3, kind: "dmg", mult: 2.2, ignoreDef: 0.5 },
@@ -262,12 +287,14 @@
     const ability = pool[Math.floor(rng() * pool.length)];
     const name = genName(rng);
     const rg = RANGES[rarity];
-    const base_stats = applyTypeBias({
+    // Tiradas por stat -> arquetipo del tipo (forma) -> normalización al
+    // presupuesto de la rareza (balance). Las dos últimas no consumen rng().
+    const base_stats = normalizeBudget(applyTypeBias({
       hp: pickRange(rng, rg.hp),
       atkP: pickRange(rng, rg.atkP), atkS: pickRange(rng, rg.atkS),
       defP: pickRange(rng, rg.defP), defS: pickRange(rng, rg.defS),
       spd: pickRange(rng, rg.spd),
-    }, type);
+    }, type), rarity, id);
     const lore = genLore(rng, tags);
 
     return { id, type, types, rarity, name, tags, base_stats, ability, lore, art_seed: hashStr(id) };
@@ -368,12 +395,12 @@
   // ================================ COMBATE =================================
   // Una unidad de combate. `tpl` lleva { id, name, type, ability, base_stats }.
   // La EVOLUCIÓN se aplica aquí (única costura): si la plantilla evoluciona y el
-  // nivel cruza el umbral, la unidad sale con stats ×evoMult y nombre evolucionado.
+  // nivel cruza el umbral, la unidad sale con stats ×evoPowerMult y nombre evolucionado.
   // Cubre jugador, rivales, bots y mazmorra por igual (motor compartido).
   function buildUnit(tpl, level, team, idx) {
     const s = tpl.base_stats;
     const stage = evoStageAt(tpl.id, level);
-    const em = evoMult(stage);
+    const em = evoPowerMult(tpl.id, level);
     const sc = (v) => Math.round(scaled(v, level) * em);
     return {
       uid: team + idx,
@@ -748,11 +775,26 @@
   // ------------------------------- EVOLUCIONES -------------------------------
   // Cada PLANTILLA tiene un plan de evolución DETERMINISTA (derivado de su id):
   // ~45% no evoluciona, ~35% una vez, ~20% dos veces. Los umbrales de nivel
-  // también dependen del aigron (1ª: nv12-18, 2ª: nv30-40). Evolucionar es un
-  // salto FUERTE de poder (×1.35 por etapa, compuesto) + nombre y sprite nuevos.
-  // Automático: al cruzar el nivel, la criatura ya ES su forma evolucionada
-  // (función pura de plantilla+nivel: cero estado, paridad por construcción).
-  const EVO_STAT_MULT = 1.35;
+  // también dependen del aigron (1ª: nv12-18, 2ª: nv30-40). Automático: al
+  // cruzar el nivel, la criatura ya ES su forma evolucionada (función pura de
+  // plantilla+nivel: cero estado, paridad por construcción).
+  //
+  // BALANCE (curva compensada, no poder gratis): el presupuesto depende del
+  // plan completo. Quien NO evoluciona va por encima de la media SIEMPRE
+  // (×1.10); quien evoluciona empieza POR DEBAJO (×0.90 / ×0.80) y acaba por
+  // encima al completar sus etapas (×1.17 / ×1.35). Débil al principio, fuerte
+  // al final: evolucionar es una inversión, no una victoria automática.
+  //   sin evolución: 1.10 ──────────────────────────── 1.10
+  //   1 evolución:   0.90 ───(nv12-18)── 1.17
+  //   2 evoluciones: 0.80 ─(nv12-18)─ 1.04 ─(nv30-40)─ 1.35
+  const EVO_STAT_MULT = 1.30;
+  const EVO_BASE_ADJ = [1.10, 0.90, 0.80]; // por nº total de etapas del plan
+  // Multiplicador de poder TOTAL de una plantilla a un nivel dado.
+  function evoPowerMult(tplId, level) {
+    if (!tplId) return 1;
+    const plan = evolutionPlan(tplId);
+    return EVO_BASE_ADJ[plan.length] * Math.pow(EVO_STAT_MULT, evoStageAt(tplId, level));
+  }
   const EVO_SUF = ["ax", "or", "ur", "ón", "ar", "ex"];
   const EVO_PRE = ["Neo", "Ur", "Magno", "Apex", "Omni", "Vraal"];
   function evolutionPlan(tplId) {
@@ -774,7 +816,6 @@
     for (const e of evolutionPlan(tplId)) if ((level || 1) < e.at) return e;
     return null;
   }
-  const evoMult = (stage) => Math.pow(EVO_STAT_MULT, stage || 0);
   // Nombre evolucionado: etapa 1 alarga el nombre (sufijo), etapa 2 además le
   // antepone un título ("Neo-", "Magno-"...). Determinista por plantilla.
   function evoName(baseName, tplId, stage) {
@@ -995,7 +1036,7 @@
     applyRelics, relicRunEffects, dungeonNodeOptions, dungeonEnemyTeam, dungeonDraft, dungeonLevelAt,
     // mecánicas innovadoras (deterministas)
     isPrismatic, prismaticShift, ivFor, applyIV, isShiny, variantOf,
-    evolutionPlan, evoStageAt, evoNext, evoMult, evoName, evoArtSeed, variantArtId,
+    evolutionPlan, evoStageAt, evoNext, evoPowerMult, evoName, evoArtSeed, variantArtId,
     dailyPuzzle, nemesisTeam, nemesisName, oracleProphecy,
   };
 });

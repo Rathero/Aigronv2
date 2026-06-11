@@ -203,4 +203,29 @@ async function generateDailyUnique(date, opts = {}) {
   return { date, id: t.id, inserted, withImage: art ? 1 : 0 };
 }
 
-module.exports = { generateDailyBatch, eventFor, composeBatch, generateSeason, generateDailyUnique };
+// REBALANCEO de stats guardadas: las plantillas ya insertadas (temporada/lotes
+// legacy/únicas) se regeneran desde genTemplate, que ahora normaliza el
+// presupuesto por rareza y se actualizan SOLO sus stats. Idempotente: re-correrlo
+// con el mismo motor no cambia nada. Variantes y fusiones quedan fuera (las
+// variantes son filas de arte; las fusiones no derivan de genTemplate).
+async function rebalanceTemplates() {
+  const rows = await db.query(
+    "SELECT template_id FROM creature_templates WHERE is_fusion=false AND kind IN ('season','daily','unique')"
+  );
+  let updated = 0;
+  for (const r of rows.rows) {
+    const s = E.genTemplate(r.template_id).base_stats;
+    const u = await db.query(
+      `UPDATE creature_templates SET base_hp=$2, base_atk=$3, base_def=$4, base_spd=$5,
+              base_atk_p=$3, base_atk_s=$6, base_def_p=$4, base_def_s=$7
+        WHERE template_id=$1
+          AND (base_hp<>$2 OR base_atk_p<>$3 OR base_atk_s<>$6 OR base_def_p<>$4 OR base_def_s<>$7 OR base_spd<>$5)`,
+      [r.template_id, s.hp, s.atkP, s.defP, s.spd, s.atkS, s.defS]
+    );
+    updated += u.rowCount;
+  }
+  console.log(`[rebalance] ${rows.rowCount} plantillas revisadas, ${updated} actualizadas`);
+  return { total: rows.rowCount, updated };
+}
+
+module.exports = { generateDailyBatch, eventFor, composeBatch, generateSeason, generateDailyUnique, rebalanceTemplates };

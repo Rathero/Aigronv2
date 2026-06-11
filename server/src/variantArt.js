@@ -108,6 +108,63 @@ function ensureVariantArtAsync(base, kind) {
   ensureVariantArt(base, kind).catch((e) => console.warn(`[variant-art] async ${kind} ${base.id}: ${e.message}`));
 }
 
+// PREGENERACIÓN del álbum completo: el arte de TODAS las variantes posibles de
+// la temporada (etapas de evolución según el plan de cada aigron + su áurea),
+// con los DESTACADOS de hoy/mañana primero (es de donde salen la mayoría de
+// capturas). Idempotente y reanudable: el cron nocturno la ejecuta cada noche
+// y avanza hasta agotar `limit` (respeta la cuota del proveedor); en pocas
+// noches el álbum entero queda cubierto y nadie ve nunca una variante sin arte.
+async function pregenerateSeasonVariants(sKey, opts = {}) {
+  const provider = getImageProvider();
+  if (provider.name === "procedural") return { skipped: "proveedor procedural (sin coste: el cliente dibuja el sprite)" };
+  const { tplBaseStats, tplTypes } = require("./util");
+  const rows = await db.query(
+    `SELECT template_id, name, type, type2, rarity, ability_id, species_tags, lore, art_seed, image_url,
+            base_hp, base_atk, base_def, base_spd, base_atk_p, base_atk_s, base_def_p, base_def_s
+       FROM creature_templates WHERE batch_date=$1 AND kind='season' AND is_fusion=false ORDER BY template_id`,
+    [sKey]
+  );
+  const bases = rows.rows.map((r) => ({ id: r.template_id, name: r.name, type: r.type, types: tplTypes(r),
+    rarity: r.rarity, ability: r.ability_id, tags: r.species_tags, lore: r.lore, art_seed: r.art_seed,
+    image_url: r.image_url, base_stats: tplBaseStats(r) }));
+  // Prioridad: destacados de hoy y de mañana primero, después el resto del álbum.
+  const today = E.todayStr();
+  const tomorrow = E.todayStr(new Date(Date.now() + 86400000));
+  const hi = new Set([
+    ...E.dailyHighlights(today, bases, 18).map((t) => t.id),
+    ...E.dailyHighlights(tomorrow, bases, 18).map((t) => t.id),
+  ]);
+  bases.sort((a, b) => (hi.has(b.id) ? 1 : 0) - (hi.has(a.id) ? 1 : 0));
+
+  const limit = parseInt(opts.limit || process.env.VARIANT_PREGEN_LIMIT || "120", 10);
+  const delay = parseInt(process.env.GEN_DELAY_MS || "2500", 10);
+  const out = { candidates: 0, generated: 0, pending: 0, limit };
+  for (const base of bases) {
+    const kinds = E.evolutionPlan(base.id).map((e) => "evo" + e.stage).concat(["aurea"]);
+    for (const kind of kinds) {
+      out.candidates++;
+      if (out.generated >= limit) { out.pending++; continue; }
+      const r = await ensureVariantArt(base, kind);
+      if (r.generated) { out.generated++; await new Promise((res) => setTimeout(res, delay)); }
+      else if (!r.image_url) out.pending++;
+    }
+  }
+  return out;
+}
+
+// Pregenera las variantes de UNA plantilla (p. ej. la criatura única del día:
+// su plan de evolución + su áurea) para que estén listas desde el minuto uno.
+async function pregenerateTemplateVariants(base) {
+  const kinds = E.evolutionPlan(base.id).map((e) => "evo" + e.stage).concat(["aurea"]);
+  const out = { generated: 0 };
+  const delay = parseInt(process.env.GEN_DELAY_MS || "2500", 10);
+  for (const kind of kinds) {
+    const r = await ensureVariantArt(base, kind);
+    if (r.generated) { out.generated++; await new Promise((res) => setTimeout(res, delay)); }
+  }
+  return out;
+}
+
 // Backfill (tarea admin): recorre las criaturas de los jugadores y genera el
 // arte de variantes que ya existen (evolucionadas por nivel / áureas) sin imagen.
 async function backfillVariantArt() {
@@ -138,4 +195,4 @@ async function backfillVariantArt() {
   return out;
 }
 
-module.exports = { ensureVariantArt, ensureVariantArtAsync, backfillVariantArt };
+module.exports = { ensureVariantArt, ensureVariantArtAsync, backfillVariantArt, pregenerateSeasonVariants, pregenerateTemplateVariants };

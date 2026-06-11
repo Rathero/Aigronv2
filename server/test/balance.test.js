@@ -248,16 +248,17 @@ test("balance: sobrecarga = x1.5 exacto y exige +2 energía (no es gratis)", () 
 // ===================== 8. CAPITÁN / ESTANCIA ACOTADOS ======================
 test("balance: capitán/estancia dan ventaja acotada y con contrapartida", () => {
   const base = teamFrom([11, 22, 33], "A");
-  const baseCap = base[0].atkP, baseHp = base[0].hpMax, baseDef = base[0].defP;
+  const baseCap = base[0].atkP, baseHp = base[0].hpMax;
   // Agresiva + capitán: tope = 1.15(estancia)*1.06(liderazgo)*1.15(capitán) ≈ 1.40.
   const aggro = teamFrom([11, 22, 33], "A");
   E.applyCaptainStance(aggro, aggro[0].uid, "AGRESIVA");
   assert.ok(aggro[0].atkP <= Math.round(baseCap * 1.41), `capitán infla ATK de más: ${aggro[0].atkP} vs base ${baseCap}`);
   assert.ok(aggro[0].hpMax <= Math.round(baseHp * 1.16), "capitán infla HP de más");
   // Defensiva: sube defensa pero BAJA ataque (contrapartida real) en no-capitanes.
+  // Comparar contra la MISMA unidad sin estancia (base[1]), no contra otra criatura.
   const def = teamFrom([11, 22, 33], "A");
   E.applyCaptainStance(def, def[0].uid, "DEFENSIVA");
-  assert.ok(def[1].defP > baseDef, "defensiva no sube defensa");
+  assert.ok(def[1].defP > base[1].defP, "defensiva no sube defensa");
   assert.ok(def[1].atkP < base[1].atkP, "defensiva no penaliza ataque");
 });
 

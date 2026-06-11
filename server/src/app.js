@@ -17,7 +17,7 @@ const C = require("./config");
 const combat = require("./combat");
 const auth = require("./auth");
 const { sign, authMiddleware, verifyIdentity } = auth;
-const { generateSeason, generateDailyUnique } = require("./jobs/generateDailyBatch");
+const { generateSeason, generateDailyUnique, rebalanceTemplates } = require("./jobs/generateDailyBatch");
 const variantArt = require("./variantArt");
 const { startCron } = require("./cron");
 const { fuse } = require("./fusion");
@@ -637,7 +637,7 @@ app.get("/collection", authMiddleware, wrap(async (req, res) => {
     const iv = C.ivFor(x.instance_id);
     const variant = C.variantOf(x.instance_id);
     const stage = C.evoStageAt(x.template_id, x.level);
-    const em = C.evoMult(stage);
+    const em = C.evoPowerMult(x.template_id, x.level);
     const sc = (k) => Math.round(C.scaled(b[k], x.level) * em);
     return {
       instance_id: x.instance_id, level: x.level, favorite: x.favorite, locked: x.locked,
@@ -687,15 +687,22 @@ app.post("/creature/:id/level-up", authMiddleware, wrap(async (req, res) => {
   }
   const newLevel = up.rows[0].level;
   // ¿EVOLUCIONÓ con esta subida? (automático al cruzar el umbral del aigron).
-  // Si sí: dispara la generación PEREZOSA de su arte IA (no bloquea la respuesta)
-  // y devuelve los datos para que el cliente celebre la evolución.
   let evolved;
   const before = C.evoStageAt(inst.template_id, newLevel - 1);
   const after = C.evoStageAt(inst.template_id, newLevel);
   if (after > before) {
     const base = await tplById(inst.template_id);
-    if (base) variantArt.ensureVariantArtAsync(base, "evo" + after);
+    if (base) variantArt.ensureVariantArtAsync(base, "evo" + after); // red de seguridad si el pregen no llegó
     evolved = { stage: after, name: C.evoName(base ? base.name : "", inst.template_id, after), at: newLevel };
+  }
+  // CALENTAMIENTO: si la próxima evolución está a <=2 niveles, pregenera ya su
+  // arte (además del pregen nocturno del álbum): cuando el jugador cruce el
+  // umbral, la imagen estará lista y la evolución se ve con su arte al instante.
+  const next = C.evoNext(inst.template_id, newLevel);
+  if (next && next.at - newLevel <= 2) {
+    tplById(inst.template_id)
+      .then((base) => { if (base) variantArt.ensureVariantArtAsync(base, "evo" + next.stage); })
+      .catch(() => {});
   }
   res.json({ level: newLevel, cost, evolved });
 }));
@@ -1370,9 +1377,14 @@ const ADMIN_TASKS = {
   "season-art": (q) => generateSeason(C.seasonKey((q.month ? q.month + "-01" : C.todayStr())), SEASON_N, { withArt: true }),
   // Genera el arte de la criatura ÚNICA del día (?date=YYYY-MM-DD, def: hoy).
   "unique-art": (q) => generateDailyUnique(q.date || C.todayStr(), { withArt: true }),
-  // Backfill del arte de VARIANTES (formas evolucionadas y áureas ya en manos
-  // de jugadores que aún no tienen imagen).
-  "variant-art": () => variantArt.backfillVariantArt(),
+  // Arte de VARIANTES: ?scope=season pregenera TODO el álbum (evoluciones según
+  // plan + áureas, destacados primero, hasta ?limit imágenes); por defecto,
+  // backfill de las variantes ya en manos de jugadores sin imagen.
+  "variant-art": (q) => q.scope === "season"
+    ? variantArt.pregenerateSeasonVariants(C.seasonKey(C.todayStr()), { limit: q.limit })
+    : variantArt.backfillVariantArt(),
+  // Rebalanceo de stats de plantillas guardadas (motor con presupuesto por rareza).
+  "rebalance-stats": () => rebalanceTemplates(),
 };
 app.post("/admin/tasks/:task", requireAdmin, (req, res) => {
   const name = req.params.task;
@@ -1412,14 +1424,39 @@ let server;
 if (require.main === module) {
   // Escuchar en 0.0.0.0 (requisito de Railway/PaaS para que el proxy llegue a la app).
   server = app.listen(PORT, "0.0.0.0", () => console.log(`AIGRONS API escuchando en 0.0.0.0:${PORT} (frontend en /)`));
-  // Cron nocturno: rellena el arte IA del álbum del mes (idempotente) y genera la
-  // criatura única del día siguiente. El álbum en sí se crea perezosamente al
-  // primer acceso del mes (sin arte), así que esto solo es enriquecimiento.
+  // Cron nocturno: arte IA del álbum del mes + criatura única de mañana (con sus
+  // variantes) + PREGENERACIÓN del arte de variantes del álbum (evoluciones y
+  // áureas, destacados primero). Todo idempotente y reanudable: cada noche avanza
+  // hasta su límite de cuota, así las variantes están listas ANTES de que un
+  // jugador las consiga (el perezoso de los endpoints queda como red de seguridad).
   startCron(async (date) => {
     await generateSeason(C.seasonKey(date), SEASON_N, { withArt: true });
     await generateDailyUnique(date, { withArt: true });
+    const uniq = await tplById(C.dailyUniqueId(date));
+    if (uniq) await variantArt.pregenerateTemplateVariants(uniq);
+    await variantArt.pregenerateSeasonVariants(C.seasonKey(date), {});
   });
   startMaintenance(db); // limpieza de tablas + cierre semanal de ligas
+  // REBALANCEO one-shot al arrancar (marca en app_meta + advisory lock): alinea
+  // las stats de las plantillas YA guardadas con el motor normalizado por
+  // presupuesto. Sin esto, la temporada en curso conservaría el desbalance viejo.
+  (async () => {
+    const KEY = "rebalance_budget_v1";
+    const done = await db.query("SELECT 1 FROM app_meta WHERE key=$1", [KEY]);
+    if (done.rowCount) return;
+    const client = await db.pool.connect();
+    try {
+      await client.query("SELECT pg_advisory_lock(hashtext($1))", [KEY]);
+      const again = await db.query("SELECT 1 FROM app_meta WHERE key=$1", [KEY]);
+      if (!again.rowCount) {
+        await rebalanceTemplates();
+        await db.query("INSERT INTO app_meta (key, value) VALUES ($1, now()::text) ON CONFLICT DO NOTHING", [KEY]);
+      }
+    } finally {
+      await client.query("SELECT pg_advisory_unlock(hashtext($1))", [KEY]).catch(() => {});
+      client.release();
+    }
+  })().catch((e) => console.warn("[rebalance]", e.message));
   push.initPush(db).then(() => push.startPushCron(db)).catch((e) => console.warn("[push]", e.message));
 
   // PvP en vivo (WebSocket en /pvp, mismo puerto). Inyecta los helpers compartidos.

@@ -1047,8 +1047,8 @@ function openDetail(iid){
   if(!atMax){
     const b=t.base_stats;
     const stNow=ENGINE.evoStageAt(t.id,inst.level), stNext=ENGINE.evoStageAt(t.id,inst.level+1);
-    const sc=(l,st)=>k=>Math.round(ENGINE.scaled(b[k],l)*ENGINE.evoMult(st));
-    const now=sc(inst.level,stNow), next=sc(inst.level+1,stNext);
+    const sc=(l)=>k=>Math.round(ENGINE.scaled(b[k],l)*ENGINE.evoPowerMult(t.id,l));
+    const now=sc(inst.level), next=sc(inst.level+1);
     const dHp=next('hp')-now('hp'), dAtk=Math.max(next('atkP')-now('atkP'),next('atkS')-now('atkS')), dSpd=next('spd')-now('spd');
     const evoFlash=stNext>stNow?`<b style="color:var(--cyan)">🧬 ¡EVOLUCIONA!</b> · `:'';
     gainTxt=`<div class="dim" style="font-size:11px;margin-top:4px">Al subir: ${evoFlash}<b style="color:var(--green)">+${dHp} HP</b> · <b style="color:var(--green)">+${dAtk} ATQ</b> · <b style="color:var(--green)">+${dSpd} SPD</b></div>`;

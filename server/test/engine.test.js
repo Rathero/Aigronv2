@@ -65,18 +65,29 @@ test("paridad de generación: engine.genTemplate === server generator", () => {
   }
 });
 
-test("stats generados dentro de rango por rareza (con arquetipo de tipo)", () => {
+test("stats generados: presupuesto de rareza clavado y forma del arquetipo", () => {
+  // Con la NORMALIZACIÓN, el invariante ya no es "cada stat dentro de su rango"
+  // sino: (a) el presupuesto total (HP/8 + resto) está a ±5% del objetivo de su
+  // rareza, y (b) la FORMA del arquetipo se conserva (un stat individual puede
+  // salirse de su rango bruto porque todo el bloque se reescala junto).
+  const budget = (s) => s.hp / 8 + s.atkP + s.atkS + s.defP + s.defS + s.spd;
+  const target = {};
+  for (const r of E.RARITIES) {
+    const mid = (k) => (E.RANGES[r][k][0] + E.RANGES[r][k][1]) / 2;
+    target[r] = mid("hp") / 8 + mid("atkP") + mid("atkS") + mid("defP") + mid("defS") + mid("spd");
+  }
   const multOf = (p, k) => (k === "atkP" || k === "atkS" ? p.atk : p[k]);
   for (let i = 0; i < 1000; i++) {
     const t = E.genTemplate("rng_" + i);
-    const rg = E.RANGES[t.rarity];
-    const p = E.TYPE_STATS[t.type];
     const s = t.base_stats;
-    ["hp", "atkP", "atkS", "defP", "defS", "spd"].forEach((k) => {
-      const m = multOf(p, k);
-      const lo = Math.round(rg[k][0] * m) - 1, hi = Math.round(rg[k][1] * m) + 1;
-      assert.ok(s[k] >= lo && s[k] <= hi, `${k} ${s[k]} fuera de [${lo},${hi}] ${t.type}/${t.rarity}`);
-    });
+    const b = budget(s);
+    assert.ok(Math.abs(b / target[t.rarity] - 1) < 0.055, `presupuesto ${b.toFixed(0)} vs objetivo ${target[t.rarity].toFixed(0)} (${t.rarity})`);
+    // Forma: con arquetipo que favorece X sobre Y (mult >=1.2x), X/Y refleja el sesgo.
+    const p = E.TYPE_STATS[t.type];
+    if (multOf(p, "atkP") >= multOf(p, "defP") * 1.2) {
+      assert.ok(s.atkP / s.defP > (E.RANGES[t.rarity].atkP[0] / E.RANGES[t.rarity].defP[1]) * 0.9, `arquetipo ${t.type} no se refleja`);
+    }
+    ["hp", "atkP", "atkS", "defP", "defS", "spd"].forEach((k) => assert.ok(s[k] >= 1, `${k} >= 1`));
     assert.ok(E.RARITIES.includes(t.rarity));
     assert.ok(E.TYPES.includes(t.type));
     assert.ok(E.ABILITIES[t.ability], `ability ${t.ability}`);
@@ -541,9 +552,10 @@ test("evolución: buildUnit aplica el salto de stats y el nombre evolucionado", 
   assert.equal(before.name, t.name, "antes del umbral: nombre base");
   assert.equal(after.name, E.evoName(t.name, id, 1), "tras el umbral: nombre evolucionado");
   assert.notEqual(after.name, t.name);
-  // Salto FUERTE: el HP al evolucionar supera con mucho el escalado normal de +1 nivel.
-  const normalNext = Math.round(E.scaled(t.base_stats.hp, at));
-  assert.ok(after.hpMax > normalNext * 1.25, `salto de evolución (${after.hpMax} > ${normalNext}×1.25)`);
+  // Salto FUERTE al evolucionar: ~×1.30 sobre el escalado normal de +1 nivel.
+  const normalRatio = E.scaled(t.base_stats.hp, at) / E.scaled(t.base_stats.hp, at - 1);
+  const realRatio = after.hpMax / before.hpMax;
+  assert.ok(realRatio > normalRatio * 1.2, `salto de evolución (${realRatio.toFixed(2)} > ${normalRatio.toFixed(2)}×1.2)`);
   // Plantilla sin evolución: nada cambia a ningún nivel.
   const flat = Array.from({ length: 500 }, (_, i) => "evo-test-" + i).find((x) => E.evolutionPlan(x).length === 0);
   assert.equal(E.buildUnit(E.genTemplate(flat), 50, "A", 0).evoStage, 0);
@@ -551,6 +563,44 @@ test("evolución: buildUnit aplica el salto de stats y el nombre evolucionado", 
   assert.equal(E.evoArtSeed(id, 1), E.evoArtSeed(id, 1));
   assert.notEqual(E.evoArtSeed(id, 1), E.evoArtSeed(id, 2));
   assert.equal(E.variantArtId(id, "evo1"), id + "__evo1");
+});
+
+test("balance: presupuesto de stats parecido dentro de cada rareza (±~9%)", () => {
+  // La normalización limita el spread del presupuesto (suma ponderada de stats,
+  // HP/8) a poco más que el jitter de ±4%: dos aigrons de la misma rareza ya no
+  // pueden diferir un 35% como antes.
+  const budget = (s) => s.hp / 8 + s.atkP + s.atkS + s.defP + s.defS + s.spd;
+  const by = {};
+  for (const t of E.composeSeason("2026-07-01", 180)) (by[t.rarity] = by[t.rarity] || []).push(budget(t.base_stats));
+  for (const r of ["COMUN", "RARA", "EPICA", "LEGENDARIA"]) {
+    const v = by[r]; if (!v || v.length < 2) continue;
+    const min = Math.min(...v), max = Math.max(...v);
+    assert.ok(max / min < 1.12, `${r}: spread ${(max / min).toFixed(3)} < 1.12`);
+  }
+  // La progresión de rareza se mantiene (LEGENDARIA > ... > COMUN).
+  const avg = (r) => by[r].reduce((a, b) => a + b) / by[r].length;
+  assert.ok(avg("COMUN") < avg("RARA") && avg("RARA") < avg("EPICA") && avg("EPICA") < avg("LEGENDARIA"));
+});
+
+test("balance: curva de evolución compensada (débil al inicio, fuerte al final)", () => {
+  // Sin evolución por encima de la media siempre; con evolución por debajo al
+  // principio y por encima al completar etapas. Spread total acotado.
+  assert.ok(Math.abs(E.evoPowerMult("x", 1)) > 0);
+  const find = (n) => Array.from({ length: 800 }, (_, i) => "evo-bal-" + i).find((x) => E.evolutionPlan(x).length === n);
+  const f0 = find(0), f1 = find(1), f2 = find(2);
+  const p1 = E.evolutionPlan(f1), p2 = E.evolutionPlan(f2);
+  // Nivel bajo: el no-evolucionador es el más fuerte.
+  assert.ok(E.evoPowerMult(f0, 5) > E.evoPowerMult(f1, 5) && E.evoPowerMult(f1, 5) > E.evoPowerMult(f2, 5));
+  // Final del juego: el orden se invierte (la inversión paga).
+  assert.ok(E.evoPowerMult(f2, 50) > E.evoPowerMult(f1, 50) && E.evoPowerMult(f1, 50) > E.evoPowerMult(f0, 50));
+  // El plan completo de 2 etapas acaba <25% por encima del no-evolucionador
+  // (fuerte, pero no rompe el juego) y >25% por debajo al principio no (mín 0.80).
+  assert.ok(E.evoPowerMult(f2, 50) / E.evoPowerMult(f0, 50) < 1.25, "ventaja final acotada");
+  assert.ok(E.evoPowerMult(f2, 1) >= 0.80 - 1e-9, "castigo inicial acotado");
+  // Etapas intermedias coherentes con los umbrales.
+  assert.ok(E.evoPowerMult(f2, p2[0].at) > E.evoPowerMult(f2, p2[0].at - 1), "salto en la 1ª");
+  assert.ok(E.evoPowerMult(f2, p2[1].at) > E.evoPowerMult(f2, p2[1].at - 1), "salto en la 2ª");
+  assert.ok(E.evoPowerMult(f1, p1[0].at) > 1.1, "1 evolución completada acaba sobre la media");
 });
 
 test("lore: artículos concuerdan con tags femeninos (sin 'del niebla')", () => {
