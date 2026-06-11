@@ -87,6 +87,9 @@ function colorFor(v,tpl){
 }
 const _spriteCache={};
 function drawAigron(canvas,tpl,px,prismId){
+  // POC estilo "completo": render suave (blobs con glow) del MISMO sprite
+  // determinista en vez de cuadrados. Inerte sin ?poc=full.
+  if(window.POC&&window.POC.smooth){ window.POC.drawSmooth(canvas,tpl,px,prismId,buildSprite,colorFor); return; }
   px=px||8; const N=16;
   canvas.width=N*px; canvas.height=N*px;
   const ctx=canvas.getContext("2d"); ctx.imageSmoothingEnabled=false;
@@ -497,7 +500,7 @@ async function doClaim(){
     const t=registerTpl(r.instance.template);
     await Promise.all([refreshMe(),refreshDaily(),refreshCollection()]);
     refreshChips();
-    SFX.play('claim'); buzz([30,40,30,40,80]);
+    SFX.play('claim'); buzz([30,40,30,40,80]); if(window.POC&&window.POC.confetti)window.POC.confetti();
     const rays=(t.rarity==="EPICA"||t.rarity==="LEGENDARIA"||r.first)?'<div class="rays"></div>':'';
     // Primer reclamo de la cuenta: es TU ESTRELLA (nv5, protegida) y 2 crías se
     // unen al equipo — el momento del huevo vuelve a ser el clímax (feedback).
@@ -1610,6 +1613,7 @@ function resolveTick(){
   else if(action.hits.length) setBanner(`<span style="color:${who}">${u.name}</span> ataca`);
   action.hits.forEach(h=>{const t=h.tgt; if(!t.el)return; t.el.classList.remove("hit");void t.el.offsetWidth;t.el.classList.add("hit");
     SFX.play(h.crit?'crit':'hit'); buzz(h.crit?40:15);
+    if(window.POC&&window.POC.onHit) window.POC.onHit(t.el,h); // POC juice: partículas + shake
     floatNum(t,(h.shielded?"🛡":"")+(h.guarded?"🛡️":"")+(h.crit?"¡":"")+h.dmg+(h.crit?"!":""),h.crit?"var(--gold)":h.shielded?"#aebfce":h.guarded?"var(--cyan)":h.typeM>1?"var(--magenta)":"#fff");});
   refreshArena();
   if(!CB.A.some(x=>x.hp>0)||!CB.B.some(x=>x.hp>0)) finishBattle();

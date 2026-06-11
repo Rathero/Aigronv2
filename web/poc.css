@@ -1,0 +1,93 @@
+/* =============================================================================
+   poc.css — Restyle de la PRUEBA DE CONCEPTO de estilo. Todo scoped bajo
+   [data-poc=...]: SIN el flag (?poc=) este archivo no afecta a nada.
+   - shake/keyframes: para los tres modos (juice/ui/full).
+   - restyle moderno "juicy": solo modos ui y full.
+   ============================================================================ */
+
+/* --- screen shake (los 3 modos) --- */
+@keyframes pocShake { 0%,100%{transform:translate(0,0)} 20%{transform:translate(-3px,2px)} 40%{transform:translate(3px,-2px)} 60%{transform:translate(-2px,-2px)} 80%{transform:translate(2px,2px)} }
+@keyframes pocShakeStrong { 0%,100%{transform:translate(0,0)} 15%{transform:translate(-6px,3px) rotate(-.5deg)} 30%{transform:translate(6px,-3px) rotate(.5deg)} 45%{transform:translate(-5px,-3px)} 60%{transform:translate(5px,3px) rotate(.5deg)} 80%{transform:translate(-3px,2px)} }
+[data-poc] #app.poc-shake { animation:pocShake .3s ease }
+[data-poc] #app.poc-shake-strong { animation:pocShakeStrong .32s ease }
+
+/* sprites con un punch de squash al recibir golpe (los 3 modos) */
+[data-poc] .fighter.hit canvas, [data-poc] .fighter.hit .aigimg { animation:pocSquash .28s ease }
+@keyframes pocSquash { 0%{transform:scale(1)} 30%{transform:scale(1.25,.8)} 60%{transform:scale(.9,1.1)} 100%{transform:scale(1)} }
+
+/* ============================ RESTYLE (ui + full) =========================== */
+:root[data-poc="ui"], :root[data-poc="full"] {
+  --bg0:#0e0b22; --panel:#221c4a; --panel2:#2b2358; --line:#4a3f8a;
+  --radius:16px;
+}
+:root[data-poc="ui"] body, :root[data-poc="full"] body {
+  background-image:
+    radial-gradient(1100px 700px at 85% -8%, rgba(192,97,255,.30), transparent 60%),
+    radial-gradient(900px 650px at -5% 108%, rgba(52,245,228,.22), transparent 55%),
+    linear-gradient(180deg,#120e2e,#0a0818);
+}
+
+/* paneles: redondeados, gradiente sutil, sombra suave (no offset duro) */
+[data-poc="ui"] .panel, [data-poc="full"] .panel {
+  border:1px solid rgba(255,255,255,.07); border-radius:var(--radius);
+  background:linear-gradient(160deg, rgba(255,255,255,.06), rgba(255,255,255,.01)), var(--panel);
+  box-shadow:0 8px 24px rgba(0,0,0,.45), inset 0 1px 0 rgba(255,255,255,.08);
+}
+[data-poc="ui"] .panel.glow-cyan, [data-poc="full"] .panel.glow-cyan {
+  box-shadow:0 8px 28px rgba(52,245,228,.28), inset 0 1px 0 rgba(255,255,255,.10);
+}
+
+/* botones: glossy, redondeados, rebote al pulsar */
+[data-poc="ui"] .btn, [data-poc="full"] .btn {
+  border-radius:14px; position:relative; overflow:hidden; letter-spacing:.3px;
+  box-shadow:0 6px 16px rgba(52,245,228,.35), inset 0 1px 0 rgba(255,255,255,.5);
+  background:linear-gradient(180deg,#5cf7e9,#1ec9bb);
+  transition:transform .12s cubic-bezier(.34,1.6,.5,1), box-shadow .12s;
+}
+[data-poc="ui"] .btn::after, [data-poc="full"] .btn::after {
+  content:"";position:absolute;left:0;right:0;top:0;height:45%;background:linear-gradient(180deg,rgba(255,255,255,.45),transparent);pointer-events:none;
+}
+[data-poc="ui"] .btn:active, [data-poc="full"] .btn:active { transform:scale(.94); box-shadow:0 2px 8px rgba(52,245,228,.4) }
+[data-poc="ui"] .btn.mag, [data-poc="full"] .btn.mag { background:linear-gradient(180deg,#ff77b6,#e23b86); box-shadow:0 6px 16px rgba(255,77,157,.4), inset 0 1px 0 rgba(255,255,255,.5) }
+[data-poc="ui"] .btn.gold, [data-poc="full"] .btn.gold { background:linear-gradient(180deg,#ffe07a,#f0b400); box-shadow:0 6px 16px rgba(255,210,63,.4), inset 0 1px 0 rgba(255,255,255,.6) }
+[data-poc="ui"] .btn.ghost, [data-poc="full"] .btn.ghost { background:rgba(255,255,255,.06); box-shadow:0 4px 12px rgba(0,0,0,.4), inset 0 0 0 1px rgba(255,255,255,.12); color:var(--ink) }
+[data-poc="ui"] .btn.ghost::after, [data-poc="full"] .btn.ghost::after { opacity:.2 }
+
+/* tarjetas de criatura: redondeadas, sombra suave, lift al pulsar */
+[data-poc="ui"] .card, [data-poc="full"] .card {
+  border-radius:14px; border-width:1px;
+  background:linear-gradient(165deg, rgba(255,255,255,.08), rgba(255,255,255,.02)), var(--panel2);
+  box-shadow:0 6px 16px rgba(0,0,0,.4), inset 0 1px 0 rgba(255,255,255,.06);
+  transition:transform .14s cubic-bezier(.34,1.6,.5,1), box-shadow .14s;
+}
+[data-poc="ui"] .card:active, [data-poc="full"] .card:active { transform:translateY(-3px) scale(.99); box-shadow:0 10px 22px rgba(0,0,0,.5) }
+[data-poc="ui"] .card .lv, [data-poc="full"] .card .lv,
+[data-poc="ui"] .mode-tile, [data-poc="full"] .mode-tile { border-radius:10px }
+
+/* topbar y chips: cristal */
+[data-poc="ui"] .topbar, [data-poc="full"] .topbar { background:rgba(20,16,46,.55); backdrop-filter:blur(10px); border-bottom:1px solid rgba(255,255,255,.06) }
+[data-poc="ui"] .chip, [data-poc="full"] .chip { border-radius:999px; border:1px solid rgba(255,255,255,.12); background:rgba(255,255,255,.05) }
+
+/* nav inferior: cristal + pastilla activa */
+[data-poc="ui"] .nav, [data-poc="full"] .nav { background:rgba(14,11,34,.7); backdrop-filter:blur(12px); border-top:1px solid rgba(255,255,255,.06) }
+[data-poc="ui"] .nav button.on, [data-poc="full"] .nav button.on { position:relative }
+[data-poc="ui"] .nav button.on::before, [data-poc="full"] .nav button.on::before {
+  content:"";position:absolute;top:2px;left:50%;transform:translateX(-50%);width:34px;height:30px;border-radius:12px;background:rgba(52,245,228,.16);z-index:-1;
+}
+
+/* mode-tiles, barras y arena: redondeo coherente */
+[data-poc="ui"] .mode-tile, [data-poc="full"] .mode-tile {
+  background:linear-gradient(160deg, rgba(255,255,255,.07), rgba(255,255,255,.01)), var(--panel);
+  border:1px solid rgba(255,255,255,.08); box-shadow:0 6px 16px rgba(0,0,0,.35);
+}
+[data-poc="ui"] .league-bar, [data-poc="full"] .league-bar,
+[data-poc="ui"] .mis-bar, [data-poc="full"] .mis-bar,
+[data-poc="ui"] .boss-hp, [data-poc="full"] .boss-hp,
+[data-poc="ui"] .hpbar, [data-poc="full"] .hpbar { border-radius:999px; overflow:hidden }
+[data-poc="ui"] .arena, [data-poc="full"] .arena { border-radius:18px; border:1px solid rgba(255,255,255,.08) }
+[data-poc="ui"] .modal, [data-poc="full"] .modal { border-radius:20px; border:1px solid rgba(255,255,255,.1) }
+
+/* modo FULL: a las criaturas con arte IA (img) un realce suave para que peguen
+   con el render blobby (las procedurales ya van suaves vía JS). */
+[data-poc="full"] .aigimg { filter:drop-shadow(0 2px 6px rgba(0,0,0,.5)) saturate(1.15) }
+[data-poc="full"] .card canvas, [data-poc="full"] .fighter canvas { filter:drop-shadow(0 2px 5px rgba(0,0,0,.45)) }
