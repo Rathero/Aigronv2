@@ -367,20 +367,27 @@
 
   // ================================ COMBATE =================================
   // Una unidad de combate. `tpl` lleva { id, name, type, ability, base_stats }.
+  // La EVOLUCIÓN se aplica aquí (única costura): si la plantilla evoluciona y el
+  // nivel cruza el umbral, la unidad sale con stats ×evoMult y nombre evolucionado.
+  // Cubre jugador, rivales, bots y mazmorra por igual (motor compartido).
   function buildUnit(tpl, level, team, idx) {
     const s = tpl.base_stats;
+    const stage = evoStageAt(tpl.id, level);
+    const em = evoMult(stage);
+    const sc = (v) => Math.round(scaled(v, level) * em);
     return {
       uid: team + idx,
       tplId: tpl.id,
-      name: tpl.name,
+      name: evoName(tpl.name, tpl.id, stage),
+      evoStage: stage,
       type: tpl.type,
       types: tpl.types && tpl.types.length ? tpl.types.slice() : [tpl.type],
       ability: tpl.ability,
       level: level,
-      hpMax: scaled(s.hp, level), hp: scaled(s.hp, level),
-      atkP: scaled(s.atkP, level), atkS: scaled(s.atkS, level),
-      defP: scaled(s.defP, level), defS: scaled(s.defS, level),
-      spd: scaled(s.spd, level),
+      hpMax: sc(s.hp), hp: sc(s.hp),
+      atkP: sc(s.atkP), atkS: sc(s.atkS),
+      defP: sc(s.defP), defS: sc(s.defS),
+      spd: sc(s.spd),
       energy: 0, team,
       atkMul: 1, defMul: 1, atkTurns: 0, defTurns: 0,
       critDownTurns: 0, critDownAmt: 0, markTurns: 0, markAmt: 0,
@@ -738,6 +745,51 @@
     return null;
   }
 
+  // ------------------------------- EVOLUCIONES -------------------------------
+  // Cada PLANTILLA tiene un plan de evolución DETERMINISTA (derivado de su id):
+  // ~45% no evoluciona, ~35% una vez, ~20% dos veces. Los umbrales de nivel
+  // también dependen del aigron (1ª: nv12-18, 2ª: nv30-40). Evolucionar es un
+  // salto FUERTE de poder (×1.35 por etapa, compuesto) + nombre y sprite nuevos.
+  // Automático: al cruzar el nivel, la criatura ya ES su forma evolucionada
+  // (función pura de plantilla+nivel: cero estado, paridad por construcción).
+  const EVO_STAT_MULT = 1.35;
+  const EVO_SUF = ["ax", "or", "ur", "ón", "ar", "ex"];
+  const EVO_PRE = ["Neo", "Ur", "Magno", "Apex", "Omni", "Vraal"];
+  function evolutionPlan(tplId) {
+    if (!tplId) return [];
+    const roll = hashStr("evoplan:" + tplId) % 100;
+    const n = roll < 45 ? 0 : roll < 80 ? 1 : 2;
+    const plan = [];
+    if (n >= 1) plan.push({ stage: 1, at: 12 + (hashStr("evoat1:" + tplId) % 7) });   // nv 12..18
+    if (n >= 2) plan.push({ stage: 2, at: 30 + (hashStr("evoat2:" + tplId) % 11) });  // nv 30..40
+    return plan;
+  }
+  function evoStageAt(tplId, level) {
+    let s = 0;
+    for (const e of evolutionPlan(tplId)) if ((level || 1) >= e.at) s = e.stage;
+    return s;
+  }
+  // Próxima evolución pendiente (o null si no quedan): { stage, at }.
+  function evoNext(tplId, level) {
+    for (const e of evolutionPlan(tplId)) if ((level || 1) < e.at) return e;
+    return null;
+  }
+  const evoMult = (stage) => Math.pow(EVO_STAT_MULT, stage || 0);
+  // Nombre evolucionado: etapa 1 alarga el nombre (sufijo), etapa 2 además le
+  // antepone un título ("Neo-", "Magno-"...). Determinista por plantilla.
+  function evoName(baseName, tplId, stage) {
+    if (!stage) return baseName;
+    const n1 = baseName + EVO_SUF[hashStr("evoname1:" + tplId) % EVO_SUF.length];
+    if (stage === 1) return n1;
+    return EVO_PRE[hashStr("evoname2:" + tplId) % EVO_PRE.length] + "-" + n1;
+  }
+  // Sprite procedural de la forma evolucionada: semilla derivada (forma nueva).
+  function evoArtSeed(tplId, stage) {
+    return stage ? hashStr("evoart:" + stage + ":" + tplId) : null;
+  }
+  // Id de la fila de ARTE de una variante ("<tplId>__evo1|__evo2|__aurea").
+  const variantArtId = (tplId, kind) => tplId + "__" + kind;
+
   // -- PUZZLE diario: equipo + enemigos FIJOS del lote de hoy, iguales para todos.
   function dailyPuzzle(date, templates) {
     const seed = hashStr("puzzle:" + date) >>> 0;
@@ -942,6 +994,8 @@
     // roguelike / mazmorra
     applyRelics, relicRunEffects, dungeonNodeOptions, dungeonEnemyTeam, dungeonDraft, dungeonLevelAt,
     // mecánicas innovadoras (deterministas)
-    isPrismatic, prismaticShift, ivFor, applyIV, isShiny, variantOf, dailyPuzzle, nemesisTeam, nemesisName, oracleProphecy,
+    isPrismatic, prismaticShift, ivFor, applyIV, isShiny, variantOf,
+    evolutionPlan, evoStageAt, evoNext, evoMult, evoName, evoArtSeed, variantArtId,
+    dailyPuzzle, nemesisTeam, nemesisName, oracleProphecy,
   };
 });

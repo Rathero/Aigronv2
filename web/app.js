@@ -129,12 +129,30 @@ function drawEgg(canvas,px){
 const TPL={};
 function registerTpl(t){ if(t&&t.id){ TPL[t.id]=Object.assign(TPL[t.id]||{},t); } return t; }
 function tpl(id){ return TPL[id]||(TPL[id]=genTemplate(id)); }
+// Plantilla SINTÉTICA de una forma EVOLUCIONADA: misma criatura base con nombre
+// evolucionado y sprite procedural derivado (evoArtSeed). Vive en la caché bajo
+// "<id>__evoN" para no pisar el arte del base; si llega arte IA de la variante,
+// se le asigna a esta entrada (refreshCollection / registerUnitArt).
+function evoTpl(baseId,stage){
+  if(!stage) return tpl(baseId);
+  const key=baseId+'__evo'+stage;
+  if(!TPL[key]){ const b=tpl(baseId);
+    TPL[key]=Object.assign({},b,{id:key,name:ENGINE.evoName(b.name,baseId,stage),
+      art_seed:ENGINE.evoArtSeed(baseId,stage),image_url:null,image_thumb_url:null}); }
+  return TPL[key];
+}
 // Registra el arte IA de unidades de combate que llegan del servidor (rival de
 // PvP): sus plantillas pueden no estar en mi caché (lote de otro día, fusión) y
 // sin esto se dibujaban con el sprite procedural en vez de su imagen real.
+// Si la unidad va EVOLUCIONADA, su arte es el de la variante: se registra bajo
+// la clave evo para no contaminar el arte del aigron base.
 function registerUnitArt(list){ (list||[]).forEach(s=>{ if(s&&s.tplId&&s.image_url){
-  TPL[s.tplId]=Object.assign(TPL[s.tplId]||genTemplate(s.tplId),{image_url:s.image_url,image_thumb_url:s.image_thumb_url||null});
+  const stage=ENGINE.evoStageAt(s.tplId,s.level||1);
+  if(stage>0){ evoTpl(s.tplId,stage).image_url=s.image_url; }
+  else TPL[s.tplId]=Object.assign(TPL[s.tplId]||genTemplate(s.tplId),{image_url:s.image_url,image_thumb_url:s.image_thumb_url||null});
 }});}
+// Plantilla para PINTAR una unidad de combate (forma evolucionada si procede).
+function combatTpl(u){ const st=ENGINE.evoStageAt(u.tplId,u.level||1); return st?evoTpl(u.tplId,st):tpl(u.tplId); }
 /* HTML del arte: imagen IA si existe, si no canvas procedural.
    instId opcional -> variante cosmética (áurea/prismática) si toca y la feature
    está on. La clase de variante va en el PROPIO elemento (canvas o img) para que
@@ -187,7 +205,11 @@ const FEATURES={puzzle:true,echoes:true,worldboss:true,nemesis:true,prismatic:tr
 async function loadFeatures(){ try{ const f=await api('/features'); Object.assign(FEATURES,f); }catch(e){} }
 async function refreshMe(){ S.user=await api('/me'); }
 async function refreshDaily(){ S.daily=await api('/daily'); (S.daily.highlights||[]).forEach(registerTpl); }
-async function refreshCollection(){ const c=await api('/collection'); c.forEach(x=>registerTpl(x.template)); S.collection=c; }
+async function refreshCollection(){ const c=await api('/collection'); c.forEach(x=>{ registerTpl(x.template);
+  // Forma evolucionada: registra su plantilla sintética y, si el arte IA de la
+  // variante ya está generado (perezoso), engánchalo.
+  if(x.evo){ const e=evoTpl(x.template.id,x.evo.stage); if(x.evo.image_url) e.image_url=x.evo.image_url; }
+}); S.collection=c; }
 async function refreshTeam(){ const t=await api('/team'); S.team=[t.slot1,t.slot2,t.slot3].filter(Boolean); }
 function instById(id){ return S.collection.find(c=>c.instance_id===id); }
 
@@ -329,10 +351,15 @@ function cardHTML(inst,extra){const t=inst.template;
   const variant=FEATURES.prismatic?(inst.variant||ENGINE.variantOf(inst.instance_id)):null;
   const vCls=variant==='aurea'?'aurea':(variant==='prismatica'?'prismatic':'');
   const vBadge=variant==='aurea'?'<div class="shiny-badge">✨</div>':(variant==='prismatica'?'<div class="prism-badge">✦</div>':'');
+  // Forma EVOLUCIONADA: sprite/arte y nombre de la etapa actual (no del base).
+  // Sin evolución pero con arte áureo generado: úsalo en lugar del arte base.
+  let dispT=t;
+  if(inst.evo) dispT=evoTpl(t.id,inst.evo.stage);
+  else if(inst.shiny_image_url) dispT=Object.assign({},t,{image_url:inst.shiny_image_url});
   return `<div class="card r-${t.rarity} ${inst.frame?'frame-'+inst.frame:''} ${vCls}" data-iid="${inst.instance_id}">
   <div class="lv">L${inst.level}</div>${inst.favorite?'<div class="fav">★</div>':''}${vBadge}${extra||""}
-  ${artTag(t,6,inst.instance_id)}
-  <div class="nm">${esc(t.name)}</div><div class="ty rar-txt ${t.rarity}">${typesLabel(t)}</div></div>`;}
+  ${artTag(dispT,6,inst.instance_id)}
+  <div class="nm">${esc(dispT.name)}</div><div class="ty rar-txt ${t.rarity}">${typesLabel(t)}</div></div>`;}
 function statBars(o,level){
   // Tope teórico por stat = (tope rareza máxima LEGENDARIA) x (arquetipo máx ~1.3),
   // escalado al MISMO nivel que el valor mostrado -> el nivel se cancela y la barra
@@ -1014,13 +1041,17 @@ function openDetail(iid){
   const variant=inst.variant||(FEATURES.prismatic?ENGINE.variantOf(iid):null);
   const atMax=inst.level>=ENGINE.LEVEL_MAX;
   const canLevel=S.user.dust>=cost.dust&&S.user.coins>=cost.coins&&!atMax;
-  // Qué GANAS al subir de nivel (antes de pagar): deltas de stats escalados.
+  // Qué GANAS al subir de nivel (antes de pagar): deltas de stats escalados,
+  // INCLUYENDO el salto de evolución si el próximo nivel cruza el umbral.
   let gainTxt='';
   if(!atMax){
-    const b=t.base_stats, sc=l=>k=>ENGINE.scaled(b[k],l);
-    const now=sc(inst.level), next=sc(inst.level+1);
+    const b=t.base_stats;
+    const stNow=ENGINE.evoStageAt(t.id,inst.level), stNext=ENGINE.evoStageAt(t.id,inst.level+1);
+    const sc=(l,st)=>k=>Math.round(ENGINE.scaled(b[k],l)*ENGINE.evoMult(st));
+    const now=sc(inst.level,stNow), next=sc(inst.level+1,stNext);
     const dHp=next('hp')-now('hp'), dAtk=Math.max(next('atkP')-now('atkP'),next('atkS')-now('atkS')), dSpd=next('spd')-now('spd');
-    gainTxt=`<div class="dim" style="font-size:11px;margin-top:4px">Al subir: <b style="color:var(--green)">+${dHp} HP</b> · <b style="color:var(--green)">+${dAtk} ATQ</b> · <b style="color:var(--green)">+${dSpd} SPD</b></div>`;
+    const evoFlash=stNext>stNow?`<b style="color:var(--cyan)">🧬 ¡EVOLUCIONA!</b> · `:'';
+    gainTxt=`<div class="dim" style="font-size:11px;margin-top:4px">Al subir: ${evoFlash}<b style="color:var(--green)">+${dHp} HP</b> · <b style="color:var(--green)">+${dAtk} ATQ</b> · <b style="color:var(--green)">+${dSpd} SPD</b></div>`;
   }
   // Si no alcanza, di POR QUÉ (qué falta) en vez de solo apagar el botón.
   const missing=[];
@@ -1032,12 +1063,22 @@ function openDetail(iid){
     :(variant==='prismatica'?'<span style="color:var(--epi);font-weight:700">✦ PRISMÁTICA</span>':'');
   // Color del potencial: verde alto, gris medio, rojo bajo (referencia rápida).
   const potCol=pot>=75?'var(--green)':pot>=45?'var(--gold)':'var(--dim2,#9a93c7)';
+  // EVOLUCIÓN: arte/nombre de la etapa actual y pista de la siguiente.
+  let dispT=t;
+  if(inst.evo) dispT=evoTpl(t.id,inst.evo.stage);
+  else if(inst.shiny_image_url) dispT=Object.assign({},t,{image_url:inst.shiny_image_url});
+  const evoNextE=ENGINE.evoNext(t.id,inst.level);
+  const evoStage=inst.evo?inst.evo.stage:0;
+  const evoLine=evoStage||evoNextE?
+    `<div class="mb8" style="font-size:12px">${evoStage?`<span style="color:var(--cyan);font-weight:700">🧬 EVOLUCIÓN ${evoStage===2?'FINAL':'1ª'}</span>`:''}
+      ${evoNextE?`${evoStage?' · ':''}<span class="dim">🧬 ${evoStage?'Evolución final':'Evoluciona'} en <b style="color:var(--cyan)">Nv.${evoNextE.at}</b></span>`:''}</div>`:'';
   openOverlay(`<div class="center">
-    <span class="art-wrap ${variant==='aurea'?'aurea':variant==='prismatica'?'prismatic':''}">${artTag(t,9,iid)}</span>
-    <div style="font-size:20px;font-weight:700;margin-top:4px">${t.name} <span class="dim" style="font-size:13px">Nv.${inst.level}</span></div>
+    <span class="art-wrap ${variant==='aurea'?'aurea':variant==='prismatica'?'prismatic':''}">${artTag(dispT,9,iid)}</span>
+    <div style="font-size:20px;font-weight:700;margin-top:4px">${esc(dispT.name)} <span class="dim" style="font-size:13px">Nv.${inst.level}</span></div>
     <div class="mb8">${typePills(t)} <span class="rar-txt ${t.rarity}" style="font-weight:700">${t.rarity}</span>
       <span class="dim" style="font-size:11px"> · ${ENGINE.isPhysical(t.type)?'⚔️ Físico':'✨ Especial'}</span></div>
     <div class="mb8" style="font-size:12px">${vLabel?vLabel+' · ':''}Potencial <b style="color:${potCol}">${pot}%</b> <span class="dim" style="font-size:10px">(stats únicos de esta criatura)</span></div>
+    ${evoLine}
     <div style="text-align:left;margin-bottom:8px">${statBars(stats, t.stats?inst.level:1)}</div>
     <div class="panel" style="text-align:left;margin-bottom:10px">
       <div style="font-weight:700;color:var(--gold);font-size:14px">✨ ${ABILITIES[t.ability].name}
@@ -1075,8 +1116,30 @@ async function setFrame(arg){
   catch(e){ toast('Marco bloqueado'); }
 }
 async function levelUp(iid){
-  try{ await api('/creature/'+iid+'/level-up',{method:'POST'}); await Promise.all([refreshMe(),refreshCollection()]); refreshChips(); openDetail(iid); toast("¡Subió de nivel!"); }
+  try{ const r=await api('/creature/'+iid+'/level-up',{method:'POST'}); await Promise.all([refreshMe(),refreshCollection()]); refreshChips();
+    if(r.evolved){ showEvolution(iid,r.evolved); } else { openDetail(iid); toast("¡Subió de nivel!"); } }
   catch(e){ const er=e.data&&e.data.error; toast(er==='max_level'?'Nivel máximo':er==='insufficient'?'Te faltan recursos':'No se pudo'); }
+}
+// Celebración de EVOLUCIÓN (automática al cruzar el umbral de nivel del aigron):
+// reveal con la forma nueva (sprite derivado o arte IA cuando llegue) y su nombre.
+function showEvolution(iid,evo){
+  const inst=instById(iid); if(!inst){openDetail(iid);return;}
+  const t=inst.template, e=evoTpl(t.id,evo.stage);
+  SFX.play('claim'); buzz([50,40,50,40,120]);
+  if(window.POC&&window.POC.confetti){window.POC.confetti();setTimeout(window.POC.confetti,250);}
+  openOverlay(`<div class="center reveal" style="position:relative"><div class="rays"></div>
+    <div style="position:relative;z-index:2">
+      <div style="font-family:var(--pixel);font-size:12px;color:var(--cyan);margin-bottom:10px">🧬 ¡EVOLUCIONÓ!</div>
+      <div class="evo-pair">
+        ${artTag(t,6)}
+        <span class="evo-arrow">→</span>
+        ${artTag(e,10,iid)}
+      </div>
+      <div style="font-size:20px;font-weight:700;margin-top:6px">${esc(e.name)}</div>
+      <div class="dim" style="font-size:12px;margin-bottom:8px">${esc(t.name)} ha alcanzado su ${evo.stage===2?'forma FINAL':'primera evolución'} en Nv.${evo.at}</div>
+      <div style="color:var(--green);font-size:13px;font-weight:700;margin-bottom:12px">¡Todas sus stats han dado un gran salto!</div>
+      <button class="btn" data-act="evoOk" data-arg="${iid}">VER FICHA</button>
+    </div></div>`);
 }
 async function toggleFav(iid){
   try{ await api('/creature/'+iid+'/favorite',{method:'POST'}); await refreshCollection(); openDetail(iid); }catch(e){ toast('Error'); }
@@ -1476,7 +1539,7 @@ function buildArena(){
   const fHTML=(u)=>`<div class="fighter ${u.team==='B'?'enemy':''}" data-uid="${u.uid}" ${u.team==='B'?`data-act="planEnemy" data-arg="${u.uid}"`:''}>
      <div class="thint"></div>
      <div class="flv">Nv${u.level}</div>
-     ${artTag(tpl(u.tplId),5)}
+     ${artTag(combatTpl(u),5)}
      <div class="hpbar"><i style="width:100%"></i></div>
      <div class="hpnum"></div>
      <div class="fname">${u.name}</div>
@@ -2139,6 +2202,7 @@ const ACTIONS={
   pushEnable:()=>pushEnable(), pushSkip:()=>{closeOverlay();localStorage.setItem('aigrons_push_asked','1');},
   firstFight:()=>firstFight(),
   levelUp:(a)=>levelUp(a),
+  evoOk:(a)=>{closeOverlay();openDetail(a);},
   toggleFav:(a)=>toggleFav(a),
   release:(a)=>release(a),
   fusionPick:(a)=>fusionPick(a),
@@ -2186,7 +2250,7 @@ document.getElementById("app").addEventListener("click",e=>{
 const TUTORIAL=[
   {ic:'🥚', t:'Bienvenido a AIGRONS', h:`Cada mes hay un <b>álbum nuevo</b> de criaturas únicas. <b>Reclama una gratis cada día</b>, combate para ganar más, y compite en el <b>ranking diario</b> — el mismo destacado para todos, así que es justo.`},
   {ic:'🎁', t:'Tu aigrón diario', h:`En <b>Inicio</b>, toca <b>ABRIR — GRATIS</b> una vez al día: sale una criatura del <b>álbum del mes</b>. Entra cada día para subir tu <b>racha</b> y <b>completar el álbum</b> antes de que cambie de mes.`},
-  {ic:'📖', t:'Colección', h:`Toca un aigrón para <b>subir de nivel</b>, marcarlo <b>favorito</b>, <b>fusionar</b> dos en uno nuevo, o <b>liberar</b> duplicados a cambio de polvo.`},
+  {ic:'📖', t:'Colección', h:`Toca un aigrón para <b>subir de nivel</b>, marcarlo <b>favorito</b>, <b>fusionar</b> dos en uno nuevo, o <b>liberar</b> duplicados a cambio de polvo. Algunos <b>🧬 EVOLUCIONAN</b> al alcanzar cierto nivel (¡y dan un gran salto de poder!).`},
   {ic:'🛡️', t:'Tu equipo', h:`En <b>Combate → EDITAR</b> elige <b>3 aigrons</b>. Los <b>tipos</b> mandan: cada uno es fuerte contra unos y débil contra otros (piedra-papel-tijera).`},
   {ic:'🎯', t:'Combate · preparación', h:`Antes de luchar eliges:<br>• <b>Capitán</b>: +15% a sus stats y +6% a todo el equipo.<br>• <b>Estancia</b>: ⚔️ Agresiva (+ATK, −DEF), 🛡️ Defensiva (+DEF, +1⚡ inicial) o ⚖️ Neutral.<br>Cada combate gasta <b>1⚡</b> (se recarga sola con el tiempo).`},
   {ic:'🕹️', t:'Combate · tu turno', h:`El 3v3 es <b>automático</b> (actúa primero quien tiene más velocidad). Tú decides cada turno:<br>• Toca una <b>habilidad</b> cuando su ⚡ esté cargada → luego toca un <b>enemigo</b> para apuntar (mira <span style="color:var(--green)">⬆</span> fuerte / <span style="color:var(--red)">⬇</span> débil por tipo).<br>• <b>🛡 Guardia</b>: esa criatura protege al equipo un turno (−40% daño recibido).<br>• <b>Sobrecarga ⚡⚡</b>: si te sobra energía, el golpe pega ×1.5.`},

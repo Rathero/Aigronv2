@@ -502,6 +502,57 @@ test("shiny áurea: más rara que la prismática y determinista", () => {
   assert.equal(E.variantOf("shiny-test-0"), E.variantOf("shiny-test-0"), "determinista");
 });
 
+test("evolución: plan determinista 0/1/2 etapas con umbrales en rango", () => {
+  let n0 = 0, n1 = 0, n2 = 0;
+  for (let i = 0; i < 2000; i++) {
+    const id = "evo-test-" + i;
+    const plan = E.evolutionPlan(id);
+    assert.deepEqual(plan, E.evolutionPlan(id), "determinista");
+    if (plan.length === 0) n0++;
+    if (plan.length === 1) n1++;
+    if (plan.length === 2) n2++;
+    if (plan[0]) assert.ok(plan[0].at >= 12 && plan[0].at <= 18, "1ª evolución nv12-18");
+    if (plan[1]) {
+      assert.ok(plan[1].at >= 30 && plan[1].at <= 40, "2ª evolución nv30-40");
+      assert.ok(plan[1].at > plan[0].at, "la 2ª llega después de la 1ª");
+    }
+  }
+  // ~45/35/20 con tolerancia de muestreo.
+  assert.ok(n0 > n1 && n1 > n2 && n2 > 100, `distribución razonable (${n0}/${n1}/${n2})`);
+  // evoStageAt/evoNext coherentes con el plan.
+  const id2 = Array.from({ length: 500 }, (_, i) => "evo-test-" + i).find((x) => E.evolutionPlan(x).length === 2);
+  const plan = E.evolutionPlan(id2);
+  assert.equal(E.evoStageAt(id2, plan[0].at - 1), 0);
+  assert.equal(E.evoStageAt(id2, plan[0].at), 1);
+  assert.equal(E.evoStageAt(id2, plan[1].at), 2);
+  assert.deepEqual(E.evoNext(id2, 1), plan[0]);
+  assert.deepEqual(E.evoNext(id2, plan[0].at), plan[1]);
+  assert.equal(E.evoNext(id2, plan[1].at), null);
+});
+
+test("evolución: buildUnit aplica el salto de stats y el nombre evolucionado", () => {
+  const id = Array.from({ length: 500 }, (_, i) => "evo-test-" + i).find((x) => E.evolutionPlan(x).length >= 1);
+  const at = E.evolutionPlan(id)[0].at;
+  const t = E.genTemplate(id);
+  const before = E.buildUnit(t, at - 1, "A", 0);
+  const after = E.buildUnit(t, at, "A", 0);
+  assert.equal(before.evoStage, 0);
+  assert.equal(after.evoStage, 1);
+  assert.equal(before.name, t.name, "antes del umbral: nombre base");
+  assert.equal(after.name, E.evoName(t.name, id, 1), "tras el umbral: nombre evolucionado");
+  assert.notEqual(after.name, t.name);
+  // Salto FUERTE: el HP al evolucionar supera con mucho el escalado normal de +1 nivel.
+  const normalNext = Math.round(E.scaled(t.base_stats.hp, at));
+  assert.ok(after.hpMax > normalNext * 1.25, `salto de evolución (${after.hpMax} > ${normalNext}×1.25)`);
+  // Plantilla sin evolución: nada cambia a ningún nivel.
+  const flat = Array.from({ length: 500 }, (_, i) => "evo-test-" + i).find((x) => E.evolutionPlan(x).length === 0);
+  assert.equal(E.buildUnit(E.genTemplate(flat), 50, "A", 0).evoStage, 0);
+  // Sprite y arte de variante: ids/semillas deterministas.
+  assert.equal(E.evoArtSeed(id, 1), E.evoArtSeed(id, 1));
+  assert.notEqual(E.evoArtSeed(id, 1), E.evoArtSeed(id, 2));
+  assert.equal(E.variantArtId(id, "evo1"), id + "__evo1");
+});
+
 test("lore: artículos concuerdan con tags femeninos (sin 'del niebla')", () => {
   // Recorre muchas plantillas y comprueba que no aparecen concordancias rotas.
   for (let i = 0; i < 300; i++) {

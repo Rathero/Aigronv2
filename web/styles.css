@@ -416,3 +416,9 @@ h2.title small{font-family:var(--ui);font-size:13px;color:var(--ink-dim);font-we
   background-size:250% 100%;animation:sheen 2.6s ease-in-out infinite}
 .art-wrap.prismatic::after{background:linear-gradient(115deg,transparent 35%,rgba(52,245,228,.5) 50%,transparent 65%);background-size:250% 100%}
 @keyframes sheen{0%{background-position:140% 0}60%,100%{background-position:-40% 0}}
+
+/* ----------------------------- EVOLUCIÓN ---------------------------------- */
+.evo-pair{display:flex;align-items:center;justify-content:center;gap:10px}
+.evo-pair canvas,.evo-pair .aigimg{image-rendering:pixelated}
+.evo-pair>:first-child{opacity:.45;filter:grayscale(.4)}
+.evo-arrow{font-size:22px;color:var(--cyan);text-shadow:0 0 8px rgba(52,245,228,.8);animation:tw 1s steps(2) infinite}

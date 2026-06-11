@@ -18,6 +18,7 @@ const combat = require("./combat");
 const auth = require("./auth");
 const { sign, authMiddleware, verifyIdentity } = auth;
 const { generateSeason, generateDailyUnique } = require("./jobs/generateDailyBatch");
+const variantArt = require("./variantArt");
 const { startCron } = require("./cron");
 const { fuse } = require("./fusion");
 const dungeon = require("./dungeon");
@@ -110,6 +111,22 @@ function rowToTpl(x) {
     art_seed: x.art_seed, lore: x.lore, image_url: x.image_url, image_thumb_url: x.image_thumb_url,
     base_stats: tplBaseStats(x),
   };
+}
+// Una plantilla por id (con tags: el prompt de arte de variantes las usa).
+async function tplById(id) {
+  const r = await db.query(`SELECT ${TPL_COLS}, species_tags FROM creature_templates WHERE template_id=$1`, [id]);
+  if (!r.rows[0]) return null;
+  const t = rowToTpl(r.rows[0]);
+  t.tags = r.rows[0].species_tags || [];
+  return t;
+}
+// Si una instancia recién creada salió ÁUREA, dispara (sin bloquear) la
+// generación perezosa de su arte dorado. Se llama desde huevo/tienda/única.
+function maybeAureaArt(instanceId, tplId) {
+  if (C.variantOf(instanceId) !== "aurea") return;
+  tplById(tplId)
+    .then((base) => { if (base) variantArt.ensureVariantArtAsync(base, "aurea"); })
+    .catch(() => {});
 }
 // Garantiza que el ÁLBUM mensual existe (lo inserta al instante SIN arte: las
 // plantillas son deterministas; el arte IA se rellena luego vía cron/admin). El
@@ -316,6 +333,19 @@ async function buildTeamUnits(userId, team = "A") {
     [slots]
   );
   const byId = {}; inst.rows.forEach((r) => (byId[r.instance_id] = r));
+  // Arte de VARIANTE (forma evolucionada / áurea) si ya está generado: la unidad
+  // viaja con la imagen de su forma actual, no la del base.
+  const artIds = new Set();
+  inst.rows.forEach((r) => {
+    const st = C.evoStageAt(r.template_id, r.level);
+    if (st > 0) artIds.add(C.variantArtId(r.template_id, "evo" + st));
+    if (C.variantOf(r.instance_id) === "aurea") artIds.add(C.variantArtId(r.template_id, "aurea"));
+  });
+  const artById = {};
+  if (artIds.size) {
+    const ar = await db.query("SELECT template_id, image_url FROM creature_templates WHERE template_id = ANY($1) AND image_url IS NOT NULL", [[...artIds]]);
+    ar.rows.forEach((a) => (artById[a.template_id] = a.image_url));
+  }
   return slots.map((iid, i) => {
     const r = byId[iid]; if (!r) return null;
     // IV por instancia (±6%, deterministas del instance_id): cada captura es
@@ -325,7 +355,11 @@ async function buildTeamUnits(userId, team = "A") {
     u.instanceId = iid; // para mapear el capitán elegido a su uid de combate
     // Arte IA: el RIVAL puede no tener esta plantilla en su caché (lote de otro
     // día, fusión); viaja con la unidad para que la vea con su imagen real.
-    u.imageUrl = r.image_url; u.imageThumbUrl = r.image_thumb_url;
+    // Prioridad: forma evolucionada > áurea > base.
+    const evoArt = u.evoStage > 0 ? artById[C.variantArtId(r.template_id, "evo" + u.evoStage)] : null;
+    const aureaArt = C.variantOf(iid) === "aurea" ? artById[C.variantArtId(r.template_id, "aurea")] : null;
+    u.imageUrl = evoArt || aureaArt || r.image_url;
+    u.imageThumbUrl = (evoArt || aureaArt) ? (evoArt || aureaArt) : r.image_thumb_url;
     return u;
   }).filter(Boolean);
 }
@@ -472,6 +506,7 @@ app.post("/daily/claim", authMiddleware, wrap(async (req, res) => {
     throw e;
   }
   await bumpMission(u.id, "claims", 1);
+  maybeAureaArt(ins.rows[0].instance_id, t.id); // áurea -> arte dorado perezoso
   res.json({ instance: { instance_id: ins.rows[0].instance_id, level: ins.rows[0].level, template: t }, streak,
     first: isFirst || undefined, companions: isFirst ? companions : undefined,
     duplicate: duplicate || undefined, dust: dust || undefined });
@@ -545,6 +580,7 @@ app.post("/daily/unique/claim", authMiddleware, wrap(async (req, res) => {
     await db.query("UPDATE users SET coins=coins+$1 WHERE id=$2", [UNIQUE_COST, req.userId]).catch(() => {});
     throw e;
   }
+  maybeAureaArt(ins.rows[0].instance_id, t.id);
   res.json({ instance: { instance_id: ins.rows[0].instance_id, level: 1, template: t }, user: userPublic(await getUser(req.userId)) });
 }));
 
@@ -583,9 +619,26 @@ app.get("/collection", authMiddleware, wrap(async (req, res) => {
       WHERE ci.user_id=$1 ORDER BY ci.obtained_at DESC`,
     [req.userId]
   );
+  // Arte IA de VARIANTES (evolución/áurea) ya generado: una sola query por las
+  // filas "<tplId>__evoN|__aurea" que apliquen a esta colección.
+  const artIds = new Set();
+  for (const x of r.rows) {
+    const stage = C.evoStageAt(x.template_id, x.level);
+    if (stage > 0) artIds.add(C.variantArtId(x.template_id, "evo" + stage));
+    if (C.variantOf(x.instance_id) === "aurea") artIds.add(C.variantArtId(x.template_id, "aurea"));
+  }
+  const artById = {};
+  if (artIds.size) {
+    const ar = await db.query("SELECT template_id, image_url FROM creature_templates WHERE template_id = ANY($1) AND image_url IS NOT NULL", [[...artIds]]);
+    ar.rows.forEach((a) => (artById[a.template_id] = a.image_url));
+  }
   res.json(r.rows.map((x) => {
     const b = tplBaseStats(x);
     const iv = C.ivFor(x.instance_id);
+    const variant = C.variantOf(x.instance_id);
+    const stage = C.evoStageAt(x.template_id, x.level);
+    const em = C.evoMult(stage);
+    const sc = (k) => Math.round(C.scaled(b[k], x.level) * em);
     return {
       instance_id: x.instance_id, level: x.level, favorite: x.favorite, locked: x.locked,
       obtained_at: x.obtained_at, // para el badge NUEVO (obtenido hoy) del cliente
@@ -594,13 +647,17 @@ app.get("/collection", authMiddleware, wrap(async (req, res) => {
       // cosmética (áurea/prismática). template.base_stats se mantiene PURO (caché
       // compartida); el cliente aplica los IV con el instance_id para mostrarlas.
       potential: iv ? iv.potential : null,
-      variant: C.variantOf(x.instance_id),
+      variant,
+      // Evolución actual (derivada de plantilla+nivel) + arte IA si ya existe.
+      evo: stage > 0 ? { stage, name: C.evoName(x.name, x.template_id, stage),
+        image_url: artById[C.variantArtId(x.template_id, "evo" + stage)] || null } : null,
+      shiny_image_url: variant === "aurea" ? (artById[C.variantArtId(x.template_id, "aurea")] || null) : null,
       template: {
         id: x.template_id, name: x.name, type: x.type, types: tplTypes(x), rarity: x.rarity, ability: x.ability_id,
         lore: x.lore, art_seed: x.art_seed, image_url: x.image_url, image_thumb_url: x.image_thumb_url,
         base_stats: b,
-        stats: { hp: C.scaled(b.hp, x.level), atkP: C.scaled(b.atkP, x.level), atkS: C.scaled(b.atkS, x.level),
-                 defP: C.scaled(b.defP, x.level), defS: C.scaled(b.defS, x.level), spd: C.scaled(b.spd, x.level) },
+        // stats escaladas con la EVOLUCIÓN incluida (el cliente aplica IV encima).
+        stats: { hp: sc("hp"), atkP: sc("atkP"), atkS: sc("atkS"), defP: sc("defP"), defS: sc("defS"), spd: sc("spd") },
       },
     };
   }));
@@ -628,7 +685,19 @@ app.post("/creature/:id/level-up", authMiddleware, wrap(async (req, res) => {
     await db.query("UPDATE users SET dust=dust+$1, coins=coins+$2 WHERE id=$3", [cost.dust, cost.coins, req.userId]);
     return res.status(400).json({ error: "max_level" });
   }
-  res.json({ level: up.rows[0].level, cost });
+  const newLevel = up.rows[0].level;
+  // ¿EVOLUCIONÓ con esta subida? (automático al cruzar el umbral del aigron).
+  // Si sí: dispara la generación PEREZOSA de su arte IA (no bloquea la respuesta)
+  // y devuelve los datos para que el cliente celebre la evolución.
+  let evolved;
+  const before = C.evoStageAt(inst.template_id, newLevel - 1);
+  const after = C.evoStageAt(inst.template_id, newLevel);
+  if (after > before) {
+    const base = await tplById(inst.template_id);
+    if (base) variantArt.ensureVariantArtAsync(base, "evo" + after);
+    evolved = { stage: after, name: C.evoName(base ? base.name : "", inst.template_id, after), at: newLevel };
+  }
+  res.json({ level: newLevel, cost, evolved });
 }));
 
 app.post("/creature/:id/release", authMiddleware, wrap(async (req, res) => {
@@ -949,6 +1018,7 @@ app.post("/shop/roll", authMiddleware, wrap(async (req, res) => {
     await db.query("UPDATE users SET coins=coins+100, rolls_today=GREATEST(rolls_today-1,0) WHERE id=$1", [u.id]).catch(() => {});
     throw e;
   }
+  maybeAureaArt(ins.rows[0].instance_id, t.id);
   res.json({ instance_id: ins.rows[0].instance_id, template: t, duplicate: drawn.duplicate || undefined, dust: drawn.dust || undefined });
 }));
 
@@ -1300,6 +1370,9 @@ const ADMIN_TASKS = {
   "season-art": (q) => generateSeason(C.seasonKey((q.month ? q.month + "-01" : C.todayStr())), SEASON_N, { withArt: true }),
   // Genera el arte de la criatura ÚNICA del día (?date=YYYY-MM-DD, def: hoy).
   "unique-art": (q) => generateDailyUnique(q.date || C.todayStr(), { withArt: true }),
+  // Backfill del arte de VARIANTES (formas evolucionadas y áureas ya en manos
+  // de jugadores que aún no tienen imagen).
+  "variant-art": () => variantArt.backfillVariantArt(),
 };
 app.post("/admin/tasks/:task", requireAdmin, (req, res) => {
   const name = req.params.task;
