@@ -3,25 +3,16 @@
   --ink:#e8e4ff; --ink-dim:#aaa2dc; --line:#3a3270; /* ink-dim subido para contraste AA sobre paneles oscuros */
   --cyan:#34f5e4; --magenta:#ff4d9d; --gold:#ffd23f; --green:#7CFF6B; --red:#ff5d5d;
   --com:#8b86b8; --rar:#43b6ff; --epi:#c061ff; --leg:#ffd23f;
+  /* Titulares/marca en pixel (identidad retro); CUERPO en VT323 (terminal retro,
+     con minúsculas reales): legible en texto largo sin perder el aire del juego. */
   --pixel: 'Press Start 2P', monospace;
-  --ui: 'Silkscreen', monospace;
+  --ui: 'VT323', monospace;
 }
-/* ---------- TEMAS DE FUENTE (selector "Aa" en el menú ≡) ----------
-   El pixel font en texto largo cansa (feedback). Variantes conmutables:
-     crt    — títulos pixel + cuerpo VT323 (terminal retro, minúsculas reales)
-     techno — títulos pixel + cuerpo Chakra Petch (cuadrada, muy legible)
-     clean  — sin pixel salvo el logo: Chakra Petch títulos + Rajdhani cuerpo */
-:root[data-font="crt"]{ --ui:'VT323', monospace; }
-:root[data-font="crt"] body{ font-size:17px; letter-spacing:.3px } /* VT323 rinde pequeña */
-:root[data-font="techno"]{ --ui:'Chakra Petch', sans-serif; }
-:root[data-font="clean"]{ --pixel:'Chakra Petch', sans-serif; --ui:'Rajdhani', sans-serif; }
-:root[data-font="clean"] h2.title{ font-size:17px; font-weight:700 }
-/* La marca conserva SIEMPRE el pixel font (identidad), elija lo que elija el jugador. */
-.logo, #boot .logo{ font-family:'Press Start 2P', monospace !important }
 *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 html,body{height:100%}
 body{
-  font-family:var(--ui);background:var(--bg0);color:var(--ink);
+  font-family:var(--ui);font-size:17px;letter-spacing:.3px; /* VT323 rinde pequeña */
+  background:var(--bg0);color:var(--ink);
   overflow:hidden;display:flex;align-items:center;justify-content:center;
   background-image:
     radial-gradient(1200px 800px at 80% -10%, rgba(192,97,255,.18), transparent 60%),
