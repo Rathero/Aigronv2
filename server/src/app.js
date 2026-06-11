@@ -1058,6 +1058,39 @@ app.get("/arena/draft", authMiddleware, requireFeature("arena"), wrap(async (req
   res.json({ date: C.todayStr(), candidates: pool.map((t) => ({ id: t.id, name: t.name, type: t.type, types: t.types, rarity: t.rarity, ability: t.ability, art_seed: t.art_seed, image_url: t.image_url, base_stats: t.base_stats })) });
 }));
 
+// Tareas de ARTE ejecutables en remoto (Railway no tiene shell cómoda): se
+// lanzan en background y el estado se consulta. Mismo ADMIN_KEY que /admin/stats.
+//   POST /admin/tasks/remove-art-backgrounds[?dryRun=1&tolerance=42]
+//   POST /admin/tasks/gen-ui-assets[?variants=3&only=icon,arena]
+//   POST /admin/tasks/boss-art            (arte del jefe de esta semana)
+//   GET  /admin/tasks                     (estado de todas)
+const artTasks = require("./artTasks");
+const _adminTasks = {}; // name -> { status, startedAt, finishedAt, result|error }
+const requireAdmin = (req, res, next) => {
+  const key = process.env.ADMIN_KEY;
+  if (!key || req.headers["x-admin-key"] !== key) return res.status(404).json({ error: "not_found" });
+  next();
+};
+const ADMIN_TASKS = {
+  "remove-art-backgrounds": (q) => artTasks.removeArtBackgrounds({ dryRun: q.dryRun === "1", tolerance: q.tolerance }),
+  "gen-ui-assets": (q) => artTasks.generateUiAssets({ variants: q.variants, only: (q.only || "").split(",").filter(Boolean) }),
+  "boss-art": () => require("./innovations").ensureBossArt().then((ok) => ({ generated: ok })),
+};
+app.post("/admin/tasks/:task", requireAdmin, (req, res) => {
+  const name = req.params.task;
+  const fn = ADMIN_TASKS[name];
+  if (!fn) return res.status(400).json({ error: "bad_task", tasks: Object.keys(ADMIN_TASKS) });
+  if (_adminTasks[name] && _adminTasks[name].status === "running") {
+    return res.status(409).json({ error: "already_running", task: _adminTasks[name] });
+  }
+  const entry = (_adminTasks[name] = { status: "running", startedAt: new Date().toISOString() });
+  fn(req.query || {})
+    .then((result) => { entry.status = "done"; entry.result = result; entry.finishedAt = new Date().toISOString(); })
+    .catch((e) => { entry.status = "error"; entry.error = e.message; entry.finishedAt = new Date().toISOString(); });
+  res.json({ started: name, poll: "GET /admin/tasks" });
+});
+app.get("/admin/tasks", requireAdmin, (req, res) => res.json(_adminTasks));
+
 // --------------------------------- HEALTH ------------------------------------
 app.get("/health", wrap(async (req, res) => {
   await db.query("SELECT 1");
