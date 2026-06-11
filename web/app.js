@@ -217,17 +217,20 @@ const SFX=(()=>{
 function buzz(ms){ if(navigator.vibrate){ try{navigator.vibrate(ms);}catch(e){} } }
 
 /* Tema de FUENTE (feedback: el pixel en texto largo cansa). Ciclo desde el
-   menú ≡: pixel (actual) → crt → techno → clean. Persistente. */
+   menú ≡: crt (defecto) → techno → clean → pixel. Persistente.
+   Defecto = 'crt' (VT323): legible y aún retro. Se usa ?? para que una elección
+   EXPLÍCITA de pixel (guardada como '') no caiga de nuevo al defecto. */
+const FONT_DEFAULT='crt';
 const FONT_THEMES=[
-  {id:'',name:'Pixel (original)'},
   {id:'crt',name:'CRT retro (VT323)'},
   {id:'techno',name:'Techno (Chakra Petch)'},
   {id:'clean',name:'Limpia (sin pixel)'},
+  {id:'',name:'Pixel (original)'},
 ];
 function applyFont(id){ if(id)document.documentElement.dataset.font=id; else delete document.documentElement.dataset.font; }
-applyFont(localStorage.getItem('aigrons_font')||'');
+applyFont(localStorage.getItem('aigrons_font') ?? FONT_DEFAULT);
 function cycleFont(){
-  const cur=localStorage.getItem('aigrons_font')||'';
+  const cur=localStorage.getItem('aigrons_font') ?? FONT_DEFAULT;
   const i=(FONT_THEMES.findIndex(f=>f.id===cur)+1)%FONT_THEMES.length;
   const f=FONT_THEMES[i];
   localStorage.setItem('aigrons_font',f.id); applyFont(f.id);
