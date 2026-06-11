@@ -154,6 +154,7 @@ function userPublic(u) {
       : null,
     league: u.league, leaguePoints: u.league_points,
     streak: u.daily_streak,
+    totalWins: u.total_wins || 0, // revelado progresivo de módulos en el cliente
     // Tiradas de tienda de HOY (techo diario): el cliente muestra cuántas quedan.
     rollsToday: u.rolls_date && C.todayStr(new Date(u.rolls_date)) === C.todayStr() ? u.rolls_today : 0,
     rollsMax: 10,
@@ -276,17 +277,9 @@ app.post("/auth/login", wrap(async (req, res) => {
   );
   let user = up.rows[0];
 
-  // Si es nuevo y no tiene aigrons, le damos 3 starters del lote de hoy.
-  const has = await db.query("SELECT 1 FROM creature_instances WHERE user_id=$1 LIMIT 1", [user.id]);
-  if (has.rowCount === 0) {
-    const tpls = await todayTemplates();
-    for (const t of tpls.slice(0, 3)) {
-      await db.query(
-        "INSERT INTO creature_instances (user_id, template_id, level, locked) VALUES ($1,$2,3,true)",
-        [user.id, t.id]
-      );
-    }
-  }
+  // SIN starters al crear cuenta: tu primer aigrón es el del PRIMER reclamo
+  // (sale potenciado como "tu estrella" + 2 crías de compañía en /daily/claim).
+  // Antes regalábamos 3 a nivel 3 y el huevo inicial decepcionaba (feedback).
   res.json({ token: sign(user), user: userPublic(user) });
 }));
 
@@ -322,13 +315,28 @@ app.post("/daily/claim", authMiddleware, wrap(async (req, res) => {
     [C.todayStr(), streak, u.id]
   );
   if (!claim.rowCount) return res.status(400).json({ error: "already_claimed" });
-  const t = list[Math.floor(Math.random() * list.length)];
+  // PRIMER reclamo de la cuenta = "tu estrella" (vía Pokémon, feedback de
+  // jugadores): rareza garantizada >COMÚN si el lote la tiene, nivel 5,
+  // favorita+protegida, y 2 crías de nivel 1 se unen para completar el equipo.
+  const cnt = await db.query("SELECT COUNT(*)::int AS n FROM creature_instances WHERE user_id=$1", [u.id]);
+  const isFirst = cnt.rows[0].n === 0;
+  const pool = isFirst ? (list.filter((x) => x.rarity !== "COMUN").length ? list.filter((x) => x.rarity !== "COMUN") : list) : list;
+  const t = pool[Math.floor(Math.random() * pool.length)];
   let ins;
+  const companions = [];
   try {
     ins = await db.query(
-      "INSERT INTO creature_instances (user_id, template_id) VALUES ($1,$2) RETURNING instance_id, level",
-      [u.id, t.id]
+      "INSERT INTO creature_instances (user_id, template_id, level, favorite, locked) VALUES ($1,$2,$3,$4,$4) RETURNING instance_id, level",
+      [u.id, t.id, isFirst ? 5 : 1, isFirst]
     );
+    if (isFirst) {
+      const commons = list.filter((x) => x.id !== t.id);
+      for (let i = 0; i < 2 && commons.length; i++) {
+        const c = commons.splice(Math.floor(Math.random() * commons.length), 1)[0];
+        const ci = await db.query("INSERT INTO creature_instances (user_id, template_id, level) VALUES ($1,$2,1) RETURNING instance_id", [u.id, c.id]);
+        companions.push({ instance_id: ci.rows[0].instance_id, template: c });
+      }
+    }
   } catch (e) {
     // Devuelve el reclamo si la criatura no llegó a crearse (el usuario podrá reintentar).
     await db.query("UPDATE users SET last_claim_date=$1, daily_streak=$2, coins=coins-30 WHERE id=$3",
@@ -336,7 +344,8 @@ app.post("/daily/claim", authMiddleware, wrap(async (req, res) => {
     throw e;
   }
   await bumpMission(u.id, "claims", 1);
-  res.json({ instance: { instance_id: ins.rows[0].instance_id, level: ins.rows[0].level, template: t }, streak });
+  res.json({ instance: { instance_id: ins.rows[0].instance_id, level: ins.rows[0].level, template: t }, streak,
+    first: isFirst || undefined, companions: isFirst ? companions : undefined });
 }));
 
 // -------------------------------- MISSIONS -----------------------------------

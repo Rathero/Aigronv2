@@ -212,16 +212,22 @@
   function genName(rng) {
     return PRE[Math.floor(rng() * PRE.length)] + MID[Math.floor(rng() * MID.length)] + SUF[Math.floor(rng() * SUF.length)];
   }
+  // Género de los tags (para que los artículos concuerden: "del volcán" pero
+  // "de la niebla"). Solo afecta al TEXTO: el consumo de rng no cambia (1 tirada),
+  // así que la paridad cliente/servidor se mantiene.
+  const FEM_TAGS = { mantis: 1, anguila: 1, polilla: 1, niebla: 1, tormenta: 1, ceniza: 1 };
+  const elArt = (w) => (FEM_TAGS[w] ? "la " : "el ") + w;
+  const delArt = (w) => (FEM_TAGS[w] ? "de la " : "del ") + w;
   function genLore(rng, tags) {
     const T = [
-      "Duerme en %1% hasta que despierta el %0%.",
-      "Nadie ha visto su %0% sin temblar.",
-      "Se alimenta de %1% y de malas decisiones.",
-      "Dicen que su %0% predice el clima.",
-      "Coleccionable desde el amanecer del %1%.",
+      (a, b) => `Duerme entre restos ${delArt(b)} hasta que ${elArt(a)} que lleva dentro despierta.`,
+      (a, b) => `Nadie ha visto su lado de ${a} sin temblar.`,
+      (a, b) => `Se alimenta de ${b} y de malas decisiones.`,
+      (a, b) => `Dicen que su espíritu de ${a} predice el clima.`,
+      (a, b) => `Coleccionable desde el primer amanecer ${delArt(b)}.`,
     ];
     const t = T[Math.floor(rng() * T.length)];
-    return t.replace("%0%", tags[0]).replace("%1%", tags[1]);
+    return t(tags[0], tags[1]);
   }
   const pickRange = (rng, r) => Math.round(r[0] + rng() * (r[1] - r[0]));
 
@@ -757,17 +763,28 @@
     if (depth <= 6) return ["RARA", "EPICA"];
     return ["EPICA", "LEGENDARIA"];
   }
+  // Nivel enemigo en un nodo: RAMPA dentro de la run. Empieza muy por debajo del
+  // nivel de referencia de la dificultad (~25%) y sube hasta superarlo (~120% en
+  // el jefe): un equipo flojo puede ganar 1-2 nodos pero no pasarse la mazmorra,
+  // y la dificultad "de verdad" llega progresivamente (feedback de jugadores).
+  function dungeonLevelAt(baseLevel, depth, kind) {
+    const start = Math.max(1, Math.round(baseLevel * 0.25));
+    const end = Math.max(start + 1, Math.round(baseLevel * 1.2));
+    const ramp = (end - start) / (DUNGEON_DEPTH - 1);
+    const bonus = kind === "ELITE" ? 2 : kind === "JEFE" ? 4 : 0;
+    return Math.max(1, Math.round(start + depth * ramp) + bonus);
+  }
+
   function dungeonEnemyTeam(seed, depth, kind, templates, baseLevel) {
     const rng = dgnRng(seed, depth, "enemy:" + kind);
-    // Curva: primeros nodos por debajo del jugador, escalando ~+1.8 niveles/nodo.
-    const boost = Math.round(depth * 1.8) + (kind === "ELITE" ? 4 : 0) + (kind === "JEFE" ? 9 : 0);
+    const nodeLevel = dungeonLevelAt(baseLevel, depth, kind);
     const ar = dungeonRarities(depth);
     let pool = templates.filter((t) => ar.includes(t.rarity));
     if (!pool.length) pool = templates;
     const units = [];
     for (let i = 0; i < 3; i++) {
       const tpl = pool[Math.floor(rng() * pool.length)];
-      const lvl = Math.max(1, baseLevel - 1 + boost + (Math.floor(rng() * 3) - 1));
+      const lvl = Math.max(1, nodeLevel + (Math.floor(rng() * 3) - 1));
       units.push(buildUnit(tpl, lvl, "B", i));
     }
     if (kind === "JEFE") units.forEach((u) => { u.hpMax = Math.round(u.hpMax * 1.4); u.hp = u.hpMax; u.atk = Math.round(u.atk * 1.2); });
@@ -799,7 +816,7 @@
     buildUnit, unitFromStats, applyCaptainStance, STANCES, pickTarget, resolveTarget,
     dealDamage, decBuffs, tickStatus, performAction, aiIntent, turnOrder, stepTurn, intentFromDecision, resolveBattle, botTeamFromSeed,
     // roguelike / mazmorra
-    applyRelics, relicRunEffects, dungeonNodeOptions, dungeonEnemyTeam, dungeonDraft,
+    applyRelics, relicRunEffects, dungeonNodeOptions, dungeonEnemyTeam, dungeonDraft, dungeonLevelAt,
     // mecánicas innovadoras (deterministas)
     isPrismatic, prismaticShift, dailyPuzzle, nemesisTeam, nemesisName, oracleProphecy,
   };

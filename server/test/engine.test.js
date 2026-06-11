@@ -406,3 +406,28 @@ test("oráculo: profecía determinista con pista verídica", () => {
   assert.equal(o1.text, o2.text, "determinista");
   assert.ok(o1.text.length > 10 && o1.hint && o1.hint.domType, "tiene texto y pista");
 });
+
+test("mazmorra: la dificultad es una RAMPA (empieza ~25% y supera el nivel en el jefe)", () => {
+  const base = 10; // FÁCIL
+  const start = E.dungeonLevelAt(base, 0, "COMBATE");
+  const boss = E.dungeonLevelAt(base, E.DUNGEON_DEPTH - 1, "JEFE");
+  assert.ok(start <= 4, `el primer nodo debe ser asequible (nv${start})`);
+  assert.ok(boss > base, `el jefe debe superar el nivel de referencia (nv${boss} > ${base})`);
+  // Monotónica: cada nodo >= el anterior.
+  for (let d = 1; d < E.DUNGEON_DEPTH; d++) {
+    assert.ok(E.dungeonLevelAt(base, d, "COMBATE") >= E.dungeonLevelAt(base, d - 1, "COMBATE"), "rampa monotónica");
+  }
+  // dungeonEnemyTeam usa la rampa (±1 de variación).
+  const tpls = E.dailyBatch("2026-06-11", 12);
+  const lvl0 = E.dungeonEnemyTeam(7, 0, "COMBATE", tpls, base).map((u) => u.level);
+  assert.ok(Math.max(...lvl0) <= start + 1, "nodo 0 cerca del nivel de arranque");
+});
+
+test("lore: artículos concuerdan con tags femeninos (sin 'del niebla')", () => {
+  // Recorre muchas plantillas y comprueba que no aparecen concordancias rotas.
+  for (let i = 0; i < 300; i++) {
+    const t = E.genTemplate("lore_" + i);
+    assert.ok(!/\bdel (niebla|tormenta|ceniza|mantis|anguila|polilla)\b/.test(t.lore), `lore roto: ${t.lore}`);
+    assert.ok(!/\bel (niebla|tormenta|ceniza|mantis|anguila|polilla)\b/.test(t.lore), `lore roto: ${t.lore}`);
+  }
+});

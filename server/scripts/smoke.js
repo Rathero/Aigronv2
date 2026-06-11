@@ -29,7 +29,7 @@ async function loginAs(subject) {
   const h = await api(null, "/health");
   ok(h.status === 200 && h.data.ok, "/health responde ok");
 
-  // Login user1 + starters
+  // Login user1 (SIN starters: el primer reclamo da estrella nv5 + 2 crías)
   const u1 = await loginAs("smoke-u1-" + Date.now());
   ok(!!u1.token, "login devuelve token");
   const t1 = u1.token;
@@ -44,15 +44,17 @@ async function loginAs(subject) {
 
   const claim = await api(t1, "/daily/claim", { method: "POST" });
   ok(claim.status === 200 && claim.data.instance, "/daily/claim crea instancia");
+  ok(claim.data.first === true && claim.data.instance.level === 5, "primer reclamo = estrella nv5");
+  ok(Array.isArray(claim.data.companions) && claim.data.companions.length === 2, "el primer reclamo trae 2 crías");
   const claim2 = await api(t1, "/daily/claim", { method: "POST" });
   ok(claim2.status === 400, "segundo /daily/claim rechazado");
 
   let coll = await api(t1, "/collection");
-  ok(coll.status === 200 && coll.data.length >= 4, "/collection >= 4 (3 starters + diaria)");
+  ok(coll.status === 200 && coll.data.length === 3, "/collection == 3 (estrella + 2 crías)");
+  ok(coll.data.filter((c) => c.locked).length === 1, "solo la estrella está protegida");
 
-  // Equipo: los 3 starters bloqueados (deja libres la diaria/tirada para fusionar)
-  const lockedIds = coll.data.filter((c) => c.locked).map((c) => c.instance_id);
-  const slots = (lockedIds.length >= 3 ? lockedIds : coll.data.map((c) => c.instance_id)).slice(0, 3);
+  // Equipo: estrella + crías (las tiradas de tienda quedan libres para fusionar)
+  const slots = coll.data.map((c) => c.instance_id).slice(0, 3);
   const team = await api(t1, "/team", { method: "PUT", body: { slots } });
   ok(team.status === 200 && team.data.slots.length === 3, "PUT /team guarda 3");
 
@@ -87,9 +89,10 @@ async function loginAs(subject) {
   const mc2 = await api(t1, "/missions/claim", { method: "POST", body: { key: "claim" } });
   ok(mc2.status === 400, "no se reclama dos veces la misma misión");
 
-  // Tienda: tirada con monedas
+  // Tienda: dos tiradas (la fusión necesita 2 instancias libres fuera del equipo)
   const roll = await api(t1, "/shop/roll", { method: "POST" });
   ok(roll.status === 200 && roll.data.template, "/shop/roll crea aigrón");
+  await api(t1, "/shop/roll", { method: "POST" });
 
   // Fusión: usa dos instancias NO bloqueadas (la diaria + la de tienda)
   coll = await api(t1, "/collection");
@@ -108,7 +111,9 @@ async function loginAs(subject) {
   }
 
   // PvP: user2 debería poder emparejarse contra el snapshot de user1
+  // (sin starters al login: reclama primero su estrella + crías)
   const u2 = await loginAs("smoke-u2-" + Date.now());
+  await api(u2.token, "/daily/claim", { method: "POST" });
   const c2 = await api(u2.token, "/collection");
   await api(u2.token, "/team", { method: "PUT", body: { slots: c2.data.slice(0, 3).map((c) => c.instance_id) } });
   const find2 = await api(u2.token, "/battle/find", { method: "POST" });

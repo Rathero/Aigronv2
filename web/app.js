@@ -366,10 +366,23 @@ function leagueBarHTML(){
     <div class="league-bar"><i style="width:${pct}%"></i></div>
     <span class="lg-next">${lp}/${next[1]} → ${next[0]}</span></div>`;
 }
+/* Revelado progresivo de módulos de la home (feedback: demasiada información
+   de golpe). Cada módulo aparece al alcanzar las victorias indicadas, con un
+   aviso de desbloqueo la primera vez. */
+const UNLOCKS={oracle:1,dungeon:1,weekly:3,modes:3};
+function unlocked(key){ return (S.user&&S.user.totalWins||0)>=UNLOCKS[key]; }
+function announceUnlocks(){
+  const seen=JSON.parse(localStorage.getItem('aigrons_unlocked')||'{}');
+  const names={oracle:'🔮 El Oráculo',dungeon:'🗺️ La Mazmorra',weekly:'📅 Misiones semanales',modes:'🧩 Modos de juego'};
+  let changed=false;
+  Object.keys(UNLOCKS).forEach(k=>{ if(unlocked(k)&&!seen[k]){ seen[k]=1; changed=true; toast('🎉 Desbloqueado: '+names[k]); SFX.play('claim'); } });
+  if(changed) localStorage.setItem('aigrons_unlocked',JSON.stringify(seen));
+}
 async function renderHome(){
   refreshChips();
+  announceUnlocks();
   const claimed=S.daily&&S.daily.claimed;
-  let dg=null; try{ dg=await api('/dungeon'); }catch(e){}
+  let dg=null; if(unlocked('dungeon')){ try{ dg=await api('/dungeon'); }catch(e){} }
   // Meta de COLECCIÓN del día: cuántos aigrons del lote de hoy tienes ya.
   // Convierte el lote compartido en un objetivo diario medible.
   let loteLine='';
@@ -397,7 +410,7 @@ async function renderHome(){
        ${loteLine}
      </div>`;
   const missions=(S.user.missions)||[];
-  const weeklyM=(S.user.weeklyMissions)||[];
+  const weeklyM=unlocked('weekly')?((S.user.weeklyMissions)||[]):[];
   const labels={claim:"Reclama tu aigrón",win:"Gana 3 combates",ability:"Usa 5 habilidades"};
   const mrow=(m)=>{const pct=Math.min(100,Math.round(m.progress/m.goal*100));
     return `<div class="mis ${m.done?'done':''}">
@@ -414,7 +427,7 @@ async function renderHome(){
      <button class="btn sm" style="padding:4px 8px" data-act="pushEnable">SÍ</button>
      <button class="btn sm ghost" style="padding:4px 8px" data-act="pushSkip">NO</button></div>`:'';
   // Banner de EVENTO del lote (sábado temático / domingo legendario).
-  const ev=S.daily&&S.daily.event;
+  const ev=unlocked('oracle')&&S.daily&&S.daily.event;
   const evBanner=ev?`<div class="panel" style="padding:8px 10px;border-color:var(--gold);font-size:13px">${ev.emoji||'⚡'} <b style="color:var(--gold)">EVENTO:</b> ${ev.name}${ev.kind==='legendary'?' — legendarias extra en el lote':''}</div>`:'';
   $("#s-home").innerHTML=`
     <h2 class="title" data-act="openProfile" style="cursor:pointer">${esc((S.user.displayName||'INICIO').toUpperCase())} <small class="dim" style="font-size:10px">👤 perfil</small></h2>
@@ -429,16 +442,16 @@ async function renderHome(){
       ${missions.map(mrow).join("")}
       ${weeklyM.length?`<div style="border-top:1px solid var(--line);margin-top:8px;padding-top:6px"><b style="font-size:13px">Semanales</b> <span class="dim" style="font-size:10px">se reinician el lunes</span>${weeklyM.map(mrow).join("")}</div>`:''}
     </div>
-    ${dungeonHomeCard(dg)}`;
+    ${unlocked('dungeon')?dungeonHomeCard(dg):''}`;
   renderCanvases($("#s-home"));
   tickCountdowns();
   loadOracle();
-  if(FEATURES.worldboss) api('/worldboss').then(b=>{const e=$("#boss-mini");if(e)e.innerHTML=b.defeated?'🏆 ¡derrotado!':`HP ${b.pct}% · ${b.top.length} héroes`;}).catch(()=>{});
+  if(FEATURES.worldboss&&unlocked('modes')) api('/worldboss').then(b=>{const e=$("#boss-mini");if(e)e.innerHTML=b.defeated?'🏆 ¡derrotado!':`HP ${b.pct}% · ${b.top.length} héroes`;}).catch(()=>{});
   $("#s-home").querySelectorAll(".card").forEach(c=>c.onclick=()=>openDetail(c.dataset.iid));
 }
 // Profecía del Oráculo (lote de mañana). Se carga async tras el primer render.
 function oracleCard(){
-  if(!FEATURES.oracle) return '';
+  if(!FEATURES.oracle||!unlocked('oracle')) return '';
   return `<div class="panel" id="oracle-card" style="border-color:var(--epi);padding:9px 11px;font-size:12px">
     🔮 <b style="color:var(--epi)">El Oráculo</b> <span class="dim" id="oracle-text">consulta los astros…</span></div>`;
 }
@@ -448,6 +461,7 @@ async function loadOracle(){
 }
 // Rejilla de MODOS de juego innovadores (puzzle, jefe mundial, némesis, arena).
 function modesGrid(){
+  if(!unlocked('modes')) return '';
   const tiles=[];
   if(FEATURES.puzzle) tiles.push(`<div class="mode-tile" data-act="openPuzzle"><span class="mi">🧩</span><b>Puzzle Diario</b><span class="dim">mín. turnos · igual para todos</span></div>`);
   if(FEATURES.worldboss) tiles.push(`<div class="mode-tile" data-act="openBoss"><span class="mi">🐉</span><b>Jefe Mundial</b><span class="dim" id="boss-mini">raid cooperativa</span></div>`);
@@ -484,14 +498,19 @@ async function doClaim(){
     await Promise.all([refreshMe(),refreshDaily(),refreshCollection()]);
     refreshChips();
     SFX.play('claim'); buzz([30,40,30,40,80]);
-    const rays=(t.rarity==="EPICA"||t.rarity==="LEGENDARIA")?'<div class="rays"></div>':'';
+    const rays=(t.rarity==="EPICA"||t.rarity==="LEGENDARIA"||r.first)?'<div class="rays"></div>':'';
+    // Primer reclamo de la cuenta: es TU ESTRELLA (nv5, protegida) y 2 crías se
+    // unen al equipo — el momento del huevo vuelve a ser el clímax (feedback).
+    const firstTxt=r.first?`<div style="color:var(--gold);font-size:13px;font-weight:700;margin-bottom:4px">⭐ ¡Tu estrella! Nv.${r.instance.level} · protegida</div>
+        <div class="dim" style="font-size:12px;margin-bottom:8px">Dos crías de nivel 1 se han unido a tu equipo:${(r.companions||[]).map(c=>' '+esc(c.template.name)).join(' ·')}</div>`:'';
     openOverlay(`<div class="center reveal" style="position:relative">${rays}
       <div style="position:relative;z-index:2">
-        <div style="font-family:var(--pixel);font-size:11px;color:var(--cyan);margin-bottom:8px">¡HA NACIDO!</div>
+        <div style="font-family:var(--pixel);font-size:11px;color:var(--cyan);margin-bottom:8px">${r.first?'¡TU PRIMER AIGRÓN!':'¡HA NACIDO!'}</div>
         ${artTag(t,11)}
-        <div style="font-size:20px;font-weight:700;margin-top:6px">${t.name}</div>
+        <div style="font-size:20px;font-weight:700;margin-top:6px">${esc(t.name)}</div>
         <div class="mb8">${typePills(t)} <span class="rar-txt ${t.rarity}" style="font-weight:700">${t.rarity}</span></div>
-        <div class="dim" style="font-size:13px;margin-bottom:10px">"${t.lore}"</div>
+        ${firstTxt}
+        <div class="dim" style="font-size:13px;margin-bottom:10px">"${esc(t.lore)}"</div>
         <div style="text-align:left;max-width:220px;margin:0 auto 12px">${statBars(t.base_stats)}</div>
         ${!localStorage.getItem('aigrons_first_fight_done')?'<button class="btn mag mb8" data-act="firstFight">⚔️ ¡TU PRIMER COMBATE!</button>':''}
         <button class="btn" data-act="toCollection">A LA COLECCIÓN</button>
@@ -790,7 +809,7 @@ async function watchReplay(battleId){
   const A=rep.team.map((s,i)=>mkUnit(s,'A',i));
   const B=rep.opponent.map((s,i)=>mkUnit(s,'B',i));
   CB={A,B,seed:0,battleId:null,pvp:false,live:false,mode:'replay',you:rep.you||'A',oppName:'',
-      rng:null,turn:0,order:[],oi:0,plan:{},planTurn:0,selecting:null,phase:'replay',speed:1,
+      rng:null,turn:0,order:[],oi:0,plan:{},planTurn:0,selecting:null,phase:'replay',speed:savedSpeed(),
       decisions:[],timer:null,planTimer:null,initA:rep.team,initB:rep.opponent,ended:false};
   buildArena();
   const pl=$("#planner"); if(pl)pl.innerHTML='';
@@ -827,7 +846,7 @@ async function watchReplay(battleId){
       if(t.el){t.el.classList.remove("hit");void t.el.offsetWidth;t.el.classList.add("hit");
         floatNum(t,(h.crit?"¡":"")+h.dmg+(h.crit?"!":""),h.crit?"var(--gold)":"#fff");}});
     refreshArena();
-    CB.timer=setTimeout(tick,Math.round(560/(CB.speed||1)));
+    CB.timer=setTimeout(tick,tickMs());
   }
   CB.timer=setTimeout(tick,400);
 }
@@ -1049,6 +1068,13 @@ async function saveTeam(){
 
 let CB=null, prep=null;
 function mkUnit(s,team,i){ return E.unitFromStats(s,team,i); }
+/* Velocidad de combate: base MÁS LENTA que antes (750ms/acción; feedback de
+   jugadores nuevos: "demasiado rápido"), ciclo x1→x2→x3 y MEMORIA en
+   localStorage. AUTO = la IA planifica y confirma sola (modo idle). */
+const BASE_TICK=750;
+function savedSpeed(){ const v=parseInt(localStorage.getItem('aigrons_speed')||'1',10); return [1,2,3].includes(v)?v:1; }
+function tickMs(){ return Math.round(BASE_TICK/((CB&&CB.speed)||1)); }
+function autoMode(){ return localStorage.getItem('aigrons_auto')==='1'; }
 
 /* =========================== PvP EN VIVO (WebSocket) =========================
    Localmente SIEMPRE: mi equipo = 'A' (abajo), rival = 'B' (arriba) -> reutiliza
@@ -1126,7 +1152,7 @@ function startLiveBattle(m){
   const B=m.opponent.map((s,i)=>mkUnit(s,'B',i));  // rival -> local 'B' (arriba)
   CB={A,B,seed:0,battleId:m.matchId,pvp:!m.bot,live:true,you:m.you,oppName:m.oppName||'Rival',
       duelCode:(PVP&&PVP.code)||null, // para ofrecer REVANCHA al terminar
-      rng:null,turn:0,order:[],oi:0,plan:{},planTurn:0,selecting:null,phase:'wait',speed:1,
+      rng:null,turn:0,order:[],oi:0,plan:{},planTurn:0,selecting:null,phase:'wait',speed:savedSpeed(),
       decisions:[],timer:null,planTimer:null,initA:m.team,initB:m.opponent,ended:false};
   buildArena();
   const vs=$(".vs"); if(vs){vs.style.opacity=1;setTimeout(()=>{vs.style.opacity=0;},800);}
@@ -1139,7 +1165,7 @@ function resumeLiveBattle(m){
   const A=m.team.map((s,i)=>mkUnit(s,'A',i));
   const B=m.opponent.map((s,i)=>mkUnit(s,'B',i));
   CB={A,B,seed:0,battleId:m.matchId,pvp:true,live:true,you:m.you,oppName:m.oppName||'Rival',
-      rng:null,turn:0,order:[],oi:0,plan:{},planTurn:m.round,selecting:null,phase:'wait',speed:1,
+      rng:null,turn:0,order:[],oi:0,plan:{},planTurn:m.round,selecting:null,phase:'wait',speed:savedSpeed(),
       decisions:[],timer:null,planTimer:null,initA:m.team,initB:m.opponent,ended:false};
   buildArena();
   const smap={};
@@ -1164,6 +1190,7 @@ function pvpRound(m){
   CB.planEndsAt=m.deadline||(Date.now()+10000);
   if(CB.planTimer)clearInterval(CB.planTimer);
   CB.planTimer=setInterval(planTimerTick,100);
+  if(autoMode()) setTimeout(()=>{ if(CB&&CB.phase==='plan'&&CB.live)confirmPlan(); },600);
 }
 function pvpConfirm(){
   const decisions=[];
@@ -1240,7 +1267,7 @@ function liveAnimate(log, state){
     });
     const sa=actor&&smap[actor.uid]; if(sa) actor.hp=sa.hp;
     refreshArena();
-  }, Math.round(560/(CB.speed||1)));
+  }, tickMs());
 }
 function pvpOver(m){
   // Igual que 'round': si la última ronda aún se anima, difiere el resultado
@@ -1343,6 +1370,8 @@ function buildArena(){
     <div class="turnlog" id="turnlog"></div>
     <div id="planner"></div>
     <div class="combat-ctrl">
+      <button class="cbtn" id="cb-speed" data-act="cbSpeed" title="Velocidad de animación">▶▶ ${CB.speed||1}x</button>
+      <button class="cbtn ${autoMode()?'on':''}" id="cb-auto" data-act="cbAuto" title="La IA decide y confirma sola">🤖 AUTO</button>
       <button class="cbtn" data-act="flee">🏳 Huir</button>
     </div>`;
   renderCanvases($("#s-battle"));
@@ -1442,10 +1471,12 @@ function planTurn(){
   CB.phase='plan'; CB.planTurn=CB.turn+1; CB.selecting=null;
   CB.plan={}; CB.A.forEach(u=>{ if(u.hp>0) CB.plan[u.uid]={action:'basic',target:null,overcharge:false}; });
   [...CB.A,...CB.B].forEach(x=>x.el&&x.el.classList.remove("acting"));
+  // PvE: SIN límite de tiempo (feedback: 10s agobia aprendiendo). El temporizador
+  // solo existe en PvP en vivo, donde lo impone el servidor (pvpRound).
+  CB.planEndsAt=null;
+  if(CB.planTimer){clearInterval(CB.planTimer);CB.planTimer=null;}
   renderPlanner();
-  CB.planEndsAt=Date.now()+10000;
-  if(CB.planTimer)clearInterval(CB.planTimer);
-  CB.planTimer=setInterval(planTimerTick,100);
+  if(autoMode()) setTimeout(()=>{ if(CB&&CB.phase==='plan'&&!CB.live)confirmPlan(); },600);
 }
 function planTimerTick(){
   if(!CB||CB.phase!=='plan'){ if(CB&&CB.planTimer){clearInterval(CB.planTimer);CB.planTimer=null;} return; }
@@ -1481,7 +1512,10 @@ function renderPlanner(){
     </div>`;
   }).join("");
   const leftPct=CB.planEndsAt?Math.max(0,Math.min(100,(CB.planEndsAt-Date.now())/10000*100)):100;
-  p.innerHTML=`<div class="plan-head"><b>RONDA ${CB.planTurn}</b><div class="plan-timer"><i id="plan-bar" style="width:${leftPct}%"></i></div></div>
+  // Barra de tiempo SOLO en PvP en vivo (deadline del servidor); en PvE piensas
+  // lo que quieras (feedback: los 10s agobian aprendiendo).
+  const timerBar=CB.planEndsAt?`<div class="plan-timer"><i id="plan-bar" style="width:${leftPct}%"></i></div>`:'<span class="dim" style="font-size:10px;margin-left:auto">⌛ sin límite de tiempo</span>';
+  p.innerHTML=`<div class="plan-head"><b>RONDA ${CB.planTurn}</b>${timerBar}</div>
     ${rows}
     ${CB.selecting?`<div class="targhint">🎯 Toca un enemigo para <b>${(CB.A.find(x=>x.uid===CB.selecting)||{}).name}</b> · <span data-act="planAuto" style="color:var(--gold);cursor:pointer">auto</span></div>`:'<div class="dim tc" style="font-size:11px;margin:4px 0">Elige acción de cada aigrón. ⚔️/✨ puedes tocar un enemigo para focalizar.</div>'}
     <button class="btn mag mt8" style="width:100%" data-act="confirmPlan">LISTO ▶</button>`;
@@ -1530,7 +1564,7 @@ function confirmPlan(){
   resolveTurn();
 }
 // Fase de RESOLUCIÓN: anima la ronda (todos actúan por velocidad), luego vuelve a planificar.
-function resolveTurn(){ if(CB.timer)clearInterval(CB.timer); CB.timer=setInterval(resolveTick, Math.round(560/(CB.speed||1))); }
+function resolveTurn(){ if(CB.timer)clearInterval(CB.timer); CB.timer=setInterval(resolveTick, tickMs()); }
 function resolveTick(){
   if(!CB||CB.ended)return;
   if(!CB.A.some(u=>u.hp>0)||!CB.B.some(u=>u.hp>0)){ finishBattle(); return; }
@@ -1580,7 +1614,8 @@ function resolveTick(){
   refreshArena();
   if(!CB.A.some(x=>x.hp>0)||!CB.B.some(x=>x.hp>0)) finishBattle();
 }
-function cbSpeed(){ if(!CB)return; CB.speed=CB.speed===1?2:1; const b=$("#cb-speed"); if(b)b.textContent="▶▶ "+CB.speed+"x"; if(CB.phase==='resolve'&&CB.timer)resolveTurn(); }
+function cbSpeed(){ if(!CB)return; CB.speed=CB.speed===1?2:CB.speed===2?3:1; localStorage.setItem('aigrons_speed',String(CB.speed)); const b=$("#cb-speed"); if(b)b.textContent="▶▶ "+CB.speed+"x"; if(CB.phase==='resolve'&&CB.timer)resolveTurn(); }
+function cbAuto(){ const on=localStorage.getItem('aigrons_auto')==='1'?'0':'1'; localStorage.setItem('aigrons_auto',on); const b=$("#cb-auto"); if(b)b.classList.toggle('on',on==='1'); toast(on==='1'?'🤖 AUTO activado':'AUTO desactivado'); if(on==='1'&&CB&&CB.phase==='plan')confirmPlan(); }
 function showCombatTip(){
   openOverlay(`<div>
     <div class="center" style="font-family:var(--pixel);font-size:12px;color:var(--cyan);margin-bottom:10px">CÓMO LUCHAR</div>
@@ -1634,7 +1669,7 @@ function startLocalCombat(opts){
   registerUnitArt(opts.team); registerUnitArt(opts.enemy);
   const seed=(opts.seed|0)||((Math.random()*0x7fffffff)|0);
   CB={A,B,seed,mode:opts.mode||'local',pvp:false,rng:mulberry32(seed>>>0),
-      turn:0,order:[],oi:0,plan:{},planTurn:0,selecting:null,phase:'plan',speed:1,decisions:[],timer:null,planTimer:null,
+      turn:0,order:[],oi:0,plan:{},planTurn:0,selecting:null,phase:'plan',speed:savedSpeed(),decisions:[],timer:null,planTimer:null,
       initA:opts.team,initB:opts.enemy,ended:false,onResolve:opts.onResolve,title:opts.title||'COMBATE'};
   document.querySelectorAll(".screen").forEach(s=>s.classList.remove("active"));
   $("#s-battle").classList.add("active");
@@ -1673,7 +1708,7 @@ function flee(){
 function fleeStay(){
   closeOverlay();
   // Si estaba planificando, devuelve los 10 s completos (el reloj siguió corriendo).
-  if(CB&&CB.phase==='plan') CB.planEndsAt=Date.now()+10000;
+  if(CB&&CB.phase==='plan'&&CB.planEndsAt) CB.planEndsAt=Date.now()+10000;
 }
 function fleeDungeon(){
   closeOverlay();
@@ -1698,9 +1733,10 @@ function dgHeader(){
      ${artTag(tpl(m.tplId),5)}
      <div class="hpbar"><i style="width:${m.dead?0:Math.round(m.hp/m.hpMax*100)}%;background:${m.hp/m.hpMax<0.3?'var(--red)':m.hp/m.hpMax<0.6?'var(--gold)':'var(--green)'}"></i></div>
      <div style="font-size:10px">${m.dead?'☠️':m.hp+'/'+m.hpMax}</div></div>`).join("");
+  const nodeLvl=ENGINE.dungeonLevelAt(D.diffLevel||1,Math.min(D.depth,D.totalDepth-1),'COMBATE');
   return `<div class="dg-bar"><b>Nodo ${Math.min(D.depth+1,D.totalDepth)}/${D.totalDepth}</b>
        <span style="display:flex;gap:4px">${pips.join("")}</span>
-       <span style="margin-left:auto;color:var(--epi)">${D.diffLabel||''} nv${D.diffLevel||'?'}</span>
+       <span style="margin-left:auto;color:var(--epi)">${D.diffLabel||''} · nv~${nodeLvl}</span>
        <span class="dim" style="font-size:11px">botín: <b style="color:var(--gold)">${D.coins}</b>🪙</span></div>
      <div class="dg-team">${team}</div>
      <div class="dg-relics">${D.relics.length?D.relics.map(relicChip).join(""):'<span class="dim" style="font-size:12px">Sin reliquias aún</span>'}</div>`;
@@ -1777,20 +1813,30 @@ function myTeamLevel(){
   return team.length?Math.round(team.reduce((a,i)=>a+i.level,0)/team.length):1;
 }
 function difficultyPicker(){
-  // Recomendación: la dificultad cuyo nivel enemigo queda más cerca del tuyo
-  // (sin pasarse mucho). Hoy nada te dice cuál es razonable para tu equipo.
+  // La mazmorra es una RAMPA: empieza suave (~25% del nivel de referencia) y
+  // sube hasta superar el nivel en el jefe. La recomendación es HONESTA: en
+  // verde solo si puedes al menos PROGRESAR (tu nivel >= primer nodo); si hasta
+  // la más fácil te supera de inicio, aviso ámbar — nada de "ideal" engañoso.
   const lvl=myTeamLevel();
-  let recId=DG_ORDER[0],best=Infinity;
-  DG_ORDER.forEach(id=>{const d=ENGINE.DUNGEON_DIFFICULTIES[id];
-    const dist=Math.abs(d.level-lvl)+(d.level>lvl+6?8:0); // penaliza pasarse mucho
-    if(dist<best){best=dist;recId=id;}});
-  const cards=DG_ORDER.map(id=>{const d=ENGINE.DUNGEON_DIFFICULTIES[id];const rec=id===recId;
-    return `<div class="relic-card" style="align-items:center;${rec?'border-color:var(--cyan);box-shadow:0 0 8px rgba(52,245,228,.3)':''}">
-      <div style="flex:1"><b>${d.label}</b>${rec?' <span style="color:var(--cyan);font-size:10px;font-weight:700">✓ PARA TU EQUIPO</span>':''}
-        <div class="dim" style="font-size:11px">Enemigos nv${d.level} · recompensa ×${d.coinMult}</div></div>
+  const startOf=id=>ENGINE.dungeonLevelAt(ENGINE.DUNGEON_DIFFICULTIES[id].level,0,'COMBATE');
+  const bossOf=id=>ENGINE.dungeonLevelAt(ENGINE.DUNGEON_DIFFICULTIES[id].level,ENGINE.DUNGEON_DEPTH-1,'JEFE');
+  // Recomendada: la más alta cuyo primer nodo puedas pelear de tú a tú.
+  let recId=null;
+  DG_ORDER.forEach(id=>{ if(lvl>=startOf(id)) recId=id; });
+  const cards=DG_ORDER.map(id=>{const d=ENGINE.DUNGEON_DIFFICULTIES[id];
+    const s=startOf(id),b=bossOf(id);
+    const rec=id===recId;
+    const tooHard=lvl<s;
+    const tag=rec?'<span style="color:var(--cyan);font-size:10px;font-weight:700">✓ PUEDES PROGRESAR</span>'
+      :tooHard?`<span style="color:var(--gold);font-size:10px;font-weight:700">⚠️ EMPIEZA EN NV${s} — AÚN TE SUPERA</span>`:'';
+    return `<div class="relic-card" style="align-items:center;${rec?'border-color:var(--cyan);box-shadow:0 0 8px rgba(52,245,228,.3)':tooHard?'border-color:var(--gold)':''}">
+      <div style="flex:1"><b>${d.label}</b> ${tag}
+        <div class="dim" style="font-size:11px">Enemigos nv${s} → nv${b} (jefe) · tu equipo: <b style="color:${tooHard?'var(--gold)':'var(--green)'}">nv${lvl}</b> · recompensa ×${d.coinMult}</div></div>
       <button class="btn sm ${rec?'':'ghost'}" data-act="dgStart" data-arg="${id}">JUGAR</button></div>`;}).join("");
+  const warn=recId===null?`<div class="dim" style="font-size:12px;margin-top:6px">⚠️ Hasta la dificultad más baja empieza por encima de tu equipo (nv${lvl}). Puedes intentarlo igualmente, pero te recomendamos subir niveles primero.</div>`:'';
   return `<div class="panel"><div class="row" style="justify-content:space-between;align-items:center">
-    <b style="font-size:13px">Elige dificultad</b><span class="dim" style="font-size:11px">tu equipo: nv ${lvl}</span></div>
+    <b style="font-size:13px">Elige dificultad</b><span class="dim" style="font-size:11px">la mazmorra sube de nivel nodo a nodo</span></div>
+    ${warn}
     <div class="mt8">${cards}</div></div>`;
 }
 function dgRankSection(){
@@ -1818,7 +1864,7 @@ function dgFight(){
   const A=b.team.map((s,i)=>E.unitFromStats(s,'A',i)); E.applyRelics(A,b.relics); A.forEach((u,i)=>u.hp=Math.min(u.hpMax,b.team[i].hp));
   const B=b.enemy.map((s,i)=>E.unitFromStats(s,'B',i));
   CB={A,B,seed:b.battleSeed|0,mode:'dungeon',pvp:false,rng:mulberry32(b.battleSeed>>>0),
-      turn:0,order:[],oi:0,plan:{},planTurn:0,selecting:null,phase:'plan',speed:1,decisions:[],timer:null,planTimer:null,
+      turn:0,order:[],oi:0,plan:{},planTurn:0,selecting:null,phase:'plan',speed:savedSpeed(),decisions:[],timer:null,planTimer:null,
       initA:b.team,initB:b.enemy,relics:b.relics,ended:false};
   document.querySelectorAll(".screen").forEach(s=>s.classList.remove("active"));
   $("#s-battle").classList.add("active");
@@ -1982,7 +2028,7 @@ const ACTIONS={
   planEnemy:(a)=>planEnemy(a),
   planAuto:()=>planAuto(),
   confirmPlan:()=>confirmPlan(),
-  cbSpeed:()=>cbSpeed(), combatTipOk:()=>combatTipOk(),
+  cbSpeed:()=>cbSpeed(), cbAuto:()=>cbAuto(), combatTipOk:()=>combatTipOk(),
   flee:()=>flee(),
   fleeDungeon:()=>fleeDungeon(), fleeStay:()=>fleeStay(),
   continueBattle:()=>{closeOverlay();go('home');},
