@@ -230,6 +230,42 @@ footer{border-top:1px solid var(--line);padding:38px 24px;text-align:center;colo
 .foot-links{display:flex;gap:22px;justify-content:center;margin-bottom:16px;flex-wrap:wrap;font-weight:500}
 .foot-links a:hover{color:var(--cyan)}
 
+/* ====== PRE-REGISTRO / HITOS (estilo DIGIMON UP) ====== */
+.prereg-bg{background:linear-gradient(180deg,var(--bg2),#0d0a18)}
+.badges{display:flex;gap:14px;flex-wrap:wrap;justify-content:center;margin:34px 0 10px}
+.badge-store{display:flex;flex-direction:column;align-items:flex-start;gap:2px;border:1px solid var(--line);
+  border-radius:12px;padding:12px 22px;background:#0c0c1c;min-width:190px;transition:border-color .2s,transform .2s}
+.badge-store:hover{border-color:var(--gold);transform:translateY(-2px)}
+.badge-store .b-soon{font-size:10px;letter-spacing:2px;color:var(--gold);text-transform:uppercase;font-weight:800}
+.badge-store .b-name{font-size:17px;font-weight:800;color:var(--text)}
+.badge-store.b-web{border-color:rgba(78,240,232,.5)}
+.badge-store.b-web .b-soon{color:var(--cyan)}
+.milestones{max-width:760px;margin:46px auto 0}
+.mile-track{position:relative;height:8px;border-radius:4px;background:#0a0a18;border:1px solid var(--line)}
+.mile-track i{position:absolute;left:0;top:0;bottom:0;width:18%;border-radius:4px;
+  background:linear-gradient(90deg,var(--gold),var(--magenta));box-shadow:0 0 14px rgba(255,211,78,.5)}
+.mile-nodes{display:flex;justify-content:space-between;margin-top:18px;gap:10px}
+.mile{flex:1;text-align:center;padding:0 6px}
+.mile .m-dot{width:18px;height:18px;border-radius:50%;margin:0 auto 12px;border:2px solid var(--line);background:#0c0c1c}
+.mile.on .m-dot{border-color:var(--gold);background:var(--gold);box-shadow:0 0 16px rgba(255,211,78,.7)}
+.mile .m-goal{font-family:'Press Start 2P',monospace;font-size:11px;color:var(--text);margin-bottom:8px}
+.mile .m-prize{font-size:13px;color:var(--muted);line-height:1.5}
+.mile.on .m-prize{color:var(--gold)}
+/* ====== ESPECIFICACIONES ====== */
+.spec{max-width:680px;margin:0 auto;border:1px solid var(--line);border-radius:16px;overflow:hidden}
+.spec-row{display:flex;border-bottom:1px solid var(--line);background:#0d0d1d}
+.spec-row:last-child{border-bottom:none}
+.spec-row dt{width:42%;padding:15px 22px;color:var(--muted);font-size:13.5px;letter-spacing:1px;text-transform:uppercase;font-weight:700;background:#0a0a16}
+.spec-row dd{flex:1;padding:15px 22px;font-size:15px;color:var(--text)}
+/* ====== SOCIAL ====== */
+.social-row{display:flex;gap:12px;flex-wrap:wrap;justify-content:center;margin:26px 0 8px}
+.soc{display:flex;align-items:center;gap:9px;border:1px solid var(--line);border-radius:999px;padding:10px 20px;
+  font-size:14px;font-weight:700;color:var(--text);transition:border-color .2s,transform .2s,box-shadow .2s}
+.soc:hover{transform:translateY(-2px)}
+.soc.s-dc:hover{border-color:#5865F2;box-shadow:0 0 18px rgba(88,101,242,.3)}
+.soc.s-tt:hover{border-color:var(--cyan);box-shadow:0 0 18px rgba(78,240,232,.3)}
+.soc.s-x:hover{border-color:#fff}
+.soc.s-yt:hover{border-color:#ff4e4e;box-shadow:0 0 18px rgba(255,78,78,.3)}
 .reveal{opacity:0;transform:translateY(28px);transition:opacity .8s ease,transform .8s ease}
 .reveal.vis{opacity:1;transform:none}
 @media (prefers-reduced-motion: reduce){
@@ -255,6 +291,7 @@ footer{border-top:1px solid var(--line);padding:38px 24px;text-align:center;colo
     <a class="hide-m" href="#unica" data-i18n="nav_unique">La única de hoy</a>
     <a class="hide-m" href="#album" data-i18n="nav_album">El álbum</a>
     <a class="hide-m" href="#modos" data-i18n="nav_modes">Modos</a>
+    <a class="hide-m" href="#fundadores" data-i18n="nav_founders">Fundadores</a>
     <a class="hide-m" href="#faq">FAQ</a>
     <div class="lang-toggle">
       <button id="lang-es" class="active" onclick="setLang('es')">ES</button>
@@ -275,6 +312,11 @@ footer{border-top:1px solid var(--line);padding:38px 24px;text-align:center;colo
     <div class="cta-row">
       <a class="btn-primary" href="/" data-i18n="cta">RECLAMA TU CRIATURA</a>
       <a class="btn-ghost" href="#album" data-i18n="cta2">Ver el álbum ↓</a>
+    </div>
+    <div class="badges">
+      <a class="badge-store b-web" href="/"><span class="b-soon" data-i18n="bg_now">Juega ya</span><span class="b-name" data-i18n="bg_web">En tu navegador</span></a>
+      <a class="badge-store" href="#fundadores"><span class="b-soon" data-i18n="bg_soon">Próximamente</span><span class="b-name">App Store</span></a>
+      <a class="badge-store" href="#fundadores"><span class="b-soon" data-i18n="bg_soon2">Próximamente</span><span class="b-name">Google Play</span></a>
     </div>
     <div class="hero-meta">
       <span><i>✔</i><span data-i18n="m1">Gratis, en tu navegador</span></span>
@@ -393,6 +435,56 @@ footer{border-top:1px solid var(--line);padding:38px 24px;text-align:center;colo
   </div>
 </section>
 
+<!-- FUNDADORES / PRE-REGISTRO -->
+<section id="fundadores" class="prereg-bg">
+  <div class="wrap" style="text-align:center">
+    <div class="kicker glow-gold reveal" data-i18n="pr_kicker">LOS PRIMEROS SERÁN RECORDADOS</div>
+    <h2 class="sec-title reveal" data-i18n="pr_title">CONVIÉRTETE EN FUNDADOR</h2>
+    <p class="sec-sub reveal" data-i18n="pr_sub">Quien juegue antes del lanzamiento en las stores se lleva el marco de Fundador para siempre. Y cuantos más seamos, más desbloqueamos todos:</p>
+    <div class="milestones reveal">
+      <div class="mile-track"><i></i></div>
+      <div class="mile-nodes">
+        <div class="mile on">
+          <div class="m-dot"></div>
+          <div class="m-goal">1.000</div>
+          <div class="m-prize" data-i18n="pr_p1">Criatura fundadora exclusiva para todos</div>
+        </div>
+        <div class="mile">
+          <div class="m-dot"></div>
+          <div class="m-goal">5.000</div>
+          <div class="m-prize" data-i18n="pr_p2">10 tiradas extra de regalo</div>
+        </div>
+        <div class="mile">
+          <div class="m-dot"></div>
+          <div class="m-goal">10.000</div>
+          <div class="m-prize" data-i18n="pr_p3">Legendaria de lanzamiento garantizada</div>
+        </div>
+      </div>
+    </div>
+    <div class="social-row reveal" style="margin-top:48px">
+      <a class="soc s-dc" href="#">💬 Discord</a>
+      <a class="soc s-tt" href="#">🎵 TikTok</a>
+      <a class="soc s-x" href="#">𝕏 Twitter</a>
+      <a class="soc s-yt" href="#">▶ YouTube</a>
+    </div>
+  </div>
+</section>
+
+<!-- ESPECIFICACIONES -->
+<section id="especificaciones" style="padding-top:70px">
+  <div class="wrap">
+    <h2 class="sec-title reveal"><span class="glow-cyan" data-i18n="sp_title">FICHA TÉCNICA</span></h2>
+    <dl class="spec reveal" style="margin-top:50px">
+      <div class="spec-row"><dt data-i18n="sp_t1">Título</dt><dd>AIGRONS</dd></div>
+      <div class="spec-row"><dt data-i18n="sp_t2">Género</dt><dd data-i18n="sp_d2">Coleccionable de criaturas · combate por turnos</dd></div>
+      <div class="spec-row"><dt data-i18n="sp_t3">Precio</dt><dd data-i18n="sp_d3">Gratis (cosméticos opcionales, nunca pay-to-win)</dd></div>
+      <div class="spec-row"><dt data-i18n="sp_t4">Plataformas</dt><dd data-i18n="sp_d4">Navegador (móvil y escritorio) · App Store y Google Play próximamente</dd></div>
+      <div class="spec-row"><dt data-i18n="sp_t5">Idiomas</dt><dd data-i18n="sp_d5">Español · English</dd></div>
+      <div class="spec-row"><dt data-i18n="sp_t6">Sesión</dt><dd data-i18n="sp_d6">2 minutos · una mano · sin esperas</dd></div>
+    </dl>
+  </div>
+</section>
+
 <!-- FAQ -->
 <section id="faq">
   <div class="wrap">
@@ -444,7 +536,7 @@ footer{border-top:1px solid var(--line);padding:38px 24px;text-align:center;colo
 /* ================= i18n ================= */
 const I18N = {
   es: {
-    nav_unique:"La única de hoy", nav_album:"El álbum", nav_modes:"Modos", nav_play:"Jugar",
+    nav_unique:"La única de hoy", nav_album:"El álbum", nav_modes:"Modos", nav_founders:"Fundadores", nav_play:"Jugar",
     intro_skip:"toca para entrar",
     intro1:"Esta noche, mientras dormías…",
     intro2:"…nacieron criaturas que <b>no existían</b>.",
@@ -494,13 +586,27 @@ const I18N = {
     a5:"Web móvil (iOS y Android) y escritorio desde el día uno. Apps nativas en App Store y Google Play, en camino.",
     f_title:"TU PRIMERA CRIATURA<br>YA HA NACIDO", f_sub:"Está esperando a conocerte.",
     ft_press:"Kit de prensa", ft_priv:"Privacidad", ft_made:"Aquí nacen cosas que no existían.",
+    bg_now:"Juega ya", bg_web:"En tu navegador", bg_soon:"Próximamente", bg_soon2:"Próximamente",
+    pr_kicker:"LOS PRIMEROS SERÁN RECORDADOS",
+    pr_title:"CONVIÉRTETE EN FUNDADOR",
+    pr_sub:"Quien juegue antes del lanzamiento en las stores se lleva el marco de Fundador para siempre. Y cuantos más seamos, más desbloqueamos todos:",
+    pr_p1:"Criatura fundadora exclusiva para todos",
+    pr_p2:"10 tiradas extra de regalo",
+    pr_p3:"Legendaria de lanzamiento garantizada",
+    sp_title:"FICHA TÉCNICA",
+    sp_t1:"Título", sp_t2:"Género", sp_t3:"Precio", sp_t4:"Plataformas", sp_t5:"Idiomas", sp_t6:"Sesión",
+    sp_d2:"Coleccionable de criaturas · combate por turnos",
+    sp_d3:"Gratis (cosméticos opcionales, nunca pay-to-win)",
+    sp_d4:"Navegador (móvil y escritorio) · App Store y Google Play próximamente",
+    sp_d5:"Español · English",
+    sp_d6:"2 minutos · una mano · sin esperas",
     season:"TEMPORADA DE {M} · DÍA {D}", album_title:"ÁLBUM · {M} {Y}",
     altar_name:"VESPERINA",
     altar_lore:"«Nació del último rayo de sol de ayer. Brilla más cuanto menos la miran.»",
     months:["ENERO","FEBRERO","MARZO","ABRIL","MAYO","JUNIO","JULIO","AGOSTO","SEPTIEMBRE","OCTUBRE","NOVIEMBRE","DICIEMBRE"]
   },
   en: {
-    nav_unique:"Today's unique", nav_album:"The album", nav_modes:"Modes", nav_play:"Play",
+    nav_unique:"Today's unique", nav_album:"The album", nav_modes:"Modes", nav_founders:"Founders", nav_play:"Play",
     intro_skip:"tap to enter",
     intro1:"Tonight, while you were sleeping…",
     intro2:"…creatures that <b>never existed</b> were born.",
@@ -550,6 +656,20 @@ const I18N = {
     a5:"Mobile web (iOS & Android) and desktop from day one. Native App Store and Google Play apps are on the way.",
     f_title:"YOUR FIRST CREATURE<br>HAS ALREADY BEEN BORN", f_sub:"It's waiting to meet you.",
     ft_press:"Press kit", ft_priv:"Privacy", ft_made:"Things that never existed are born here.",
+    bg_now:"Play now", bg_web:"In your browser", bg_soon:"Coming soon", bg_soon2:"Coming soon",
+    pr_kicker:"THE FIRST ONES WILL BE REMEMBERED",
+    pr_title:"BECOME A FOUNDER",
+    pr_sub:"Play before the store launch and keep the Founder frame forever. And the more of us there are, the more we all unlock:",
+    pr_p1:"Exclusive founder creature for everyone",
+    pr_p2:"10 bonus pulls as a gift",
+    pr_p3:"Guaranteed launch legendary",
+    sp_title:"SPEC SHEET",
+    sp_t1:"Title", sp_t2:"Genre", sp_t3:"Price", sp_t4:"Platforms", sp_t5:"Languages", sp_t6:"Session",
+    sp_d2:"Creature collector · turn-based battles",
+    sp_d3:"Free (optional cosmetics, never pay-to-win)",
+    sp_d4:"Browser (mobile & desktop) · App Store and Google Play coming soon",
+    sp_d5:"Español · English",
+    sp_d6:"2 minutes · one hand · no waiting",
     season:"{M} SEASON · DAY {D}", album_title:"ALBUM · {M} {Y}",
     altar_name:"VESPERINE",
     altar_lore:"“Born from yesterday's last ray of sun. It shines brighter the less you look at it.”",
