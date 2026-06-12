@@ -87,6 +87,8 @@ app.use(generalLimiter);
 
 // Sirve el frontend en / para probar en local (http://localhost:3000)
 app.use(express.static(path.join(__dirname, "../../web")));
+// Landing pública de marketing (aigrons.com): mismo origen => sin CORS.
+app.use("/landing", express.static(path.join(__dirname, "../../landing")));
 
 // El catálogo coleccionable es MENSUAL: un álbum grande (~180) que cambia cada
 // mes. Sobre él rota un destacado diario (~18) que alimenta puzzle/mazmorra/
@@ -390,6 +392,49 @@ app.get("/auth/config", (req, res) => {
 });
 // Flags de funcionalidad: el cliente los pide para mostrar/ocultar cada mecánica.
 app.get("/features", (req, res) => res.json(features.flags()));
+// ------------------------------ LANDING PÚBLICA ------------------------------
+// Datos reales para la landing de marketing (SIN auth): temporada actual, única
+// del día, destacados y una muestra del álbum. Solo expone campos que el juego
+// ya muestra públicamente (nombre/lore/rareza/arte). Caché en memoria 5 min:
+// aguanta picos de tráfico (Product Hunt/Reddit) sin tocar la BD por visita.
+let _landingCache = { key: null, at: 0, data: null };
+app.get("/api/landing", wrap(async (req, res) => {
+  const today = C.todayStr();
+  const now = Date.now();
+  if (_landingCache.key === today && now - _landingCache.at < 5 * 60 * 1000) {
+    res.set("Cache-Control", "public, max-age=300");
+    return res.json(_landingCache.data);
+  }
+  const sKey = C.seasonKey(today);
+  const pool = await seasonTemplates(today);
+  const highlights = C.dailyHighlights(today, pool, HIGHLIGHT_N);
+  const uniq = await dailyUniqueTemplate(today);
+  // Cuántas especies del álbum ha descubierto YA la comunidad (dato real y vistoso).
+  const disc = await db.query(
+    `SELECT COUNT(DISTINCT ci.template_id)::int AS n FROM creature_instances ci
+       JOIN creature_templates t ON t.template_id = ci.template_id
+      WHERE t.batch_date=$1 AND t.kind='season'`, [sKey]);
+  const pub = (t, withLore) => ({
+    id: t.id, name: t.name, type: t.type, rarity: t.rarity, art_seed: t.art_seed,
+    image_url: t.image_url || null, image_thumb_url: t.image_thumb_url || null,
+    ...(withLore ? { lore: t.lore } : {}),
+  });
+  // Muestra del álbum repartida uniformemente (estable durante el día; sin nombres:
+  // en la landing las no destacadas se enseñan como silueta, igual que en el juego).
+  const step = Math.max(1, Math.floor(pool.length / 24));
+  const albumSample = pool.filter((_, i) => i % step === 0).slice(0, 24)
+    .map((t) => ({ id: t.id, rarity: t.rarity, art_seed: t.art_seed, image_thumb_url: t.image_thumb_url || null }));
+  const data = {
+    date: today,
+    season: { key: sKey, label: C.seasonLabel(today), total: pool.length, discovered: disc.rows[0].n },
+    unique: uniq ? pub(uniq, true) : null,
+    highlights: highlights.map((t) => pub(t, true)),
+    albumSample,
+  };
+  _landingCache = { key: today, at: now, data };
+  res.set("Cache-Control", "public, max-age=300");
+  res.json(data);
+}));
 // Middleware: 404 si la feature de la ruta está apagada.
 const requireFeature = (key) => (req, res, next) => features.on(key) ? next() : res.status(404).json({ error: "feature_disabled" });
 app.post("/auth/login", wrap(async (req, res) => {
