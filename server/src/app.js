@@ -1450,7 +1450,12 @@ app.post("/admin/tasks/:task", requireAdmin, (req, res) => {
   }
   const entry = (_adminTasks[name] = { status: "running", startedAt: new Date().toISOString() });
   fn(req.query || {})
-    .then((result) => { entry.status = "done"; entry.result = result; entry.finishedAt = new Date().toISOString(); })
+    .then((result) => {
+      entry.status = "done"; entry.result = result; entry.finishedAt = new Date().toISOString();
+      // Las tareas de arte cambian image_url: invalida la caché de la landing
+      // para que el resultado se vea al instante (antes tardaba hasta 5 min).
+      _landingCache = { key: null, at: 0, data: null };
+    })
     .catch((e) => { entry.status = "error"; entry.error = e.message; entry.finishedAt = new Date().toISOString(); });
   res.json({ started: name, poll: "GET /admin/tasks" });
 });

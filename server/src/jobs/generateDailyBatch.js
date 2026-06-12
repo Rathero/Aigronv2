@@ -192,15 +192,21 @@ async function generateSeason(sKey, n, opts = {}) {
 async function generateDailyUnique(date, opts = {}) {
   const t = E.dailyUnique(date);
   const provider = getImageProvider();
-  let art = null;
+  let art = null, note;
   if (opts.withArt !== false && provider.name !== "procedural") {
     const ex = await db.query("SELECT image_url FROM creature_templates WHERE template_id=$1", [t.id]);
-    if (!ex.rowCount || !ex.rows[0].image_url) art = await generateArt(provider, t);
+    if (ex.rowCount && ex.rows[0].image_url) note = "ya tenía imagen: " + ex.rows[0].image_url;
+    else {
+      art = await generateArt(provider, t);
+      if (!art) note = "la generación falló o fue filtrada — busca '[batch] error generando arte de " + t.id + "' en los logs";
+    }
+  } else if (provider.name === "procedural") {
+    note = "proveedor procedural (sin GEMINI_API_KEY): no se genera imagen";
   }
   const inserted = await insertTemplate(t, date, "unique", art);
   if (art) await db.query("UPDATE creature_templates SET image_url=$2, image_thumb_url=$3, quality_score=$4 WHERE template_id=$1 AND image_url IS NULL",
     [t.id, art.image_url, art.image_thumb_url, art.quality_score]);
-  return { date, id: t.id, inserted, withImage: art ? 1 : 0 };
+  return { date, id: t.id, inserted, withImage: art ? 1 : 0, note };
 }
 
 // REBALANCEO de stats guardadas: las plantillas ya insertadas (temporada/lotes
