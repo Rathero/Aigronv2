@@ -423,7 +423,7 @@ app.get("/api/landing", wrap(async (req, res) => {
   // en la landing las no destacadas se enseñan como silueta, igual que en el juego).
   const step = Math.max(1, Math.floor(pool.length / 24));
   const albumSample = pool.filter((_, i) => i % step === 0).slice(0, 24)
-    .map((t) => ({ id: t.id, rarity: t.rarity, art_seed: t.art_seed, image_thumb_url: t.image_thumb_url || null }));
+    .map((t) => ({ id: t.id, type: t.type, rarity: t.rarity, art_seed: t.art_seed, image_thumb_url: t.image_thumb_url || null }));
   const data = {
     date: today,
     season: { key: sKey, label: C.seasonLabel(today), total: pool.length, discovered: disc.rows[0].n },

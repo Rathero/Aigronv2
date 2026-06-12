@@ -234,6 +234,13 @@ function seedNum(x){
   for(let i=0;i<str.length;i++){ h=Math.imul(31,h)+str.charCodeAt(i)|0; }
   return (Math.abs(h)||1);
 }
+/* Dibuja una criatura REAL con el renderer del juego (web/sprite.js): la única
+   y el álbum se ven EXACTAMENTE igual que dentro de la app. Si el módulo aún no
+   cargó o no hay datos, cae al dibujo procedural decorativo de la landing. */
+function drawRealTpl(canvas, tpl, px){
+  if(window.SPRITE && tpl && (tpl.art_seed!=null || tpl.id)){ window.SPRITE.drawTpl(canvas, tpl, px||10); return true; }
+  return false;
+}
 function updateSeasonChip(){
   const now=new Date(), T=I18N[LANG];
   let txt=T.season.replace('{M}',T.months[now.getMonth()]).replace('{D}',now.getDate());
@@ -252,7 +259,7 @@ function renderAltar(data){
   } else {
     let cv=old;
     if(old.tagName!=='CANVAS'){ cv=document.createElement('canvas'); cv.id='altar-canvas'; old.replaceWith(cv); }
-    drawCreature(cv, data?seedNum(data.art_seed):992617, 5);
+    if(!drawRealTpl(cv, data, 12)) drawCreature(cv, data?seedNum(data.art_seed):992617, 5);
   }
   if(data){
     if(data.name) document.getElementById('altar-name').textContent=String(data.name).toUpperCase();
@@ -267,8 +274,8 @@ function buildAlbum(sample, discovered, total){
   cont.innerHTML='';
   const rnd=mulberry32(20260612);
   const items=(sample&&sample.length)
-    ? sample.map(t=>({seed:seedNum(t.art_seed),rarity:t.rarity,thumb:t.image_thumb_url}))
-    : Array.from({length:24},(_,i)=>({seed:7000+Math.floor(rnd()*999999),rarity:null,thumb:null}));
+    ? sample.map(t=>({tpl:t, seed:seedNum(t.art_seed), rarity:t.rarity, thumb:t.image_thumb_url}))
+    : Array.from({length:24},(_,i)=>({tpl:null, seed:7000+Math.floor(rnd()*999999), rarity:null, thumb:null}));
   const T=total||180, D=(discovered!=null)?discovered:64;
   const frac=Math.max(0.08,Math.min(0.95,D/T));
   const rcls=r=> r==='LEGENDARIA'?'s-leg' : r==='EPICA'?'s-epic' : r==='RARA'?'s-rare' : '';
@@ -285,7 +292,9 @@ function buildAlbum(sample, discovered, total){
       d.appendChild(img);
     } else {
       const c=document.createElement('canvas'); d.appendChild(c);
-      drawCreature(c, it.seed, i%6);
+      // Sprite REAL del juego si hay datos (las 'unknown' las oscurece el CSS:
+      // misma forma, en negro — igual que las siluetas del álbum de la app).
+      if(!drawRealTpl(c, it.tpl, 6)) drawCreature(c, it.seed, i%6);
     }
     cont.appendChild(d);
   });
@@ -400,7 +409,7 @@ function resolveArt(u){ return /^https?:/i.test(u) ? u : API_BASE + u; }
     renderAltar(d.unique);
     buildAlbum(d.albumSample, d.season.discovered, d.season.total);
     updateSeasonChip();
-  }catch(e){ /* sin API: contenido procedural de respaldo */ }
+  }catch(e){ console.warn('[landing] sin datos reales (', e && e.message, ') — mostrando contenido de respaldo'); }
 })();
 
 /* ================= listeners sin inline (CSP) ================= */
