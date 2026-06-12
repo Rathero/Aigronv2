@@ -42,14 +42,17 @@ async function closeWeekIfDue(db) {
     const again = await client.query("SELECT value FROM app_meta WHERE key='league_week_closed'");
     if (again.rowCount && again.rows[0].value === thisWeek) { await client.query("ROLLBACK"); return false; }
 
-    const caseCoins = `CASE league WHEN 'DIAMANTE' THEN ${REWARDS.DIAMANTE.coins} WHEN 'PLATINO' THEN ${REWARDS.PLATINO.coins} WHEN 'ORO' THEN ${REWARDS.ORO.coins} WHEN 'PLATA' THEN ${REWARDS.PLATA.coins} ELSE ${REWARDS.BRONCE.coins} END`;
-    const caseGems = `CASE league WHEN 'DIAMANTE' THEN ${REWARDS.DIAMANTE.gems} WHEN 'PLATINO' THEN ${REWARDS.PLATINO.gems} WHEN 'ORO' THEN ${REWARDS.ORO.gems} WHEN 'PLATA' THEN ${REWARDS.PLATA.gems} ELSE ${REWARDS.BRONCE.gems} END`;
-    const caseFloor = `CASE league WHEN 'DIAMANTE' THEN ${FLOORS.DIAMANTE} WHEN 'PLATINO' THEN ${FLOORS.PLATINO} WHEN 'ORO' THEN ${FLOORS.ORO} WHEN 'PLATA' THEN ${FLOORS.PLATA} ELSE ${FLOORS.BRONCE} END`;
+    // Los CASE reciben la COLUMNA calificada: en los UPDATE ... FROM _mov, tanto
+    // users como _mov tienen `league`/`league_points` y la referencia sin calificar
+    // es ambigua (el cierre fallaba con "column reference league is ambiguous").
+    const caseCoins = (col) => `CASE ${col} WHEN 'DIAMANTE' THEN ${REWARDS.DIAMANTE.coins} WHEN 'PLATINO' THEN ${REWARDS.PLATINO.coins} WHEN 'ORO' THEN ${REWARDS.ORO.coins} WHEN 'PLATA' THEN ${REWARDS.PLATA.coins} ELSE ${REWARDS.BRONCE.coins} END`;
+    const caseGems = (col) => `CASE ${col} WHEN 'DIAMANTE' THEN ${REWARDS.DIAMANTE.gems} WHEN 'PLATINO' THEN ${REWARDS.PLATINO.gems} WHEN 'ORO' THEN ${REWARDS.ORO.gems} WHEN 'PLATA' THEN ${REWARDS.PLATA.gems} ELSE ${REWARDS.BRONCE.gems} END`;
+    const caseFloor = (col) => `CASE ${col} WHEN 'DIAMANTE' THEN ${FLOORS.DIAMANTE} WHEN 'PLATINO' THEN ${FLOORS.PLATINO} WHEN 'ORO' THEN ${FLOORS.ORO} WHEN 'PLATA' THEN ${FLOORS.PLATA} ELSE ${FLOORS.BRONCE} END`;
 
     // Histórico de la semana que se cierra (para salón de la fama / perfil).
     await client.query(
       `INSERT INTO league_weeks (week_start, user_id, league, points, reward_coins, reward_gems)
-       SELECT $1, id, league, league_points, ${caseCoins}, ${caseGems}
+       SELECT $1, id, league, league_points, ${caseCoins("league")}, ${caseGems("league")}
          FROM users WHERE league_points > 0
        ON CONFLICT (week_start, user_id) DO NOTHING`,
       [thisWeek]
@@ -70,24 +73,24 @@ async function closeWeekIfDue(db) {
               count(*) OVER (PARTITION BY league) AS n
          FROM users WHERE league_points > 0`
     );
-    const NEXT_FLOOR = `CASE league WHEN 'BRONCE' THEN 100 WHEN 'PLATA' THEN 250 WHEN 'ORO' THEN 450 ELSE 700 END`;
-    const PREV_MID = `CASE league WHEN 'PLATA' THEN 50 WHEN 'ORO' THEN 175 WHEN 'PLATINO' THEN 350 ELSE 575 END`;
+    const NEXT_FLOOR = `CASE u.league WHEN 'BRONCE' THEN 100 WHEN 'PLATA' THEN 250 WHEN 'ORO' THEN 450 ELSE 700 END`;
+    const PREV_MID = `CASE u.league WHEN 'PLATA' THEN 50 WHEN 'ORO' THEN 175 WHEN 'PLATINO' THEN 350 ELSE 575 END`;
     const up = await client.query(
-      `UPDATE users u SET coins = coins + ${caseCoins}, gems = gems + ${caseGems},
+      `UPDATE users u SET coins = coins + ${caseCoins("u.league")}, gems = gems + ${caseGems("u.league")},
               league_points = ${NEXT_FLOOR}
          FROM _mov m WHERE u.id = m.id AND m.n >= 5 AND m.pr >= 0.8 AND u.league <> 'DIAMANTE'`
     );
     const down = await client.query(
-      `UPDATE users u SET coins = coins + ${caseCoins}, gems = gems + ${caseGems},
+      `UPDATE users u SET coins = coins + ${caseCoins("u.league")}, gems = gems + ${caseGems("u.league")},
               league_points = ${PREV_MID}
          FROM _mov m WHERE u.id = m.id AND m.n >= 5 AND m.pr <= 0.2 AND u.league <> 'BRONCE'`
     );
     // Resto: recompensa + soft-reset.
     const upd = await client.query(
       `UPDATE users u SET
-         coins = coins + ${caseCoins},
-         gems  = gems + ${caseGems},
-         league_points = ${caseFloor} + (league_points - ${caseFloor}) / 2
+         coins = coins + ${caseCoins("u.league")},
+         gems  = gems + ${caseGems("u.league")},
+         league_points = ${caseFloor("u.league")} + (u.league_points - ${caseFloor("u.league")}) / 2
        FROM _mov m WHERE u.id = m.id
          AND NOT (m.n >= 5 AND m.pr >= 0.8 AND u.league <> 'DIAMANTE')
          AND NOT (m.n >= 5 AND m.pr <= 0.2 AND u.league <> 'BRONCE')`
