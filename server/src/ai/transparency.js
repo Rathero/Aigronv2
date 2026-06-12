@@ -15,8 +15,22 @@
 // =============================================================================
 let PNG = null;
 try { PNG = require("pngjs").PNG; } catch (e) { /* opcional */ }
+let JPEG = null;
+try { JPEG = require("jpeg-js"); } catch (e) { /* opcional */ }
 
 const available = () => !!PNG;
+
+// JPEG -> PNG (RGBA) en JS puro: Gemini a veces devuelve image/jpeg, que no
+// admite transparencia y se saltaba el croma (la única del día salió con el
+// fondo verde horneado). Convertimos y el pipeline de croma sigue igual.
+const canConvertJpeg = () => !!(PNG && JPEG);
+function jpegToPng(buffer) {
+  if (!canConvertJpeg()) return null;
+  const img = JPEG.decode(buffer, { maxMemoryUsageInMB: 64, formatAsRGBA: true });
+  const png = new PNG({ width: img.width, height: img.height });
+  img.data.copy(png.data);
+  return PNG.sync.write(png);
+}
 
 // ¿La imagen ya tiene transparencia? (para que el reprocesado sea idempotente)
 function hasTransparency(buffer) {
@@ -135,4 +149,4 @@ function keyEdgesAdaptive(buffer, tolerance = 42) {
   return PNG.sync.write(png);
 }
 
-module.exports = { available, hasTransparency, hasGreenBg, chromaKeyGreen, keyEdgesAdaptive };
+module.exports = { available, hasTransparency, hasGreenBg, chromaKeyGreen, keyEdgesAdaptive, canConvertJpeg, jpegToPng };

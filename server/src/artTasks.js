@@ -23,8 +23,8 @@ async function removeArtBackgrounds(opts = {}) {
   const tolerance = parseInt(opts.tolerance || "42", 10);
 
   const rows = [];
-  (await db.query("SELECT template_id AS id, image_url FROM creature_templates WHERE image_url IS NOT NULL")).rows.forEach((r) => rows.push(r));
-  (await db.query("SELECT id, image_url FROM world_boss WHERE image_url IS NOT NULL")).rows.forEach((r) => rows.push(r));
+  (await db.query("SELECT template_id AS id, image_url, 'creature_templates' AS tbl FROM creature_templates WHERE image_url IS NOT NULL")).rows.forEach((r) => rows.push(r));
+  (await db.query("SELECT id, image_url, 'world_boss' AS tbl FROM world_boss WHERE image_url IS NOT NULL")).rows.forEach((r) => rows.push(r));
 
   const storage = require("./ai/storage");
   const out = { total: rows.length, done: 0, alreadyTransparent: 0, notProcessable: 0, missing: 0, failed: 0, dryRun: dry };
@@ -33,11 +33,22 @@ async function removeArtBackgrounds(opts = {}) {
     const m = /^\/art\/(.+)$/.exec(r.image_url || "");
     const s3key = !m && storage.enabled() ? storage.keyFromUrl(r.image_url) : null;
     if (!m && !s3key) { out.notProcessable++; continue; } // externas desconocidas (CDN/data-uri)
-    if (!(r.image_url || "").endsWith(".png")) { out.notProcessable++; continue; } // jpg: regenerar mejor
+    const isJpg = (r.image_url || "").endsWith(".jpg");
+    if (!isJpg && !(r.image_url || "").endsWith(".png")) { out.notProcessable++; continue; }
     const file = m ? path.join(ART_DIR, m[1]) : null;
     if (file && !fs.existsSync(file)) { out.missing++; continue; }
     try {
-      const buf = file ? fs.readFileSync(file) : await storage.getBuffer(s3key);
+      let buf = file ? fs.readFileSync(file) : await storage.getBuffer(s3key);
+      // JPEG (sin canal alfa): Gemini a veces lo devuelve y el croma se saltaba,
+      // dejando el fondo verde horneado. Se convierte a PNG, se recorta y se
+      // guarda COMO .png nuevo, reapuntando la fila de BD.
+      let saveAsPng = false;
+      if (isJpg) {
+        if (!tr.canConvertJpeg()) { out.notProcessable++; continue; }
+        buf = tr.jpegToPng(buf);
+        if (!tr.hasGreenBg(buf)) { out.notProcessable++; continue; } // jpg oscuro viejo: regenerar mejor
+        saveAsPng = true;
+      }
       // Fondo VERDE croma: re-procesa con el flood-fill AUNQUE ya tenga algo de
       // alfa (el croma por umbral antiguo dejaba el verde a medio quitar y el
       // chequeo de "ya transparente" lo saltaba — esa era la causa del bug).
@@ -49,9 +60,18 @@ async function removeArtBackgrounds(opts = {}) {
       } else {
         res = tr.keyEdgesAdaptive(buf, tolerance); // fondo oscuro antiguo
       }
-      if (res === buf) { out.failed++; continue; } // descartado por la salvaguarda
+      if (res === buf && !saveAsPng) { out.failed++; continue; } // descartado por la salvaguarda
       if (!dry) {
-        if (file) {
+        if (saveAsPng) {
+          const newUrl = r.image_url.replace(/\.jpg$/, ".png");
+          if (file) fs.writeFileSync(file.replace(/\.jpg$/, ".png"), res);
+          else await storage.put(s3key.replace(/\.jpg$/, ".png"), res, "image/png");
+          const idCol = r.tbl === "world_boss" ? "id" : "template_id";
+          await db.query(`UPDATE ${r.tbl} SET image_url=$2 WHERE ${idCol}=$1`, [r.id, newUrl]);
+          if (r.tbl === "creature_templates") {
+            await db.query("UPDATE creature_templates SET image_thumb_url=$2 WHERE template_id=$1 AND image_thumb_url=$3", [r.id, newUrl, r.image_url]);
+          }
+        } else if (file) {
           // .bak solo en local; en S3 el reproceso es idempotente y el espacio cuesta.
           if (!fs.existsSync(file + ".bak")) fs.copyFileSync(file, file + ".bak");
           fs.writeFileSync(file, res);

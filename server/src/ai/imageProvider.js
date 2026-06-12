@@ -199,10 +199,13 @@ function makeGeminiProvider() {
       let buffer = Buffer.from(imgPart.inlineData.data, "base64");
       let ext = (imgPart.inlineData.mimeType || "image/png").includes("jpeg") ? "jpg" : "png";
       // Fondo transparente: elimina el verde croma pedido en el prompt (pngjs).
-      if (opts.transparent && ext === "png") {
+      // Si Gemini devuelve JPEG (sin canal alfa), se convierte a PNG primero:
+      // antes ese caso se saltaba el croma y el fondo verde quedaba horneado.
+      if (opts.transparent) {
         try {
           const tr = require("./transparency");
-          if (tr.available()) buffer = tr.chromaKeyGreen(buffer);
+          if (ext === "jpg" && tr.canConvertJpeg()) { buffer = tr.jpegToPng(buffer); ext = "png"; }
+          if (ext === "png" && tr.available()) buffer = tr.chromaKeyGreen(buffer);
         } catch (e) { console.warn(`[ai] croma falló (${opts.templateId}): ${e.message}`); }
       }
 

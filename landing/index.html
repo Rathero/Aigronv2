@@ -124,7 +124,7 @@ nav{position:fixed;top:0;left:0;right:0;z-index:50;display:flex;align-items:cent
   background:radial-gradient(circle,rgba(255,78,205,.22) 0%,rgba(167,139,250,.12) 40%,transparent 70%);
   animation:breatheGlow 4s ease-in-out infinite}
 @keyframes breatheGlow{0%,100%{opacity:.7;transform:translate(-50%,-50%) scale(1)}50%{opacity:1;transform:translate(-50%,-50%) scale(1.12)}}
-#altar-canvas{width:min(300px,64vw);height:min(300px,64vw);image-rendering:pixelated;position:relative;
+#altar-canvas{width:min(300px,64vw);height:min(300px,64vw);image-rendering:pixelated;position:relative;object-fit:contain;display:block;margin:0 auto;
   animation:altarFloat 4.2s ease-in-out infinite;filter:drop-shadow(0 18px 32px rgba(0,0,0,.6))}
 @keyframes altarFloat{0%,100%{transform:translateY(0)}50%{transform:translateY(-14px)}}
 .altar-ring{position:absolute;left:50%;bottom:-6px;transform:translateX(-50%);width:62%;height:34px;border-radius:50%;
@@ -183,25 +183,26 @@ nav{position:fixed;top:0;left:0;right:0;z-index:50;display:flex;align-items:cent
 .step h3{font-size:21px;margin-bottom:12px;font-weight:800}
 .step p{color:var(--muted);font-size:15.5px;line-height:1.7}
 
-/* ====== SCREENSHOTS ====== */
-.shots-bg{background:var(--bg2)}
-.shots{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:20px}
-.shot{aspect-ratio:9/16;max-height:480px;width:100%;
-  background:repeating-linear-gradient(45deg,#13132a 0 12px,#101020 12px 24px);
-  border:1px dashed var(--line);border-radius:18px;display:flex;flex-direction:column;align-items:center;
-  justify-content:center;gap:12px;color:var(--muted);font-size:13px;overflow:hidden;position:relative}
-.shot img{width:100%;height:100%;object-fit:cover;border-radius:18px}
-.shot .ph-icon{font-size:34px;opacity:.5}
-@media(min-width:900px){.shots{grid-template-columns:repeat(3,1fr)}}
-
-/* ====== MODES ====== */
-.modes{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:18px}
-.mode{background:linear-gradient(170deg,var(--panel2),#0e0e1f);border:1px solid var(--line);border-radius:16px;
-  padding:26px;transition:border-color .2s,transform .2s,box-shadow .2s}
-.mode:hover{border-color:var(--cyan);transform:translateY(-4px);box-shadow:0 8px 30px rgba(78,240,232,.08)}
-.mode .m-icon{font-size:30px;margin-bottom:14px;display:block;filter:drop-shadow(0 0 10px rgba(78,240,232,.3))}
-.mode h3{font-size:16.5px;font-weight:800;margin-bottom:9px}
-.mode p{color:var(--muted);font-size:14.5px;line-height:1.62}
+/* ====== MODOS (filas alternadas: screenshot real + texto) ====== */
+.modes-bg{background:var(--bg2);position:relative;overflow:hidden}
+.modes-drift{position:absolute;inset:0;pointer-events:none;z-index:0}
+.modes-drift canvas,.modes-drift img{position:absolute;image-rendering:pixelated;opacity:.5;filter:drop-shadow(0 0 14px rgba(78,240,232,.25))}
+.mfeat{position:relative;z-index:1;display:flex;align-items:center;gap:clamp(28px,5vw,72px);margin-top:72px}
+.mfeat.flip{flex-direction:row-reverse}
+.mf-media{flex:0 0 min(300px,38vw)}
+.mf-media img{width:100%;border-radius:22px;border:1px solid var(--line);display:block;
+  box-shadow:0 24px 60px rgba(0,0,0,.55),0 0 40px rgba(255,78,205,.10);transition:transform .25s}
+.mfeat:hover .mf-media img{transform:translateY(-6px) rotate(-.6deg)}
+.mfeat.flip:hover .mf-media img{transform:translateY(-6px) rotate(.6deg)}
+.mf-text{flex:1;min-width:0}
+.mf-text .m-icon{font-size:30px;margin-bottom:14px;display:block;filter:drop-shadow(0 0 10px rgba(78,240,232,.3))}
+.mf-text h3{font-size:clamp(19px,2.4vw,24px);font-weight:800;margin-bottom:10px}
+.mf-text p{color:var(--muted);font-size:clamp(15px,1.8vw,17px);line-height:1.7;max-width:520px}
+@media(max-width:760px){
+  .mfeat,.mfeat.flip{flex-direction:column;text-align:center;gap:22px;margin-top:56px}
+  .mf-media{flex:0 0 auto;width:min(260px,72vw)}
+  .mf-text p{margin:0 auto}
+}
 
 /* ====== FAIR PLAY ====== */
 .fair{background:linear-gradient(135deg,rgba(78,240,232,.08),rgba(255,78,205,.08));
@@ -393,35 +394,26 @@ footer{border-top:1px solid var(--line);padding:38px 24px;text-align:center;colo
 </section>
 
 <!-- SCREENSHOTS -->
-<section class="shots-bg">
-  <div class="wrap">
-    <div class="kicker glow-magenta reveal" data-i18n="sh_kicker">ASÍ SE VE POR DENTRO</div>
-    <h2 class="sec-title reveal" data-i18n="sh_title">NEÓN, PÍXELES Y CRIATURAS</h2>
-    <div class="shots" style="margin-top:56px">
-      <div class="shot reveal"><img src="assets/screenshots/shot-1.png" alt="AIGRONS screenshot 1"><span class="ph-icon">🖼️</span><span data-i18n="ph">Screenshot próximamente</span></div>
-      <div class="shot reveal"><img src="assets/screenshots/shot-2.png" alt="AIGRONS screenshot 2"><span class="ph-icon">🖼️</span><span data-i18n="ph">Screenshot próximamente</span></div>
-      <div class="shot reveal"><img src="assets/screenshots/shot-3.png" alt="AIGRONS screenshot 3"><span class="ph-icon">🖼️</span><span data-i18n="ph">Screenshot próximamente</span></div>
-    </div>
-  </div>
-</section>
-
-<!-- MODES -->
-<section id="modos">
+<section id="modos" class="modes-bg">
+  <div class="modes-drift" id="modes-drift"></div>
   <div class="wrap">
     <div class="kicker glow-cyan reveal" data-i18n="mo_kicker">CUANDO QUIERAS MÁS</div>
     <h2 class="sec-title reveal" data-i18n="mo_title">SEIS FORMAS DE PERDERTE</h2>
-    <div class="modes" style="margin-top:56px">
-      <div class="mode reveal"><span class="m-icon">✨</span><h3 data-i18n="mo1_t">La Única del Día</h3><p data-i18n="mo1_p">Cada día nace una criatura irrepetible. Cázala hoy o despídete de ella para siempre.</p></div>
-      <div class="mode reveal"><span class="m-icon">🏰</span><h3 data-i18n="mo2_t">Mazmorra</h3><p data-i18n="mo2_p">Ocho pisos, reliquias que rompen las reglas y muerte permanente. Tu equipo caído vagará por las runs de otros jugadores.</p></div>
-      <div class="mode reveal"><span class="m-icon">🐲</span><h3 data-i18n="mo3_t">Jefe Mundial</h3><p data-i18n="mo3_p">Un coloso con la vida compartida entre todos los jugadores del mundo. Cada golpe tuyo cuenta.</p></div>
-      <div class="mode reveal"><span class="m-icon">⚡</span><h3 data-i18n="mo4_t">PvP en vivo</h3><p data-i18n="mo4_p">Otro humano, diez segundos por turno, nadie a quien culpar.</p></div>
-      <div class="mode reveal"><span class="m-icon">🗡️</span><h3 data-i18n="mo5_t">Arena Sellada</h3><p data-i18n="mo5_p">Draft a ciegas: 3 de 6 criaturas de la temporada. Tu colección se queda fuera. Tu criterio, no.</p></div>
-      <div class="mode reveal"><span class="m-icon">😈</span><h3 data-i18n="mo6_t">Némesis</h3><p data-i18n="mo6_p">Un rival que aprende de tus victorias y vuelve con el counter preparado. Le caes mal, en concreto a ti.</p></div>
-    </div>
+    <div class="mfeat reveal"><div class="mf-media"><img src="assets/screenshots/unica.png" alt="La Única del Día" loading="lazy"></div>
+      <div class="mf-text"><span class="m-icon">✨</span><h3 data-i18n="mo1_t">La Única del Día</h3><p data-i18n="mo1_p">Cada día nace una criatura irrepetible. Cázala hoy o despídete de ella para siempre.</p></div></div>
+    <div class="mfeat flip reveal"><div class="mf-media"><img src="assets/screenshots/mazmorra.png" alt="Mazmorra" loading="lazy"></div>
+      <div class="mf-text"><span class="m-icon">🏰</span><h3 data-i18n="mo2_t">Mazmorra</h3><p data-i18n="mo2_p">Ocho pisos, reliquias que rompen las reglas y muerte permanente. Tu equipo caído vagará por las runs de otros jugadores.</p></div></div>
+    <div class="mfeat reveal"><div class="mf-media"><img src="assets/screenshots/jefe.png" alt="Jefe Mundial" loading="lazy"></div>
+      <div class="mf-text"><span class="m-icon">🐲</span><h3 data-i18n="mo3_t">Jefe Mundial</h3><p data-i18n="mo3_p">Un coloso con la vida compartida entre todos los jugadores del mundo. Cada golpe tuyo cuenta.</p></div></div>
+    <div class="mfeat flip reveal"><div class="mf-media"><img src="assets/screenshots/combate.png" alt="PvP en vivo" loading="lazy"></div>
+      <div class="mf-text"><span class="m-icon">⚡</span><h3 data-i18n="mo4_t">PvP en vivo</h3><p data-i18n="mo4_p">Otro humano, diez segundos por turno, nadie a quien culpar.</p></div></div>
+    <div class="mfeat reveal"><div class="mf-media"><img src="assets/screenshots/arena.png" alt="Arena Sellada" loading="lazy"></div>
+      <div class="mf-text"><span class="m-icon">🗡️</span><h3 data-i18n="mo5_t">Arena Sellada</h3><p data-i18n="mo5_p">Draft a ciegas: 3 de 6 criaturas de la temporada. Tu colección se queda fuera. Tu criterio, no.</p></div></div>
+    <div class="mfeat flip reveal"><div class="mf-media"><img src="assets/screenshots/nemesis.png" alt="Némesis" loading="lazy"></div>
+      <div class="mf-text"><span class="m-icon">😈</span><h3 data-i18n="mo6_t">Némesis</h3><p data-i18n="mo6_p">Un rival que aprende de tus victorias y vuelve con el counter preparado. Le caes mal, en concreto a ti.</p></div></div>
   </div>
 </section>
 
-<!-- FAIR PLAY -->
 <section class="fair">
   <div class="wrap">
     <h2 class="reveal"><span class="glow-gold" data-i18n="fp_title">NOS IMPORTA QUIÉN JUEGA,<br>NO QUIÉN PAGA</span></h2>
