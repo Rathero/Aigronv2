@@ -191,4 +191,47 @@ Hoy es 12 de junio: el lanzamiento global se alinea con el estreno de la **tempo
 | CapCut Pro / herramienta edición (1–2 meses) | 0–25 € | Semana 4 |
 | Reserva (boost PH, micro-influencer ES) | 50 € | Flexible |
 
-Hosting (Railway/VPS) y Gemini free tier se asumen cubiertos. **No gastar en ads antes de validar retención: comprar tráfico haci
+Hosting (Railway/VPS) y Gemini free tier se asumen cubiertos. **No gastar en ads antes de validar retención: comprar tráfico hacia un juego que no retiene es quemar dinero.**
+
+---
+
+## 9. KPIs y puertas de decisión
+
+| Métrica | Objetivo | Puerta |
+|---|---|---|
+| D1 retención | >35% | <25% → arreglar onboarding antes de cualquier promo |
+| D7 retención | >15% | ≥12% → luz verde al test de paid |
+| % claim diario | >80% | — |
+| % jugadores que comparten (tirada/única/hito de álbum) | >15% | <5% → rediseñar la share card |
+| % de álbum completado a fin de temporada (mediana) | >30% | Muy bajo → revisar pity/economía; muy alto (>80%) → álbum se agota pronto, subir profundidad |
+| Retención M2 (vuelven en la temporada siguiente) | >40% de los activos de fin de mes | El KPI propio del modelo de temporadas |
+| K-factor (invitados/jugador) | >0,2 | — |
+| Coste IA mensual | <100 €/mes | Generación mensual + única diaria: escala plano con usuarios |
+
+El panel `/admin/stats` ya cubre DAU, D1/D7 y combates. Añadir: eventos de share, UTM en landing, embudo claim→combate, % álbum completado y retención entre temporadas.
+
+---
+
+## 10. Riesgos
+
+| Riesgo | Mitigación |
+|---|---|
+| Backlash anti-IA en Reddit | Transparencia proactiva en FAQ + ángulo "procedural de nueva generación"; nunca ocultarlo |
+| El share no prende | A/B: barra de álbum vs sprite de la única vs racha; probar formatos imagen/texto |
+| "Valle" de mitad de temporada (álbum medio completo, novedad agotada) | La única diaria + destacados rotatorios + ligas semanales existen para esto: hacerlos protagonistas del día 10 al 25 |
+| Pico de PH/HN tumba el servidor | Load test previo; CDN para arte; poco estado gracias al motor determinista |
+| Retención floja post-novedad | Activar visiblemente némesis, jefe mundial y ligas en el onboarding del día 3–7 |
+| Docs desactualizados confunden a prensa/colaboradores | Actualizar README/design doc esta semana (higiene P0) |
+
+---
+
+## 11. Checklist inmediato (esta semana)
+
+- [ ] Share de la tirada diaria/única con barra de progreso del álbum
+- [ ] Modo invitado sin login
+- [ ] Decidir Puzzle Diario: desactivar flag o implementar backend
+- [ ] Actualizar README.md y docs/criaturas-imposibles.md al modelo de temporadas
+- [ ] Comprar aigrons.com
+- [ ] Crear cuentas: TikTok (ES/EN), X, Discord, itch.io
+- [ ] Desplegar landing (`/landing`) con UTM tracking
+- [ ] Elegir las 7 primeras "únicas del día" estrella para los primeros TikToks
