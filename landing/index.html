@@ -82,8 +82,6 @@ nav{position:fixed;top:0;left:0;right:0;z-index:50;display:flex;align-items:cent
 /* ====== HERO ====== */
 .hero{min-height:100svh;display:flex;flex-direction:column;align-items:center;justify-content:center;
   text-align:center;padding:130px 20px 90px;position:relative;overflow:hidden}
-.hero-drift{position:absolute;inset:0;pointer-events:none;z-index:0}
-.hero-drift canvas{position:absolute;image-rendering:pixelated;opacity:.85;filter:drop-shadow(0 0 14px rgba(78,240,232,.25))}
 .hero-inner{position:relative;z-index:1}
 .season-chip{display:inline-flex;align-items:center;gap:10px;font-family:'Press Start 2P',monospace;font-size:10px;
   letter-spacing:2px;color:var(--gold);border:1px solid rgba(255,211,78,.35);border-radius:999px;padding:10px 20px;
@@ -185,8 +183,6 @@ nav{position:fixed;top:0;left:0;right:0;z-index:50;display:flex;align-items:cent
 
 /* ====== MODOS (filas alternadas: screenshot real + texto) ====== */
 .modes-bg{background:var(--bg2);position:relative;overflow:hidden}
-.modes-drift{position:absolute;inset:0;pointer-events:none;z-index:0}
-.modes-drift canvas,.modes-drift img{position:absolute;image-rendering:pixelated;opacity:.5;filter:drop-shadow(0 0 14px rgba(78,240,232,.25))}
 .mfeat{position:relative;z-index:1;display:flex;align-items:center;gap:clamp(28px,5vw,72px);margin-top:72px}
 .mfeat.flip{flex-direction:row-reverse}
 .mf-media{flex:0 0 min(300px,38vw)}
@@ -304,7 +300,6 @@ footer{border-top:1px solid var(--line);padding:38px 24px;text-align:center;colo
 
 <!-- HERO -->
 <header class="hero">
-  <div class="hero-drift" id="hero-drift"></div>
   <div class="hero-inner">
     <div class="season-chip">◆ <span id="season-chip-text">TEMPORADA DE JUNIO · DÍA 12</span></div>
     <h1 class="glitch" data-text="AIGRONS">AIGRONS</h1>
@@ -395,7 +390,6 @@ footer{border-top:1px solid var(--line);padding:38px 24px;text-align:center;colo
 
 <!-- SCREENSHOTS -->
 <section id="modos" class="modes-bg">
-  <div class="modes-drift" id="modes-drift"></div>
   <div class="wrap">
     <div class="kicker glow-cyan reveal" data-i18n="mo_kicker">CUANDO QUIERAS MÁS</div>
     <h2 class="sec-title reveal" data-i18n="mo_title">SEIS FORMAS DE PERDERTE</h2>

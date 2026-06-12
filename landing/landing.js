@@ -310,62 +310,6 @@ function buildAlbum(sample, discovered, total){
 }
 buildAlbum(null);
 
-/* ================= criaturas flotantes (hero y modos) + parallax =========
-   Al cargar pintan sprites decorativos; cuando llegan los DATOS REALES
-   (destacados del día), se repintan con las criaturas de verdad: arte IA si
-   existe (img) o el sprite procedural REAL del juego (SPRITE.drawTpl). */
-const _drifts=[];
-let _mx=0,_my=0;
-addEventListener('mousemove',e=>{ _mx=(e.clientX/innerWidth-.5); _my=(e.clientY/innerHeight-.5); },{passive:true});
-function initDrift(hostId, n, seedBase){
-  const host = document.getElementById(hostId);
-  if(!host) return;
-  const rnd = mulberry32(seedBase);
-  for(let i=0;i<n;i++){
-    const c = document.createElement('canvas');
-    const size = 40+Math.floor(rnd()*54);
-    c.style.width=c.style.height=size+"px";
-    const x = rnd()*100, y = rnd()*100;
-    c.style.left=x+"%"; c.style.top=y+"%";
-    host.appendChild(c);
-    drawCreature(c, seedBase+31337+i*1117, i);
-    _drifts.push({el:c, host, idx:i, size, x, y, vx:(rnd()-.5)*.018, vy:(rnd()-.5)*.014, ph:rnd()*6.28, depth:.4+rnd()*.6});
-  }
-}
-function repaintDrift(highlights){
-  if(!highlights || !highlights.length) return;
-  _drifts.forEach((s,k)=>{
-    const t=highlights[k % highlights.length];
-    const art=t.image_thumb_url||t.image_url;
-    if(art){
-      const img=document.createElement('img');
-      img.src=resolveArt(art);
-      img.style.cssText=s.el.style.cssText;
-      img.style.width=img.style.height=s.size+"px";
-      s.el.replaceWith(img); s.el=img;
-    } else if(window.SPRITE){
-      window.SPRITE.drawTpl(s.el, t, 4);
-    }
-  });
-}
-(function loop(){
-  let t=0;
-  (function frame(){
-    t+=0.016;
-    for(const s of _drifts){
-      s.x+=s.vx; s.y+=s.vy;
-      if(s.x<-6)s.x=106; if(s.x>106)s.x=-6;
-      if(s.y<-6)s.y=106; if(s.y>106)s.y=-6;
-      const bobY = Math.sin(t*1.1+s.ph)*6;
-      s.el.style.left=s.x+"%"; s.el.style.top=s.y+"%";
-      s.el.style.transform="translate("+(-_mx*30*s.depth)+"px,"+(bobY-_my*22*s.depth)+"px)";
-    }
-    requestAnimationFrame(frame);
-  })();
-})();
-initDrift('hero-drift', 7, 0);
-initDrift('modes-drift', 6, 5000);
-
 /* ================= background particles ================= */
 const bg = document.getElementById('bgfx'); const bctx = bg.getContext('2d');
 let parts=[];
@@ -432,7 +376,6 @@ function resolveArt(u){ return /^https?:/i.test(u) ? u : API_BASE + u; }
     window.REAL=d;
     renderAltar(d.unique);
     buildAlbum(d.albumSample, d.season.discovered, d.season.total);
-    repaintDrift(d.highlights);
     updateSeasonChip();
   }catch(e){ console.warn('[landing] sin datos reales (', e && e.message, ') — mostrando contenido de respaldo'); }
 })();
