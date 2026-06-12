@@ -15,8 +15,10 @@ function tomorrowStr() {
   return C.todayStr(new Date(Date.now() + 86400000));
 }
 
-// `job(date)` se invoca cada noche con la fecha de MAÑANA: rellena el arte del
-// álbum del mes (idempotente) y genera la criatura única del día siguiente.
+// `job()` es la pasada de generación CATCH-UP (idempotente): asegura el arte
+// del álbum del mes (y el siguiente cuando se acerca), la única de hoy y la de
+// mañana, y avanza las variantes. Corre CADA HORA: si una pasada se quedó
+// corta por cuota, la siguiente retoma — el déficit se drena solo.
 function startCron(job) {
   if (process.env.DISABLE_CRON === "true") {
     console.log("[cron] desactivado (DISABLE_CRON=true)");
@@ -29,26 +31,32 @@ function startCron(job) {
     console.log("[cron] node-cron no instalado; usa el cron del SO con scripts/generate-today.js");
     return null;
   }
-  const expr = process.env.CRON_GENERATE || "0 3 * * *";
+  const expr = process.env.CRON_GENERATE || "7 * * * *"; // cada hora (min 7: fuera de picos)
   const tz = process.env.CRON_TZ || "UTC";
   if (!cron.validate(expr)) {
     console.warn(`[cron] expresión inválida "${expr}", cron desactivado`);
     return null;
   }
+  // Mutex en proceso: si una pasada aún corre (lote grande + cuota lenta), la
+  // siguiente se salta en vez de duplicar llamadas a la API en paralelo.
+  let running = false;
   const task = cron.schedule(
     expr,
     async () => {
-      const date = tomorrowStr();
+      if (running) { console.log("[cron] pasada anterior aún en curso, salto"); return; }
+      running = true;
       try {
-        console.log(`[cron] generando temporada + única de ${date}...`);
-        await job(date);
+        console.log("[cron] pasada de generación (catch-up)...");
+        await job();
       } catch (e) {
-        console.error(`[cron] error generando ${date}:`, e.message);
+        console.error("[cron] error en la pasada:", e.message);
+      } finally {
+        running = false;
       }
     },
     { timezone: tz }
   );
-  console.log(`[cron] activo: "${expr}" (${tz}) -> rellena álbum del mes + única de mañana`);
+  console.log(`[cron] activo: "${expr}" (${tz}) -> catch-up de álbum/únicas/variantes cada hora`);
   return task;
 }
 

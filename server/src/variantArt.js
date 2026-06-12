@@ -140,7 +140,7 @@ async function pregenerateSeasonVariants(sKey, opts = {}) {
   ]);
   bases.sort((a, b) => (hi.has(b.id) ? 1 : 0) - (hi.has(a.id) ? 1 : 0));
 
-  const limit = parseInt(opts.limit || process.env.VARIANT_PREGEN_LIMIT || "120", 10);
+  const limit = parseInt(opts.limit || process.env.VARIANT_PREGEN_LIMIT || "40", 10); // por pasada (el cron es horario)
   const delay = parseInt(process.env.GEN_DELAY_MS || "2500", 10);
   const out = { candidates: 0, generated: 0, pending: 0, limit };
   for (const base of bases) {

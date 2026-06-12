@@ -1484,17 +1484,27 @@ let server;
 if (require.main === module) {
   // Escuchar en 0.0.0.0 (requisito de Railway/PaaS para que el proxy llegue a la app).
   server = app.listen(PORT, "0.0.0.0", () => console.log(`AIGRONS API escuchando en 0.0.0.0:${PORT} (frontend en /)`));
-  // Cron nocturno: arte IA del álbum del mes + criatura única de mañana (con sus
-  // variantes) + PREGENERACIÓN del arte de variantes del álbum (evoluciones y
-  // áureas, destacados primero). Todo idempotente y reanudable: cada noche avanza
-  // hasta su límite de cuota, así las variantes están listas ANTES de que un
-  // jugador las consiga (el perezoso de los endpoints queda como red de seguridad).
-  startCron(async (date) => {
-    await generateSeason(C.seasonKey(date), SEASON_N, { withArt: true });
-    await generateDailyUnique(date, { withArt: true });
-    const uniq = await tplById(C.dailyUniqueId(date));
-    if (uniq) await variantArt.pregenerateTemplateVariants(uniq);
-    await variantArt.pregenerateSeasonVariants(C.seasonKey(date), {});
+  // Cron HORARIO (catch-up continuo, todo idempotente — cada pasada solo genera
+  // lo que FALTA): mientras haya déficit de imágenes, cada hora drena más.
+  //   1. Arte del álbum del MES ACTUAL.
+  //   2. Álbum del MES SIGUIENTE desde 7 días antes del cambio (que el día 1
+  //      amanezca completo, no a medias).
+  //   3. Única de HOY y de MAÑANA con sus variantes (nunca sale sin imagen).
+  //   4. Pregen de variantes del álbum (cap por pasada: reparte la cuota).
+  startCron(async () => {
+    const today = C.todayStr();
+    const tomorrow = C.todayStr(new Date(Date.now() + 86400000));
+    await generateSeason(C.seasonKey(today), SEASON_N, { withArt: true });
+    const d0 = new Date(today + "T00:00:00");
+    const firstNext = new Date(d0.getFullYear(), d0.getMonth() + 1, 1);
+    const daysToNext = Math.ceil((firstNext - d0) / 86400000);
+    if (daysToNext <= 7) await generateSeason(C.seasonKey(C.todayStr(firstNext)), SEASON_N, { withArt: true });
+    for (const day of [today, tomorrow]) {
+      await generateDailyUnique(day, { withArt: true });
+      const uniq = await tplById(C.dailyUniqueId(day));
+      if (uniq) await variantArt.pregenerateTemplateVariants(uniq);
+    }
+    await variantArt.pregenerateSeasonVariants(C.seasonKey(today), {});
   });
   startMaintenance(db); // limpieza de tablas + cierre semanal de ligas
   // REBALANCEO one-shot al arrancar (marca en app_meta + advisory lock): alinea
