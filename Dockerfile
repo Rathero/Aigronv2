@@ -11,9 +11,10 @@ WORKDIR /app
 COPY server/package.json ./server/package.json
 RUN cd server && npm install --omit=dev --no-audit --no-fund
 
-# Código de la app + frontend + motor compartido.
+# Código de la app + frontend + motor compartido + landing de marketing.
 COPY server ./server
 COPY web ./web
+COPY landing ./landing
 
 WORKDIR /app/server
 EXPOSE 3000
