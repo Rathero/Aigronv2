@@ -1437,6 +1437,9 @@ const ADMIN_TASKS = {
   // Migra el arte del volumen al almacén externo S3 (R2/B2/GCS) configurado por
   // ART_S3_*; ?delete=1 borra los locales tras subirlos (libera el volumen).
   "art-migrate": (q) => artTasks.migrateArtToStorage({ delete: q.delete === "1" }),
+  // Autodiagnóstico del almacén externo: sube/lee un objeto de prueba y verifica
+  // la URL pública. Lánzala ANTES de art-migrate para validar las variables.
+  "art-storage-test": () => require("./ai/storage").selfTest(),
 };
 app.post("/admin/tasks/:task", requireAdmin, (req, res) => {
   const name = req.params.task;

@@ -70,11 +70,23 @@ const objectUrl = (key) => {
   return `${c.endpoint.replace(/\/$/, "")}/${c.bucket}/${key.split("/").map(encodeURIComponent).join("/")}`;
 };
 
+// fetch con el error de RED desempaquetado: el "fetch failed" de undici esconde
+// la causa real (ENOTFOUND, ECONNREFUSED, cert...) en e.cause — sin esto el
+// diagnóstico de un endpoint mal escrito es imposible desde los logs.
+async function s3fetch(url, opts) {
+  try {
+    return await fetch(url, opts);
+  } catch (e) {
+    const cause = e.cause ? ` (${e.cause.code || e.cause.message})` : "";
+    throw new Error(`no se pudo conectar con ${new URL(url).host}${cause} — revisa ART_S3_ENDPOINT`, { cause: e });
+  }
+}
+
 // Sube un buffer y devuelve su URL PÚBLICA (la que se guarda en image_url).
 async function put(key, buffer, contentType = "image/png") {
   const url = objectUrl(key);
   const headers = sign("PUT", url, { "content-type": contentType, "content-length": String(buffer.length) }, sha256(buffer));
-  const res = await fetch(url, { method: "PUT", headers, body: buffer });
+  const res = await s3fetch(url, { method: "PUT", headers, body: buffer });
   if (!res.ok) throw new Error(`storage PUT ${res.status}: ${(await res.text()).slice(0, 150)}`);
   return `${cfg().publicBase}/${key}`;
 }
@@ -87,7 +99,7 @@ async function getBuffer(urlOrKey) {
     url = objectUrl(urlOrKey);
     headers = sign("GET", url, {}, sha256(""));
   }
-  const res = await fetch(url, { headers });
+  const res = await s3fetch(url, { headers });
   if (!res.ok) throw new Error(`storage GET ${res.status} ${url}`);
   return Buffer.from(await res.arrayBuffer());
 }
@@ -99,4 +111,31 @@ function keyFromUrl(url) {
   return null;
 }
 
-module.exports = { enabled, put, getBuffer, keyFromUrl };
+// AUTODIAGNÓSTICO de la configuración (tarea admin art-storage-test): sube un
+// objeto de prueba, lo relee firmado y lo relee por la URL PÚBLICA. Cada paso
+// reporta ok/fallo con causa, para distinguir endpoint mal escrito (red),
+// credenciales malas (403) o acceso público sin activar (404 en el último paso).
+async function selfTest() {
+  const c = cfg();
+  const missing = ["ART_S3_ENDPOINT", "ART_S3_BUCKET", "ART_S3_ACCESS_KEY", "ART_S3_SECRET_KEY", "ART_PUBLIC_BASE"]
+    .filter((k) => !process.env[k]);
+  const out = {
+    config: { endpoint: c.endpoint || null, bucket: c.bucket || null, region: c.region, publicBase: c.publicBase || null, missing },
+  };
+  if (missing.length) { out.verdict = "faltan variables: " + missing.join(", "); return out; }
+  const key = "_diag/test-" + Date.now() + ".txt";
+  const payload = Buffer.from("aigrons storage self-test");
+  try { out.putPublicUrl = await put(key, payload, "text/plain"); out.put = "ok"; }
+  catch (e) { out.put = e.message; out.verdict = "PUT falló: endpoint o credenciales mal (403=claves, 'no se pudo conectar'=endpoint)"; return out; }
+  try { const b = await getBuffer(key); out.getSigned = b.equals(payload) ? "ok" : "contenido distinto"; }
+  catch (e) { out.getSigned = e.message; }
+  try {
+    const res = await fetch(out.putPublicUrl);
+    out.getPublic = res.ok ? "ok" : `HTTP ${res.status}`;
+    if (!res.ok) out.verdict = "el bucket funciona pero ART_PUBLIC_BASE no sirve los objetos: activa el acceso público (r2.dev / dominio) o corrige la URL";
+  } catch (e) { out.getPublic = e.message; out.verdict = "ART_PUBLIC_BASE no responde: revisa la URL pública"; }
+  if (!out.verdict) out.verdict = "todo OK: puedes lanzar art-migrate";
+  return out;
+}
+
+module.exports = { enabled, put, getBuffer, keyFromUrl, selfTest };
