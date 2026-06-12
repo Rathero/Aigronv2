@@ -26,15 +26,18 @@ async function removeArtBackgrounds(opts = {}) {
   (await db.query("SELECT template_id AS id, image_url FROM creature_templates WHERE image_url IS NOT NULL")).rows.forEach((r) => rows.push(r));
   (await db.query("SELECT id, image_url FROM world_boss WHERE image_url IS NOT NULL")).rows.forEach((r) => rows.push(r));
 
+  const storage = require("./ai/storage");
   const out = { total: rows.length, done: 0, alreadyTransparent: 0, notProcessable: 0, missing: 0, failed: 0, dryRun: dry };
   for (const r of rows) {
+    // Origen del arte: /art local (volumen) o almacén externo S3 (clave del bucket).
     const m = /^\/art\/(.+)$/.exec(r.image_url || "");
-    if (!m) { out.notProcessable++; continue; } // externas (CDN/data-uri)
-    const file = path.join(ART_DIR, m[1]);
-    if (!fs.existsSync(file)) { out.missing++; continue; }
-    if (!file.endsWith(".png")) { out.notProcessable++; continue; } // jpg: regenerar mejor
+    const s3key = !m && storage.enabled() ? storage.keyFromUrl(r.image_url) : null;
+    if (!m && !s3key) { out.notProcessable++; continue; } // externas desconocidas (CDN/data-uri)
+    if (!(r.image_url || "").endsWith(".png")) { out.notProcessable++; continue; } // jpg: regenerar mejor
+    const file = m ? path.join(ART_DIR, m[1]) : null;
+    if (file && !fs.existsSync(file)) { out.missing++; continue; }
     try {
-      const buf = fs.readFileSync(file);
+      const buf = file ? fs.readFileSync(file) : await storage.getBuffer(s3key);
       // Fondo VERDE croma: re-procesa con el flood-fill AUNQUE ya tenga algo de
       // alfa (el croma por umbral antiguo dejaba el verde a medio quitar y el
       // chequeo de "ya transparente" lo saltaba — esa era la causa del bug).
@@ -48,8 +51,13 @@ async function removeArtBackgrounds(opts = {}) {
       }
       if (res === buf) { out.failed++; continue; } // descartado por la salvaguarda
       if (!dry) {
-        if (!fs.existsSync(file + ".bak")) fs.copyFileSync(file, file + ".bak");
-        fs.writeFileSync(file, res);
+        if (file) {
+          // .bak solo en local; en S3 el reproceso es idempotente y el espacio cuesta.
+          if (!fs.existsSync(file + ".bak")) fs.copyFileSync(file, file + ".bak");
+          fs.writeFileSync(file, res);
+        } else {
+          await storage.put(s3key, res, "image/png");
+        }
       }
       out.done++;
     } catch (e) { out.failed++; }
@@ -113,4 +121,96 @@ async function generateUiAssets(opts = {}) {
   return out;
 }
 
-module.exports = { removeArtBackgrounds, generateUiAssets, UI_ASSETS };
+// ------------------------- uso y limpieza del volumen ------------------------
+// El arte vive en un VOLUMEN limitado (Railway): estas tareas permiten ver qué
+// lo llena y liberar espacio sin shell en el contenedor.
+function walkArt(dir, out) {
+  for (const name of fs.readdirSync(dir)) {
+    const p = path.join(dir, name);
+    const st = fs.statSync(p);
+    if (st.isDirectory()) { walkArt(p, out); continue; }
+    out.push({ path: p, rel: path.relative(ART_DIR, p), size: st.size });
+  }
+  return out;
+}
+const mb = (n) => Math.round(n / 1024 / 1024 * 10) / 10;
+
+// Informe de uso: total, nº de archivos y cuánto ocupan los .bak (copias de
+// seguridad de remove-art-backgrounds: duplican el espacio en silencio).
+async function artUsage() {
+  if (!fs.existsSync(ART_DIR)) return { totalMB: 0, files: 0 };
+  const files = walkArt(ART_DIR, []);
+  const total = files.reduce((a, f) => a + f.size, 0);
+  const baks = files.filter((f) => f.rel.endsWith(".bak"));
+  // Huérfanos: PNG/JPG de criaturas que ya no referencia ninguna fila (lotes
+  // diarios viejos purgados, descartes...). ui/ y .bak quedan fuera del cálculo.
+  const used = new Set();
+  (await db.query("SELECT image_url FROM creature_templates WHERE image_url IS NOT NULL")).rows.forEach((r) => used.add(r.image_url));
+  (await db.query("SELECT image_url FROM world_boss WHERE image_url IS NOT NULL")).rows.forEach((r) => used.add(r.image_url));
+  const orphans = files.filter((f) => !f.rel.endsWith(".bak") && !f.rel.startsWith("ui/") && !f.rel.startsWith("ui\\") && !used.has("/art/" + f.rel.replace(/\\/g, "/")));
+  return {
+    totalMB: mb(total), files: files.length,
+    bak: { count: baks.length, mb: mb(baks.reduce((a, f) => a + f.size, 0)) },
+    orphans: { count: orphans.length, mb: mb(orphans.reduce((a, f) => a + f.size, 0)) },
+  };
+}
+
+// Limpieza: borra los .bak siempre; con orphans=1 borra también el arte que no
+// referencia ninguna fila de BD (conservador: nunca toca ui/ ni lo referenciado).
+async function artCleanup(opts = {}) {
+  if (!fs.existsSync(ART_DIR)) return { freedMB: 0 };
+  const files = walkArt(ART_DIR, []);
+  let freed = 0, deleted = 0;
+  for (const f of files.filter((x) => x.rel.endsWith(".bak"))) {
+    try { fs.unlinkSync(f.path); freed += f.size; deleted++; } catch (e) { /* sigue */ }
+  }
+  if (opts.orphans) {
+    const used = new Set();
+    (await db.query("SELECT image_url FROM creature_templates WHERE image_url IS NOT NULL")).rows.forEach((r) => used.add(r.image_url));
+    (await db.query("SELECT image_url FROM world_boss WHERE image_url IS NOT NULL")).rows.forEach((r) => used.add(r.image_url));
+    for (const f of files) {
+      if (f.rel.endsWith(".bak") || f.rel.startsWith("ui/") || f.rel.startsWith("ui\\")) continue;
+      if (used.has("/art/" + f.rel.replace(/\\/g, "/"))) continue;
+      try { fs.unlinkSync(f.path); freed += f.size; deleted++; } catch (e) { /* sigue */ }
+    }
+  }
+  return { deleted, freedMB: mb(freed), after: await artUsage() };
+}
+
+// Migra el arte EXISTENTE del volumen local al almacén externo S3 (R2/B2/GCS):
+// sube cada imagen referenciada en BD, actualiza su image_url a la URL pública
+// y (con delete=1) borra el archivo local para liberar el volumen. Los assets
+// de UI (/art/ui/*) NO se migran: el cliente los referencia por ruta fija.
+async function migrateArtToStorage(opts = {}) {
+  const storage = require("./ai/storage");
+  if (!storage.enabled()) throw new Error("configura ART_S3_ENDPOINT/BUCKET/ACCESS_KEY/SECRET_KEY y ART_PUBLIC_BASE primero");
+  const rows = [];
+  (await db.query("SELECT template_id AS id, image_url, 'creature_templates' AS tbl FROM creature_templates WHERE image_url LIKE '/art/%'")).rows.forEach((r) => rows.push(r));
+  (await db.query("SELECT id, image_url, 'world_boss' AS tbl FROM world_boss WHERE image_url LIKE '/art/%'")).rows.forEach((r) => rows.push(r));
+  const out = { total: rows.length, migrated: 0, missing: 0, failed: 0, deletedLocal: 0 };
+  for (const r of rows) {
+    const rel = r.image_url.slice("/art/".length);
+    if (rel.startsWith("ui/")) continue;
+    const file = path.join(ART_DIR, rel);
+    if (!fs.existsSync(file)) { out.missing++; continue; }
+    try {
+      const url = await storage.put(rel, fs.readFileSync(file), rel.endsWith(".jpg") ? "image/jpeg" : "image/png");
+      if (r.tbl === "world_boss") {
+        await db.query("UPDATE world_boss SET image_url=$2 WHERE id=$1", [r.id, url]);
+      } else {
+        await db.query(
+          "UPDATE creature_templates SET image_url=$2, image_thumb_url=CASE WHEN image_thumb_url=$3 THEN $2 ELSE image_thumb_url END WHERE template_id=$1",
+          [r.id, url, r.image_url]
+        );
+      }
+      if (opts.delete) { try { fs.unlinkSync(file); out.deletedLocal++; } catch (e) { /* sigue */ } }
+      out.migrated++;
+    } catch (e) {
+      out.failed++;
+      if (out.failed <= 3) console.warn(`[art-migrate] ${rel}: ${e.message.slice(0, 120)}`);
+    }
+  }
+  return out;
+}
+
+module.exports = { removeArtBackgrounds, generateUiAssets, artUsage, artCleanup, migrateArtToStorage, UI_ASSETS };

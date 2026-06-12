@@ -30,14 +30,18 @@ const VARIANT_NOTE = {
   aurea: " This is the ultra-rare GOLDEN SHINY variant of the same creature: same species and pose family, but with a luxurious gold/amber palette, holographic golden glow, subtle sparkles. Keep the visual identity recognizable.",
 };
 
-// Imagen de referencia (el arte del BASE) si está en /art local: mantiene la
-// identidad visual de la variante. Devuelve null si no hay o no es local.
-function refImageFor(baseImageUrl) {
-  const m = /^\/art\/(.+\.png)$/.exec(baseImageUrl || "");
-  if (!m) return null;
-  const file = path.join(ART_DIR, m[1]);
-  try { return { mimeType: "image/png", data: fs.readFileSync(file).toString("base64") }; }
-  catch (e) { return null; }
+// Imagen de referencia (el arte del BASE): mantiene la identidad visual de la
+// variante. Soporta /art local y URLs http(s) (almacén externo S3/R2/B2/GCS).
+async function refImageFor(baseImageUrl) {
+  try {
+    const m = /^\/art\/(.+\.png)$/.exec(baseImageUrl || "");
+    if (m) return { mimeType: "image/png", data: fs.readFileSync(path.join(ART_DIR, m[1])).toString("base64") };
+    if (/^https?:\/\/.+\.png$/.test(baseImageUrl || "")) {
+      const storage = require("./ai/storage");
+      return { mimeType: "image/png", data: (await storage.getBuffer(baseImageUrl)).toString("base64") };
+    }
+  } catch (e) { /* sin referencia: se genera solo con el prompt */ }
+  return null;
 }
 
 // Nombre/stats de la fila de variante (solo informativos: el combate y la
@@ -83,7 +87,7 @@ async function ensureVariantArt(base, kind) {
     palette: kind === "aurea" ? "golden amber" : base.type.toLowerCase(),
   };
   const prompt = buildImagePrompt(concept, base.rarity, true) + VARIANT_NOTE[kind];
-  const ref = refImageFor(base.image_url);
+  const ref = await refImageFor(base.image_url);
   try {
     const art = await provider.generate(concept, {
       prompt, rarity: base.rarity, templateId: v.id, transparent: true,

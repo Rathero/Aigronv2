@@ -85,8 +85,10 @@ function makeOpenAIProvider() {
   const ART_DIR = path.join(__dirname, "../../../web/art");
   const PUBLIC_BASE = process.env.ART_PUBLIC_BASE || "/art";
 
+  const storage = require("./storage");
   async function saveLocal(buffer, key) {
-    fs.mkdirSync(ART_DIR, { recursive: true });
+    if (storage.enabled()) return storage.put(key + ".png", buffer, "image/png");
+    fs.mkdirSync(path.join(ART_DIR, path.dirname(key)), { recursive: true });
     const file = path.join(ART_DIR, key + ".png");
     fs.writeFileSync(file, buffer);
     return `${PUBLIC_BASE}/${key}.png`;
@@ -162,9 +164,13 @@ function makeGeminiProvider() {
   const ART_DIR = path.join(__dirname, "../../../web/art");
   const PUBLIC_BASE = process.env.ART_PUBLIC_BASE || "/art";
   const KEY = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
+  const storage = require("./storage");
 
-  function save(buffer, key, ext) {
-    fs.mkdirSync(ART_DIR, { recursive: true });
+  async function save(buffer, key, ext) {
+    // Almacén EXTERNO S3-compatible si está configurado (el volumen local es
+    // pequeño); si no, disco local servido en /art como siempre.
+    if (storage.enabled()) return storage.put(key + "." + ext, buffer, ext === "jpg" ? "image/jpeg" : "image/png");
+    fs.mkdirSync(path.join(ART_DIR, path.dirname(key)), { recursive: true });
     fs.writeFileSync(path.join(ART_DIR, key + "." + ext), buffer);
     return `${PUBLIC_BASE}/${key}.${ext}`;
   }
@@ -226,7 +232,7 @@ function makeGeminiProvider() {
       }
 
       const key = opts.templateId || crypto.randomBytes(6).toString("hex");
-      const out = save(buffer, key, ext);
+      const out = await save(buffer, key, ext);
       return { image_url: out, image_thumb_url: out, quality_score: score };
     },
   };

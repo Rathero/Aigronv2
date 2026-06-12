@@ -1430,6 +1430,13 @@ const ADMIN_TASKS = {
     : variantArt.backfillVariantArt(),
   // Rebalanceo de stats de plantillas guardadas (motor con presupuesto por rareza).
   "rebalance-stats": () => rebalanceTemplates(),
+  // Volumen de arte: informe de uso y limpieza (los .bak de remove-art-backgrounds
+  // duplican el espacio; ?orphans=1 borra además arte sin fila en BD).
+  "art-usage": () => artTasks.artUsage(),
+  "art-cleanup": (q) => artTasks.artCleanup({ orphans: q.orphans === "1" }),
+  // Migra el arte del volumen al almacén externo S3 (R2/B2/GCS) configurado por
+  // ART_S3_*; ?delete=1 borra los locales tras subirlos (libera el volumen).
+  "art-migrate": (q) => artTasks.migrateArtToStorage({ delete: q.delete === "1" }),
 };
 app.post("/admin/tasks/:task", requireAdmin, (req, res) => {
   const name = req.params.task;
