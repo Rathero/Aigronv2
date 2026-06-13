@@ -188,6 +188,64 @@ const SFX=(()=>{
 })();
 function buzz(ms){ if(navigator.vibrate){ try{navigator.vibrate(ms);}catch(e){} } }
 
+/* ---------------- MÚSICA (chiptune procedural adaptativa, sin assets) --------
+   Un secuenciador WebAudio teje una banda sonora 8-bit al vuelo: bajo + arpegio
+   sobre una progresión menor pentatónica (suena bien y "a juego" con el pixel).
+   Dos escenas: 'menu' (tranquila) y 'battle' (más rápida, con percusión) — la
+   música se INTENSIFICA al combatir. Pesa 0 (no hay ficheros), arranca en el
+   primer gesto del usuario (política de autoplay) y tiene toggle propio en ≡.
+   On por defecto; se recuerda en localStorage ('aigrons_music'). */
+const MUSIC=(()=>{
+  let ctx=null, master=null, on=localStorage.getItem('aigrons_music')!=='0', scene='menu', timer=null, step=0, playing=false;
+  const BASE=220; // La3
+  const SCALE=[0,3,5,7,10,12,15,17]; // menor pentatónica (semitonos), dos octavas
+  const hz=(semi)=>BASE*Math.pow(2,semi/12);
+  // Progresión de "acordes" (índice raíz en la escala) por escena.
+  const PROG={ menu:[0,5,3,4], battle:[0,0,5,3] };
+  function ac(){
+    if(!ctx){ try{ ctx=new (window.AudioContext||window.webkitAudioContext)(); master=ctx.createGain(); master.gain.value=0; master.connect(ctx.destination); }catch(e){ return null; } }
+    if(ctx&&ctx.state==='suspended') ctx.resume().catch(()=>{});
+    return ctx;
+  }
+  function voice(f,t,dur,type,vol){
+    const o=ctx.createOscillator(), g=ctx.createGain();
+    o.type=type; o.frequency.setValueAtTime(f,t);
+    g.gain.setValueAtTime(0,t); g.gain.linearRampToValueAtTime(vol,t+.01); g.gain.exponentialRampToValueAtTime(.0001,t+dur);
+    o.connect(g); g.connect(master); o.start(t); o.stop(t+dur+.03);
+  }
+  function perc(t,dur,vol){ // percusión de ruido para la escena de combate
+    const len=Math.floor(ctx.sampleRate*dur), b=ctx.createBuffer(1,len,ctx.sampleRate), d=b.getChannelData(0);
+    for(let i=0;i<len;i++) d[i]=(Math.random()*2-1)*Math.pow(1-i/len,2);
+    const s=ctx.createBufferSource(); s.buffer=b; const g=ctx.createGain(); g.gain.value=vol;
+    s.connect(g); g.connect(master); s.start(t);
+  }
+  function tick(){
+    const c=ac(); if(!c){ return; }
+    const t=c.currentTime+.06, isB=scene==='battle', prog=PROG[scene];
+    const root=prog[Math.floor(step/8)%prog.length], s=step%8;
+    if(s%2===0) voice(hz(SCALE[root]-12), t, isB?.22:.34, 'triangle', .11);                 // bajo
+    const arp=[root,root+2,root+4,root+2][s%4];
+    voice(hz(SCALE[arp%SCALE.length]), t, isB?.12:.2, 'square', isB?.05:.045);               // arpegio
+    if(isB){ if(s%4===0)perc(t,.06,.06); if(s%2===1)perc(t,.03,.03);
+      if(s===6) voice(hz(SCALE[(root+4)%SCALE.length]+12), t, .14, 'square', .045); }          // adorno
+    step++;
+  }
+  function loop(){ tick(); timer=setTimeout(loop, scene==='battle'?125:165); }
+  function start(){
+    if(!on||playing) return; const c=ac(); if(!c) return; playing=true;
+    master.gain.cancelScheduledValues(c.currentTime);
+    master.gain.setValueAtTime(0,c.currentTime); master.gain.linearRampToValueAtTime(.4, c.currentTime+1.6);
+    loop();
+  }
+  function stop(){ playing=false; if(timer){clearTimeout(timer);timer=null;}
+    if(master&&ctx){ master.gain.cancelScheduledValues(ctx.currentTime); master.gain.linearRampToValueAtTime(0, ctx.currentTime+.4); } }
+  return {
+    start, enabled:()=>on,
+    setScene:(s)=>{ if(scene===s||(s!=='menu'&&s!=='battle'))return; scene=s; step=0; },
+    toggle:()=>{ on=!on; localStorage.setItem('aigrons_music', on?'1':'0'); if(on){ playing=false; start(); } else stop(); return on; },
+  };
+})();
+
 /* Beacon de ERRORES: los fallos de los jugadores dejan de ser invisibles.
    Máximo 3 por sesión (el servidor además limita por IP). */
 let _errSent=0;
@@ -914,7 +972,7 @@ async function watchReplay(battleId){
     (e.hits||[]).forEach(h=>{const t=byUid(loc(h.tgt&&h.tgt.uid));if(!t)return;
       t.hp=Math.max(0,t.hp-h.dmg);
       if(t.el){t.el.classList.remove("hit");void t.el.offsetWidth;t.el.classList.add("hit");
-        floatNum(t,(h.crit?"¡":"")+h.dmg+(h.crit?"!":""),h.crit?"var(--gold)":"#fff");}});
+        floatNum(t,(h.crit?"¡":"")+h.dmg+(h.crit?"!":""),h.crit?"var(--gold)":"#fff",h.crit); impactFx(t,h);}});
     refreshArena();
     CB.timer=setTimeout(tick,tickMs());
   }
@@ -1378,7 +1436,7 @@ function liveAnimate(log, state){
     (e.hits||[]).forEach(h=>{ const luid=toLocalUid(h.tgt&&h.tgt.uid); const t=byUid(luid); if(!t||!t.el)return;
       t.el.classList.remove("hit");void t.el.offsetWidth;t.el.classList.add("hit");
       SFX.play(h.crit?'crit':'hit'); buzz(h.crit?40:15);
-      floatNum(t,(h.shielded?"🛡":"")+(h.guarded?"🛡️":"")+(h.crit?"¡":"")+h.dmg+(h.crit?"!":""),h.crit?"var(--gold)":h.shielded?"#aebfce":h.guarded?"var(--cyan)":h.typeM>1?"var(--magenta)":"#fff");
+      floatNum(t,(h.shielded?"🛡":"")+(h.guarded?"🛡️":"")+(h.crit?"¡":"")+h.dmg+(h.crit?"!":""),h.crit?"var(--gold)":h.shielded?"#aebfce":h.guarded?"var(--cyan)":h.typeM>1?"var(--magenta)":"#fff",h.crit); impactFx(t,h);
       const ss=smap[luid]; if(ss) t.hp=ss.hp;
     });
     const sa=actor&&smap[actor.uid]; if(sa) actor.hp=sa.hp;
@@ -1393,6 +1451,7 @@ function pvpOver(m){
   if(m.leaguePoints!=null){ S.user.leaguePoints=m.leaguePoints; S.user.league=m.league; }
   if(m.energy!=null) S.user.energy=m.energy;
   refreshChips();
+  MUSIC.setScene('menu');
   const won=!!m.youWon;
   SFX.play(won?'win':'lose'); buzz(won?[40,60,80]:60);
   openOverlay(`<div class="center">
@@ -1466,6 +1525,7 @@ function duelStart(){
 }
 
 function buildArena(){
+  MUSIC.setScene('battle'); // la música se intensifica al combatir
   const fHTML=(u)=>`<div class="fighter ${u.team==='B'?'enemy':''}" data-uid="${u.uid}" ${u.team==='B'?`data-act="planEnemy" data-arg="${u.uid}"`:''}>
      <div class="thint"></div>
      <div class="flv">Nv${u.level}</div>
@@ -1494,8 +1554,25 @@ function buildArena(){
   [...CB.A,...CB.B].forEach(u=>{u.el=$(`.fighter[data-uid="${u.uid}"]`);u.hpEl=u.el.querySelector(".hpbar i");u.hpNumEl=u.el.querySelector(".hpnum");u.pipsEl=u.el.querySelectorAll(".pip");});
   refreshArena();
 }
-function floatNum(u,txt,color){const s=document.createElement("span");s.className="floatnum";s.textContent=txt;
-  s.style.color=color;s.style.left="50%";s.style.top="0";s.style.transform="translateX(-50%)";u.el.appendChild(s);setTimeout(()=>s.remove(),1000);}
+function floatNum(u,txt,color,big){const s=document.createElement("span");s.className="floatnum"+(big?" big":"");s.textContent=txt;
+  s.style.color=color;s.style.left="50%";s.style.top="0";if(!big)s.style.transform="translateX(-50%)";u.el.appendChild(s);setTimeout(()=>s.remove(),big?1100:1000);}
+/* ---- JUICINESS: screen-shake del escenario + chispas de impacto -------------
+   Puro render (no toca el motor determinista): solo "sienten" mejor los golpes. */
+function shake(big){ const a=document.querySelector('.arena'); if(!a)return; const c=big?'shake-big':'shake';
+  a.classList.remove('shake','shake-big'); void a.offsetWidth; a.classList.add(c); setTimeout(()=>a&&a.classList.remove(c), big?440:260); }
+function sparks(u,color,n){ if(!u||!u.el)return; for(let i=0;i<(n||6);i++){ const s=document.createElement('span'); s.className='spark';
+  const ang=Math.random()*Math.PI*2, dist=16+Math.random()*28;
+  s.style.setProperty('--dx',(Math.cos(ang)*dist).toFixed(1)+'px');
+  s.style.setProperty('--dy',(Math.sin(ang)*dist-8).toFixed(1)+'px');
+  s.style.color=color; s.style.background=color; u.el.appendChild(s); setTimeout(()=>s.remove(),460); } }
+// Impacto centralizado (lo usan los 4 caminos de animación: replay, PvP en vivo,
+// PvE local y mazmorra). Añade el FLASH de crítico a nivel de sprite (encima del
+// empuje .hit) y delega las partículas + screen-shake en POC (sistema de canvas
+// ya afinado). Fallback a chispas DOM + shake del .arena si POC no cargó. */
+function impactFx(t,h){ if(!t||!t.el)return; const crit=!!(h&&h.crit);
+  if(crit){ t.el.classList.add('crit-hit'); setTimeout(()=>t.el&&t.el.classList.remove('crit-hit'),340); }
+  if(window.POC&&window.POC.onHit){ try{ window.POC.onHit(t.el,h); }catch(e){} }
+  else { shake(crit); sparks(t, crit?'var(--gold)':(h&&h.typeM>1?'var(--magenta)':(h&&h.guarded?'var(--cyan)':'#fff')), crit?11:6); } }
 const sumHp=arr=>arr.reduce((s,u)=>s+Math.max(0,u.hp),0);
 function refreshArena(){
   if(!CB)return;
@@ -1507,7 +1584,10 @@ function refreshArena(){
       const badges=(u.shield>0?" 🛡"+u.shield:"")+(u.poisonTurns>0?" ☠":"")+(u.stunTurns>0?" 💫":"");
       u.hpNumEl.innerHTML = (u.hp<=0?"☠️":(Math.max(0,Math.round(u.hp))+"/"+u.hpMax))+'<span style="font-size:9px">'+badges+'</span>';
     }
-    if(u.hp<=0)u.el.classList.add("dead");
+    if(u.hp<=0){ if(!u._died){ u._died=true; u.el.classList.add("dying"); sparks(u,"var(--red)",12);
+        if(window.POC&&window.POC.onHit){ try{ window.POC.onHit(u.el,{crit:true}); }catch(e){} }
+        setTimeout(()=>{ u.el&&u.el.classList.add("dead"); },240); }
+      else u.el.classList.add("dead"); }
     u.el.classList.toggle("guarding", !!u.guarding && u.hp>0);
     u.pipsEl.forEach((p,i)=>p.classList.toggle("on",i<u.energy));
   });
@@ -1725,9 +1805,8 @@ function resolveTick(){
   else if(action.ability){ setBanner(`<span style="color:${who}">${u.name}</span> usa <b style="color:var(--gold)">${action.ability}</b>${action.overcharge?' ⚡⚡×1.5':''}`); SFX.play('ability'); }
   else if(action.hits.length) setBanner(`<span style="color:${who}">${u.name}</span> ataca`);
   action.hits.forEach(h=>{const t=h.tgt; if(!t.el)return; t.el.classList.remove("hit");void t.el.offsetWidth;t.el.classList.add("hit");
-    SFX.play(h.crit?'crit':'hit'); buzz(h.crit?40:15);
-    if(window.POC&&window.POC.onHit) window.POC.onHit(t.el,h); // POC juice: partículas + shake
-    floatNum(t,(h.shielded?"🛡":"")+(h.guarded?"🛡️":"")+(h.crit?"¡":"")+h.dmg+(h.crit?"!":""),h.crit?"var(--gold)":h.shielded?"#aebfce":h.guarded?"var(--cyan)":h.typeM>1?"var(--magenta)":"#fff");});
+    SFX.play(h.crit?'crit':'hit'); buzz(h.crit?40:15); impactFx(t,h);
+    floatNum(t,(h.shielded?"🛡":"")+(h.guarded?"🛡️":"")+(h.crit?"¡":"")+h.dmg+(h.crit?"!":""),h.crit?"var(--gold)":h.shielded?"#aebfce":h.guarded?"var(--cyan)":h.typeM>1?"var(--magenta)":"#fff",h.crit);});
   refreshArena();
   if(!CB.A.some(x=>x.hp>0)||!CB.B.some(x=>x.hp>0)) finishBattle();
 }
@@ -1795,6 +1874,7 @@ function startLocalCombat(opts){
 }
 function showResult(r){
   const win=r.win;
+  MUSIC.setScene('menu');
   SFX.play(win?'win':'lose'); buzz(win?[40,60,80]:60);
   openOverlay(`<div class="center">
      <div style="font-family:var(--pixel);font-size:16px;color:${win?'var(--gold)':'var(--ink-dim)'};margin-bottom:10px">${win?'¡VICTORIA!':'DERROTA'}</div>
@@ -1991,6 +2071,7 @@ function dgFight(){
 }
 function showDungeonResult(r){
   const win=r.win; let extra='';
+  MUSIC.setScene('menu');
   SFX.play(win?'win':'lose'); buzz(win?[40,60,80]:60);
   if(r.cleared) extra='<div style="color:var(--gold);margin-top:6px">🏆 ¡Mazmorra completada!</div>';
   else if(r.fled) extra='<div style="color:var(--red);margin-top:6px">🏳 Huiste — la run termina aquí.</div>';
@@ -2104,6 +2185,7 @@ async function purchase(sku){
 const RENDER={home:renderHome,battle:renderBattle,dungeon:renderDungeon,collection:renderCollection,ranking:renderRanking,shop:renderShop};
 function go(screen){
   if(CB&&CB.timer&&screen!=="battle"){clearInterval(CB.timer);CB=null;}
+  MUSIC.setScene(screen==="battle"?"battle":"menu");
   document.querySelectorAll(".screen").forEach(s=>s.classList.remove("active"));
   $("#s-"+screen).classList.add("active");
   document.querySelectorAll(".nav button").forEach(b=>b.classList.toggle("on",b.dataset.screen===screen));
@@ -2158,15 +2240,21 @@ const ACTIONS={
   openTutorial:()=>openTutorial(),
   tutNext:()=>tutNext(), tutPrev:()=>tutPrev(), tutDone:()=>tutDone(),
   logout:()=>logout(),
-  menuToggle:()=>{ $("#topmenu").classList.toggle("show"); const s=$("#m-sound"); if(s)s.textContent=SFX.muted()?'🔇 Sonido: off':'🔊 Sonido: on'; },
+  menuToggle:()=>{ $("#topmenu").classList.toggle("show");
+    const s=$("#m-sound"); if(s)s.textContent=SFX.muted()?'🔇 Sonido: off':'🔊 Sonido: on';
+    const mm=$("#m-music"); if(mm)mm.textContent=MUSIC.enabled()?'🎵 Música: on':'🎵 Música: off'; },
   menuTutorial:()=>{$("#topmenu").classList.remove("show");openTutorial();},
   menuSound:()=>{ const m=SFX.toggle(); const s=$("#m-sound"); if(s)s.textContent=m?'🔇 Sonido: off':'🔊 Sonido: on'; if(!m)SFX.play('claim'); },
+  menuMusic:()=>{ const on=MUSIC.toggle(); const mm=$("#m-music"); if(mm)mm.textContent=on?'🎵 Música: on':'🎵 Música: off'; },
+  menuStory:()=>{ openIntro(); },
+  introNext:()=>introNext(), introSkip:()=>introSkip(), introFF:()=>introFF(),
   menuLogout:()=>{$("#topmenu").classList.remove("show");logout();},
   dgStart:(a)=>dgStart(a), dgRankTab:(a)=>dgRankTab(a), dgChoose:(a)=>dgChoose(a), dgDraft:(a)=>dgDraft(a), dgSkipDraft:()=>dgSkipDraft(),
   dgBuy:(a)=>dgBuy(a), dgHeal:()=>dgHeal(), dgLeaveShop:()=>dgLeaveShop(), dgFight:()=>dgFight(), dgContinue:()=>dgContinue(),
   goDungeon:()=>go('dungeon')
 };
 document.getElementById("app").addEventListener("click",e=>{
+  MUSIC.start(); // política de autoplay: la música arranca en el primer gesto (idempotente)
   const el=e.target.closest("[data-act]");
   // El menú de la topbar se cierra al tocar fuera de él.
   const menu=$("#topmenu");
@@ -2175,6 +2263,70 @@ document.getElementById("app").addEventListener("click",e=>{
   SFX.play('click');
   const fn=ACTIONS[el.dataset.act]; if(fn) fn(el.dataset.arg, el);
 });
+
+/* ============== CINEMÁTICA DE APERTURA "GÉNESIS" (cold-open) ==============
+   Establece el MUNDO antes del tutorial: por qué nacen aigrons cada día (el
+   Núcleo roto) y quién es el Oráculo. Texto con efecto máquina de escribir,
+   reveals por etapas y la música arrancando. Se ve una vez (primer login) y se
+   puede REVER desde el menú ≡ → "Historia". Da alma a la colección. */
+const LORE_INTRO=[
+  {g:'🌑', h:`Hace mil ciclos, el <b>Núcleo</b> que soñaba el mundo se hizo añicos.`},
+  {g:'✦',  h:`Cada fragmento atrapó una <span class="mag">idea viva</span>: una criatura imposible que aún no existía.`},
+  {g:'🌅', h:`Por eso, <b>cada amanecer</b>, el cielo se quiebra y nace un <b>lote nuevo</b> de <b>aigrons</b>… el mismo para todo el que sueña.`},
+  {g:'👁️', h:`El <span class="gold">Oráculo</span> los ve antes que nadie, y susurra profecías de lo que vendrá mañana.`},
+  {g:'⚔️', h:`Reúnelos. Combate. Complétalos <b>antes de que el día se los lleve</b>.`},
+  {g:'🥚', h:`Tu primer fragmento ya late. <b>¿Le das forma?</b>`},
+];
+let introI=0, introSkipType=null, introTyped=false;
+// Máquina de escribir consciente de etiquetas: emite el HTML entero pero revela
+// el TEXTO carácter a carácter (las etiquetas <b>… se mantienen intactas).
+function typeLine(el, html, done){
+  const tokens=html.match(/<[^>]+>|[^<]+/g)||[]; let out='', ti=0, ci=0, t=null, fin=false;
+  const cur='<span class="intro-cursor">&nbsp;</span>';
+  function finish(){ if(fin)return; fin=true; if(t)clearTimeout(t); el.innerHTML=html+cur; if(done)done(); }
+  function step(){
+    if(ti>=tokens.length){ finish(); return; }
+    const tk=tokens[ti];
+    if(tk[0]==='<'){ out+=tk; ti++; return step(); }
+    const ch=tk[ci++]; out+=ch; if(ci>=tk.length){ ti++; ci=0; }
+    el.innerHTML=out+cur;
+    t=setTimeout(step, /[.,;…!?]/.test(ch)?150:24);
+  }
+  step();
+  return finish; // llamarla completa la línea de golpe (fast-forward)
+}
+function showIntro(i){
+  introI=i||0; introTyped=false;
+  let host=$("#intro");
+  if(!host){ host=document.createElement("div"); host.className="intro"; host.id="intro"; document.getElementById("app").appendChild(host); }
+  const s=LORE_INTRO[introI], last=introI===LORE_INTRO.length-1;
+  const dots=LORE_INTRO.map((_,k)=>`<span class="intro-dot ${k===introI?'on':''}"></span>`).join("");
+  host.innerHTML=`
+    <button class="intro-skip" data-act="introSkip">Saltar ✕</button>
+    <div class="intro-glyph">${s.g}</div>
+    <div class="intro-line" id="intro-line" data-act="introFF"></div>
+    <div class="intro-dots">${dots}</div>
+    <div class="intro-actions">
+      <button class="btn ${last?'gold':'mag'}" id="intro-next" data-act="introNext"
+        style="opacity:.3;pointer-events:none;max-width:260px">${last?'DAR FORMA ▸':'CONTINUAR ▸'}</button>
+    </div>`;
+  MUSIC.start();
+  introSkipType=typeLine($("#intro-line"), s.h, ()=>{ introTyped=true;
+    const b=$("#intro-next"); if(b){ b.style.opacity='1'; b.style.pointerEvents='auto'; } });
+}
+// Tocar el texto: si aún se está escribiendo, complétalo; si ya, avanza.
+function introFF(){ if(!introTyped&&introSkipType){ introSkipType(); } else introNext(); }
+function introNext(){ if(introI<LORE_INTRO.length-1){ showIntro(introI+1); } else introDone(); }
+function introSkip(){ introDone(); }
+function introDone(){ introSkipType=null; const h=$("#intro"); if(h)h.remove();
+  localStorage.setItem('aigrons_intro','1');
+  if(!localStorage.getItem('aigrons_tut')){ localStorage.setItem('aigrons_tut','1'); showTutorial(0); } }
+function openIntro(){ $("#topmenu").classList.remove("show"); showIntro(0); }
+// Onboarding de primer login: cinemática del mundo → tutorial de mecánicas.
+function maybeOnboard(){
+  if(!localStorage.getItem('aigrons_intro')){ localStorage.setItem('aigrons_intro','1'); showIntro(0); }
+  else if(!localStorage.getItem('aigrons_tut')){ localStorage.setItem('aigrons_tut','1'); showTutorial(0); }
+}
 
 /* ====================== TUTORIAL (primer login) ====================== */
 const TUTORIAL=[
@@ -2206,7 +2358,6 @@ function tutNext(){ if(tutI<TUTORIAL.length-1){tutI++;tutRender();} else tutDone
 function tutPrev(){ if(tutI>0){tutI--;tutRender();} }
 function tutDone(){ localStorage.setItem('aigrons_tut','1'); closeOverlay(); }
 function openTutorial(){ showTutorial(0); }
-function maybeTutorial(){ if(!localStorage.getItem('aigrons_tut')){ localStorage.setItem('aigrons_tut','1'); showTutorial(0); } }
 
 /* ---------------- Arranque ---------------- */
 function bootMsg(msg,retry){ $("#boot-msg").textContent=msg; $("#boot-spin").style.display=retry?'none':'block'; $("#boot-retry").style.display=retry?'inline-block':'none'; }
@@ -2245,7 +2396,7 @@ async function afterAuth(){
   try{ await refreshMe(); }
   catch(e){ if(e.status===401){ TOKEN=''; localStorage.removeItem('aigrons_token'); return showLogin(); } throw e; }
   await Promise.all([loadFeatures(),refreshDaily(),refreshCollection(),refreshTeam()]);
-  hideBoot(); go("home"); maybeTutorial();
+  hideBoot(); go("home"); maybeOnboard();
 }
 async function boot(){
   showBoot(); showLoadingSec(true); bootMsg('Conectando…',false);

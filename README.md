@@ -369,6 +369,20 @@ test de paridad en `npm test`.
   (`resume` por WebSocket) en vez de derrota instantánea.
 - ✅ Sonido chiptune sintetizado + háptica (toggle en el menú ≡), compartir el aigrón
   del día (Web Share), progreso del lote diario ("X/30 de hoy").
+- ✅ **Música adaptativa** (`MUSIC` en `app.js`): banda sonora chiptune procedural
+  (bajo+arpegio sobre progresión menor pentatónica, sin assets) que se **intensifica
+  en combate** (escena `menu`↔`battle`). Arranca en el primer gesto (autoplay) y tiene
+  toggle propio en ≡ ("🎵 Música").
+- ✅ **Juiciness de combate** (game feel): screen-shake del escenario, flash + empuje
+  del sprite golpeado, **flash dorado en crítico**, chispas de impacto (vía `POC` con
+  fallback DOM), números de crítico con punch y **muerte con disolución**. Es puro
+  render (`impactFx`/`sparks`/`shake` en `app.js` + `styles.css`); no toca el motor
+  determinista y respeta `prefers-reduced-motion`. Cableado en los 4 caminos de
+  animación (replay, PvP en vivo, PvE local y mazmorra).
+- ✅ **Cinemática de apertura "Génesis"** (`LORE_INTRO`/`showIntro`): cold-open
+  narrativo con efecto máquina de escribir que establece el mundo (el Núcleo roto, por
+  qué nacen aigrons cada día, el Oráculo) antes del tutorial. Se ve una vez y se reve
+  desde ≡ → "📖 Historia".
 - Pendiente: ascensos/descensos por percentil y Salón de la Fama (el histórico ya existe).
 
 ### P2 — Monetización
