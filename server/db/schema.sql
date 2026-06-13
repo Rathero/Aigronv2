@@ -70,6 +70,8 @@ CREATE TABLE IF NOT EXISTS creature_instances (
   cosmetic_frame TEXT,
   obtained_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+-- Sendero de evolución elegido por el jugador (OFENSIVO/DEFENSIVO/VELOZ) o NULL.
+ALTER TABLE creature_instances ADD COLUMN IF NOT EXISTS evo_path TEXT;
 CREATE INDEX IF NOT EXISTS idx_instances_user ON creature_instances(user_id);
 
 CREATE TABLE IF NOT EXISTS teams (

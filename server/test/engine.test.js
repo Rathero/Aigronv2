@@ -641,6 +641,18 @@ test("sinergias: applyTeamSynergy hornea el bono y es determinista", () => {
   assert.equal(duo[0].hpMax, 1080); assert.equal(duo[0].hp, 1080);
 });
 
+test("sendero de evolución: applyEvoPath aplica el perfil correcto", () => {
+  function unit() { return { atkP: 100, atkS: 100, defP: 100, defS: 100, hpMax: 1000, hp: 1000, spd: 50 }; }
+  const off = unit(); const po = E.applyEvoPath(off, "OFENSIVO");
+  assert.equal(po.label, "Ofensivo");
+  assert.equal(off.atkP, 112); assert.equal(off.defP, 94); assert.equal(off.hpMax, 1000);
+  const def = unit(); E.applyEvoPath(def, "DEFENSIVO");
+  assert.equal(def.defP, 112); assert.equal(def.hpMax, 1060); assert.equal(def.atkP, 94);
+  const vel = unit(); E.applyEvoPath(vel, "VELOZ");
+  assert.equal(vel.spd, Math.round(50 * 1.15)); assert.equal(vel.atkP, 105);
+  assert.equal(E.applyEvoPath(unit(), "NOPE"), null); // sendero inválido: no muta
+});
+
 test("arco narrativo: seasonStory es determinista, válido y avanza mes a mes", () => {
   const a = E.seasonStory("2026-06");
   assert.equal(a.title, E.seasonStory("2026-06").title); // determinista

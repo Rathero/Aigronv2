@@ -1075,6 +1075,11 @@ function openDetail(iid){
   const evoLine=evoStage||evoNextE?
     `<div class="mb8" style="font-size:12px">${evoStage?`<span style="color:var(--cyan);font-weight:700">🧬 EVOLUCIÓN ${evoStage===2?'FINAL':'1ª'}</span>`:''}
       ${evoNextE?`${evoStage?' · ':''}<span class="dim">🧬 ${evoStage?'Evolución final':'Evoluciona'} en <b style="color:var(--cyan)">Nv.${evoNextE.at}</b></span>`:''}</div>`:'';
+  // Sendero de evolución (#6): elegir/cambiar el perfil de stats de la forma evolucionada.
+  const pathLabel=inst.evo_path&&ENGINE.EVO_PATHS[inst.evo_path]?ENGINE.EVO_PATHS[inst.evo_path].label:null;
+  const pathLine=evoStage?`<div class="mb8" style="font-size:12px">${pathLabel
+    ?`🧬 Sendero: <b style="color:var(--cyan)">${esc(pathLabel)}</b> <button class="btn sm ghost" style="padding:2px 8px;width:auto;margin-left:4px" data-act="chooseEvoPath" data-arg="${iid}">cambiar</button>`
+    :`<button class="btn sm gold pulse" style="width:auto" data-act="chooseEvoPath" data-arg="${iid}">🧬 ELIGE SENDERO</button>`}</div>`:'';
   openOverlay(`<div class="center">
     <span class="art-wrap ${variant==='aurea'?'aurea':variant==='prismatica'?'prismatic':''}">${artTag(dispT,9,iid)}</span>
     <div style="font-size:20px;font-weight:700;margin-top:4px">${esc(dispT.name)} <span class="dim" style="font-size:13px">Nv.${inst.level}</span></div>
@@ -1082,6 +1087,7 @@ function openDetail(iid){
       <span class="dim" style="font-size:11px"> · ${ENGINE.isPhysical(t.type)?'⚔️ Físico':'✨ Especial'}</span></div>
     <div class="mb8" style="font-size:12px">${vLabel?vLabel+' · ':''}Potencial <b style="color:${potCol}">${pot}%</b> <span class="dim" style="font-size:10px">(stats únicos de esta criatura)</span></div>
     ${evoLine}
+    ${pathLine}
     <div style="text-align:left;margin-bottom:8px">${statBars(stats, t.stats?inst.level:1)}</div>
     <div class="panel" style="text-align:left;margin-bottom:10px">
       <div style="font-weight:700;color:var(--gold);font-size:14px">✨ ${ABILITIES[t.ability].name}
@@ -1141,8 +1147,32 @@ function showEvolution(iid,evo){
       <div style="font-size:20px;font-weight:700;margin-top:6px">${esc(e.name)}</div>
       <div class="dim" style="font-size:12px;margin-bottom:8px">${esc(t.name)} ha alcanzado su ${evo.stage===2?'forma FINAL':'primera evolución'} en Nv.${evo.at}</div>
       <div style="color:var(--green);font-size:13px;font-weight:700;margin-bottom:12px">¡Todas sus stats han dado un gran salto!</div>
-      <button class="btn" data-act="evoOk" data-arg="${iid}">VER FICHA</button>
+      <button class="btn mag" data-act="chooseEvoPath" data-arg="${iid}">🧬 ELEGIR SENDERO</button>
+      <button class="btn ghost mt8" data-act="evoOk" data-arg="${iid}">VER FICHA</button>
     </div></div>`);
+}
+// Sendero de evolución (#6): perfil de stats permanente (reescribible) de la forma
+// evolucionada. Mismo bicho y arte; distinto destino según cómo lo quieras jugar.
+let pendingPathIid=null;
+function chooseEvoPath(iid){
+  pendingPathIid=iid;
+  const inst=instById(iid); const cur=inst&&inst.evo_path;
+  const P=ENGINE.EVO_PATHS;
+  const opt=(k,emoji)=>`<button class="btn ghost ${cur===k?'cyan':''}" data-act="setEvoPath" data-arg="${k}" style="text-align:left;margin-bottom:8px;width:100%">
+     ${emoji} <b>${P[k].label}</b> <span class="dim" style="font-size:12px">— ${esc(P[k].desc)}</span>${cur===k?' <span style="color:var(--cyan)">✓</span>':''}</button>`;
+  openOverlay(`<div class="center">
+    <div style="font-family:var(--pixel);font-size:12px;color:var(--cyan);margin-bottom:8px">🧬 SENDERO DE EVOLUCIÓN</div>
+    <div class="dim mb8" style="font-size:13px">Elige cómo crece tu forma evolucionada. Mismo aigrón, distinto estilo. <b>Puedes cambiarlo cuando quieras.</b></div>
+    ${opt('OFENSIVO','⚔️')}${opt('DEFENSIVO','🛡️')}${opt('VELOZ','⚡')}
+    <button class="btn sm ghost mt8" data-act="evoOk" data-arg="${iid}">${cur?'CERRAR':'AHORA NO'}</button>
+  </div>`);
+}
+async function setEvoPath(path){
+  const iid=pendingPathIid; if(!iid)return;
+  try{ await api('/creature/'+iid+'/evo-path',{method:'POST',body:{path}});
+    await refreshCollection(); SFX.play('claim'); buzz(40);
+    toast('🧬 Sendero: '+(ENGINE.EVO_PATHS[path]||{}).label); openDetail(iid); }
+  catch(e){ toast('No se pudo elegir el sendero'); }
 }
 async function toggleFav(iid){
   try{ await api('/creature/'+iid+'/favorite',{method:'POST'}); await refreshCollection(); openDetail(iid); }catch(e){ toast('Error'); }
@@ -2235,6 +2265,7 @@ const ACTIONS={
   firstFight:()=>firstFight(),
   levelUp:(a)=>levelUp(a),
   evoOk:(a)=>{closeOverlay();openDetail(a);},
+  chooseEvoPath:(a)=>chooseEvoPath(a), setEvoPath:(a)=>setEvoPath(a),
   toggleFav:(a)=>toggleFav(a),
   release:(a)=>release(a),
   fusionPick:(a)=>fusionPick(a),

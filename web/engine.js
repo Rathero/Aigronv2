@@ -532,6 +532,27 @@
     return s;
   }
 
+  // --------------------- SENDERO DE EVOLUCIÓN (ramificación) ----------------
+  // Al evolucionar, el jugador elige un SENDERO permanente por instancia: mismo
+  // bicho y mismo arte, pero un perfil de stats distinto (como una estancia fija).
+  // Se hornea en la unidad al construirla (servidor; revalidado). No toca la
+  // evolución determinista (que sigue siendo función pura del id+nivel): el
+  // sendero es estado del JUGADOR, no de la plantilla.
+  const EVO_PATHS = {
+    OFENSIVO:  { label: "Ofensivo",  desc: "+12% ATK, −6% DEF",          atk: 1.12, def: 0.94, hp: 1,    spd: 1 },
+    DEFENSIVO: { label: "Defensivo", desc: "+12% DEF, +6% HP, −6% ATK",  atk: 0.94, def: 1.12, hp: 1.06, spd: 1 },
+    VELOZ:     { label: "Veloz",     desc: "+15% SPD, +5% ATK",          atk: 1.05, def: 1,    hp: 1,    spd: 1.15 },
+  };
+  function applyEvoPath(unit, path) {
+    const p = EVO_PATHS[path];
+    if (!p || !unit) return null;
+    unit.atkP = Math.round(unit.atkP * p.atk); unit.atkS = Math.round(unit.atkS * p.atk);
+    unit.defP = Math.round(unit.defP * p.def); unit.defS = Math.round(unit.defS * p.def);
+    if (p.hp !== 1) { unit.hpMax = Math.round(unit.hpMax * p.hp); unit.hp = unit.hpMax; }
+    if (p.spd !== 1) unit.spd = Math.round(unit.spd * p.spd);
+    return p;
+  }
+
   // ATK/DEF efectivos según la CLASE del atacante: físico usa atkP/defP, especial atkS/defS.
   const effAtk = (u) => (isPhysical(u.type) ? u.atkP : u.atkS) * u.atkMul;
   const effDef = (att, tgt) => (isPhysical(att.type) ? tgt.defP : tgt.defS) * tgt.defMul;
@@ -1095,7 +1116,7 @@
     genName, genLore, pickRange, scaled, todayStr, genTemplate, dailyBatch,
     seasonKey, seasonLabel, seasonStory, dailyEvent, composeSeason, dailyHighlights, dailyUniqueId, dailyUnique,
     // combate
-    buildUnit, unitFromStats, applyCaptainStance, applyTeamSynergy, teamSynergy, STANCES, SYNERGIES, pickTarget, resolveTarget,
+    buildUnit, unitFromStats, applyCaptainStance, applyTeamSynergy, teamSynergy, applyEvoPath, EVO_PATHS, STANCES, SYNERGIES, pickTarget, resolveTarget,
     dealDamage, decBuffs, tickStatus, performAction, aiIntent, turnOrder, stepTurn, intentFromDecision, resolveBattle, botTeamFromSeed,
     // roguelike / mazmorra
     applyRelics, relicRunEffects, dungeonNodeOptions, dungeonEnemyTeam, dungeonDraft, dungeonLevelAt,

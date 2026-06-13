@@ -327,7 +327,7 @@ async function buildTeamUnits(userId, team = "A") {
   }
   if (!slots.length) return [];
   const inst = await db.query(
-    `SELECT ci.instance_id, ci.level, t.template_id, t.name, t.type, t.type2, t.ability_id,
+    `SELECT ci.instance_id, ci.level, ci.evo_path, t.template_id, t.name, t.type, t.type2, t.ability_id,
             t.base_hp, t.base_atk, t.base_def, t.base_spd, t.base_atk_p, t.base_atk_s, t.base_def_p, t.base_def_s,
             t.image_url, t.image_thumb_url
        FROM creature_instances ci JOIN creature_templates t ON t.template_id = ci.template_id
@@ -354,6 +354,7 @@ async function buildTeamUnits(userId, team = "A") {
     // única. Se hornean en las stats de combate; el snapshot las congela igual.
     const tplLike = { id: r.template_id, name: r.name, type: r.type, types: tplTypes(r), ability: r.ability_id, base_stats: C.applyIV(tplBaseStats(r), iid) };
     const u = combat.buildUnit(tplLike, r.level, team, i);
+    if (r.evo_path && u.evoStage > 0) C.applyEvoPath(u, r.evo_path); // sendero de evolución (perfil de stats)
     u.instanceId = iid; // para mapear el capitán elegido a su uid de combate
     // Arte IA: el RIVAL puede no tener esta plantilla en su caché (lote de otro
     // día, fusión); viaja con la unidad para que la vea con su imagen real.
@@ -656,7 +657,7 @@ app.post("/missions/claim", authMiddleware, wrap(async (req, res) => {
 // -------------------------------- COLLECTION ---------------------------------
 app.get("/collection", authMiddleware, wrap(async (req, res) => {
   const r = await db.query(
-    `SELECT ci.instance_id, ci.level, ci.xp, ci.favorite, ci.locked, ci.obtained_at, ci.cosmetic_frame,
+    `SELECT ci.instance_id, ci.level, ci.xp, ci.favorite, ci.locked, ci.obtained_at, ci.cosmetic_frame, ci.evo_path,
             t.template_id, t.name, t.type, t.type2, t.rarity, t.ability_id, t.lore, t.art_seed,
             t.base_hp, t.base_atk, t.base_def, t.base_spd, t.base_atk_p, t.base_atk_s, t.base_def_p, t.base_def_s,
             t.image_url, t.image_thumb_url
@@ -684,10 +685,22 @@ app.get("/collection", authMiddleware, wrap(async (req, res) => {
     const stage = C.evoStageAt(x.template_id, x.level);
     const em = C.evoPowerMult(x.template_id, x.level);
     const sc = (k) => Math.round(C.scaled(b[k], x.level) * em);
+    const stats = { hp: sc("hp"), atkP: sc("atkP"), atkS: sc("atkS"), defP: sc("defP"), defS: sc("defS"), spd: sc("spd") };
+    // Sendero de evolución: aplica el perfil a las stats mostradas (combate lo
+    // revalida aparte). Solo si la criatura ya evolucionó (stage>0).
+    const pathDef = stage > 0 && x.evo_path && C.EVO_PATHS[x.evo_path] ? C.EVO_PATHS[x.evo_path] : null;
+    if (pathDef) {
+      stats.atkP = Math.round(stats.atkP * pathDef.atk); stats.atkS = Math.round(stats.atkS * pathDef.atk);
+      stats.defP = Math.round(stats.defP * pathDef.def); stats.defS = Math.round(stats.defS * pathDef.def);
+      stats.hp = Math.round(stats.hp * pathDef.hp); stats.spd = Math.round(stats.spd * pathDef.spd);
+    }
     return {
       instance_id: x.instance_id, level: x.level, favorite: x.favorite, locked: x.locked,
       obtained_at: x.obtained_at, // para el badge NUEVO (obtenido hoy) del cliente
       frame: x.cosmetic_frame,
+      // Sendero elegido (solo relevante si stage>0); null si aún no eligió.
+      evo_path: stage > 0 ? (x.evo_path || null) : null,
+      can_choose_path: stage > 0 && !x.evo_path, // el cliente ofrece elegir
       // Singularidad por instancia: "potencial" (media de IV 0..100) y variante
       // cosmética (áurea/prismática). template.base_stats se mantiene PURO (caché
       // compartida); el cliente aplica los IV con el instance_id para mostrarlas.
@@ -701,8 +714,8 @@ app.get("/collection", authMiddleware, wrap(async (req, res) => {
         id: x.template_id, name: x.name, type: x.type, types: tplTypes(x), rarity: x.rarity, ability: x.ability_id,
         lore: x.lore, art_seed: x.art_seed, image_url: x.image_url, image_thumb_url: x.image_thumb_url,
         base_stats: b,
-        // stats escaladas con la EVOLUCIÓN incluida (el cliente aplica IV encima).
-        stats: { hp: sc("hp"), atkP: sc("atkP"), atkS: sc("atkS"), defP: sc("defP"), defS: sc("defS"), spd: sc("spd") },
+        // stats escaladas con la EVOLUCIÓN (+ sendero) incluida (el cliente aplica IV encima).
+        stats,
       },
     };
   }));
@@ -784,6 +797,18 @@ app.post("/creature/:id/favorite", authMiddleware, wrap(async (req, res) => {
   res.json(r.rows[0]);
 }));
 
+// Sendero de evolución (#6): el jugador elige el perfil de stats de su forma
+// evolucionada. Solo válido si la instancia YA evolucionó (stage>0). Reescribible.
+app.post("/creature/:id/evo-path", authMiddleware, wrap(async (req, res) => {
+  const path = req.body && req.body.path;
+  if (!C.EVO_PATHS[path]) return res.status(400).json({ error: "bad_path" });
+  const r = await db.query("SELECT template_id, level FROM creature_instances WHERE instance_id=$1 AND user_id=$2", [req.params.id, req.userId]);
+  if (!r.rowCount) return res.status(404).json({ error: "not_found" });
+  if (C.evoStageAt(r.rows[0].template_id, r.rows[0].level) <= 0) return res.status(400).json({ error: "not_evolved" });
+  await db.query("UPDATE creature_instances SET evo_path=$1 WHERE instance_id=$2 AND user_id=$3", [path, req.params.id, req.userId]);
+  res.json({ evo_path: path });
+}));
+
 // ----------------------------------- TEAM ------------------------------------
 app.get("/team", authMiddleware, wrap(async (req, res) => {
   const r = await db.query("SELECT slot1,slot2,slot3 FROM teams WHERE user_id=$1", [req.userId]);
@@ -793,14 +818,15 @@ app.get("/team", authMiddleware, wrap(async (req, res) => {
 app.put("/team", authMiddleware, wrap(async (req, res) => {
   const slots = (req.body && req.body.slots) || [];
   if (!Array.isArray(slots)) return res.status(400).json({ error: "bad_slots" });
-  const own = await db.query("SELECT instance_id, level, template_id FROM creature_instances WHERE user_id=$1 AND instance_id = ANY($2::uuid[])", [req.userId, slots]);
+  const own = await db.query("SELECT instance_id, level, template_id, evo_path FROM creature_instances WHERE user_id=$1 AND instance_id = ANY($2::uuid[])", [req.userId, slots]);
   const valid = own.rows.map((x) => x.instance_id);
   const ordered = slots.filter((s) => valid.includes(s)).slice(0, 3);
   // instance_id en el snapshot: el rival aplica MIS IV al defenderme (consistencia
   // atacante/defensor). Snapshots antiguos sin él -> stats de plantilla puras.
+  // evo_path viaja en el snapshot para que mi sendero cuente al defenderme async.
   const snapshot = own.rows
     .filter((x) => ordered.includes(x.instance_id))
-    .map((x) => ({ template_id: x.template_id, level: x.level, instance_id: x.instance_id }));
+    .map((x) => ({ template_id: x.template_id, level: x.level, instance_id: x.instance_id, evo_path: x.evo_path || null }));
   // avg_level materializado: el matchmaking de /battle/find filtra por esta
   // columna indexada en vez de calcular avg() sobre el JSONB de TODOS los equipos.
   const avgLevel = snapshot.length ? snapshot.reduce((a, s) => a + s.level, 0) / snapshot.length : null;
@@ -829,6 +855,7 @@ async function opponentFromSnapshot(snapshot) {
     if (!t) return;
     const tplLike = { id: t.template_id, name: t.name, type: t.type, types: tplTypes(t), ability: t.ability_id, base_stats: C.applyIV(tplBaseStats(t), s.instance_id) };
     const u = combat.buildUnit(tplLike, s.level, "B", out.length);
+    if (s.evo_path && u.evoStage > 0) C.applyEvoPath(u, s.evo_path); // sendero del defensor
     u.imageUrl = t.image_url; u.imageThumbUrl = t.image_thumb_url;
     out.push(u);
   });
