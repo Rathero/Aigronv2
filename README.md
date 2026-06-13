@@ -234,6 +234,7 @@ Todas requieren `Authorization: Bearer <token>` salvo `/auth/login`.
 | POST | `/dungeon/abandon` | Huir de la run activa = permadeath (cuenta como muerte, registra score) |
 | GET  | `/dungeon/ranking` | Ranking diario por profundidad alcanzada |
 | GET  | `/profile` · POST `/me/name` | Perfil (stats, semanas de liga, combates recientes) y cambio de nombre |
+| GET  | `/recap` | Resumen mensual estilo "Wrapped": descubrimientos del mes, joya del mes, distribución por tipo/rareza y totales (para tarjetas compartibles) |
 | GET  | `/battle/:id/replay` | Replay grabado de un combate propio (equipos+log+estado final) |
 | GET  | `/hall-of-fame` | Top de la última semana cerrada de ligas |
 | GET  | `/achievements` · POST `/achievements/claim` | Logros (progreso desde contadores) y reclamo |
@@ -383,6 +384,16 @@ test de paridad en `npm test`.
   narrativo con efecto máquina de escribir que establece el mundo (el Núcleo roto, por
   qué nacen aigrons cada día, el Oráculo) antes del tutorial. Se ve una vez y se reve
   desde ≡ → "📖 Historia".
+- ✅ **Códice del mundo** (`CODEX`/`openCodex`): la mitología del Núcleo se revela por
+  hitos según descubres aigrons (cliente, desde `S.collection`; sin servidor). Incluye
+  mini-bestiario por rareza. Se abre desde ≡ → "📜 Códice" y desde el álbum.
+- ✅ **Recap mensual "Wrapped"** (`/recap` + `openRecap`): secuencia de tarjetas
+  animadas con tu mes (cazados, joya del mes, álbum, combates) y una **imagen para
+  compartir**. Se abre desde ≡ → "✨ Mi resumen" y desde un aviso en Inicio los últimos
+  5 días del mes (cuando el álbum va a rotar).
+- ✅ **Recordatorio push a las 11:00** (hora de España): a quien tiene push y no ha
+  reclamado hoy. `PUSH_REMINDER_CRON` (defecto `0 11 * * *`) con su propia zona
+  `PUSH_REMINDER_TZ` (defecto `Europe/Madrid`, independiente de `CRON_TZ`).
 - Pendiente: ascensos/descensos por percentil y Salón de la Fama (el histórico ya existe).
 
 ### P2 — Monetización

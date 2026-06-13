@@ -1182,6 +1182,75 @@ app.get("/profile", authMiddleware, wrap(async (req, res) => {
     recent: recent.rows.map((b) => ({ id: b.id, result: b.result, at: b.created_at, pvp: b.pvp, hasReplay: b.has_replay, oppName: b.opp_name })),
   });
 }));
+// RECAP mensual estilo "Wrapped": resumen compartible de la temporada (mes) del
+// jugador. Reúne descubrimientos del mes, distribución por tipo/rareza, el mejor
+// aigrón (por poder base) y los totales de progreso. Datos para una secuencia de
+// tarjetas animadas + una imagen para compartir (viralidad emocional al rotar el
+// álbum). Todo derivado de tablas existentes; sin migración.
+app.get("/recap", authMiddleware, wrap(async (req, res) => {
+  const u = await getUser(req.userId);
+  if (!u) return res.status(404).json({ error: "no_user" });
+  const today = C.todayStr();
+  const sKey = C.seasonKey(today);
+
+  // Distribución por rareza y tipo sobre PLANTILLAS DISTINTAS descubiertas (toda
+  // la vida): refleja "qué especies conoces", no cuántos duplicados tienes.
+  const distinct = await db.query(
+    `SELECT DISTINCT t.template_id, t.rarity, t.type
+       FROM creature_instances ci JOIN creature_templates t ON t.template_id = ci.template_id
+      WHERE ci.user_id=$1`, [req.userId]);
+  const rarity = { COMUN: 0, RARA: 0, EPICA: 0, LEGENDARIA: 0 };
+  const types = {};
+  for (const r of distinct.rows) {
+    if (rarity[r.rarity] != null) rarity[r.rarity]++;
+    types[r.type] = (types[r.type] || 0) + 1;
+  }
+  const topType = Object.entries(types).sort((a, b) => b[1] - a[1])[0] || null;
+
+  // Totales de colección + cuántos aigrons nuevos este MES (created_at en el mes).
+  const counts = await db.query(
+    `SELECT COUNT(*)::int AS total,
+            COUNT(*) FILTER (WHERE obtained_at >= date_trunc('month', now()))::int AS new_month
+       FROM creature_instances WHERE user_id=$1`, [req.userId]);
+
+  // El mejor aigrón por PODER base (escalado suave por nivel) para la portada.
+  // TPL_COLS cualificado con el alias `t.`: en el JOIN, `template_id` existe en
+  // ambas tablas y sin cualificar sería ambiguo.
+  const tplColsT = TPL_COLS.split(",").map((c) => "t." + c).join(",");
+  const topRow = await db.query(
+    `SELECT ${tplColsT}, ci.level,
+            (t.base_hp/10.0 + t.base_atk_p + t.base_atk_s + t.base_def_p + t.base_def_s + t.base_spd)
+            * (1 + (ci.level - 1) * 0.07) AS power
+       FROM creature_instances ci JOIN creature_templates t ON t.template_id = ci.template_id
+      WHERE ci.user_id=$1 ORDER BY power DESC LIMIT 1`, [req.userId]);
+  let top = null;
+  if (topRow.rowCount) {
+    const t = rowToTpl(topRow.rows[0]);
+    top = { id: t.id, name: t.name, type: t.type, types: t.types, rarity: t.rarity,
+      ability: t.ability, art_seed: t.art_seed, image_url: t.image_url, image_thumb_url: t.image_thumb_url,
+      base_stats: t.base_stats, level: topRow.rows[0].level };
+  }
+
+  // Progreso del álbum del mes.
+  const pool = await seasonTemplates(today);
+  const owned = await ownedSeasonIds(req.userId, sKey);
+
+  res.json({
+    season: { key: sKey, label: C.seasonLabel(today) },
+    memberSince: u.created_at,
+    collection: counts.rows[0].total,
+    newThisMonth: counts.rows[0].new_month,
+    discovered: distinct.rowCount,
+    rarity, types,
+    topType: topType ? { type: topType[0], count: topType[1] } : null,
+    albumOwned: owned.size, albumTotal: pool.length, complete: pool.length > 0 && owned.size >= pool.length,
+    top,
+    wins: u.total_wins, losses: u.total_losses,
+    streak: u.daily_streak, bestStreak: u.best_streak,
+    league: u.league, bestLeague: u.best_league,
+    dungeonsCleared: u.dungeons_cleared, fusionsDone: u.fusions_done,
+  });
+}));
 // Cambio de nombre (3-16 caracteres razonables, saneado contra HTML).
 app.post("/me/name", authMiddleware, wrap(async (req, res) => {
   const name = auth.sanitizeName((req.body && req.body.name) || "");

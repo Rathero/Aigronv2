@@ -5,8 +5,8 @@
 //   sin romper nada (initPush devuelve null y los endpoints responden 501).
 // - Claves VAPID: de env (VAPID_PUBLIC_KEY/VAPID_PRIVATE_KEY) o se AUTOGENERAN
 //   una vez y se persisten en app_meta (cero configuración para empezar).
-// - Recordatorio diario (cron, PUSH_REMINDER_CRON, defecto 17:00): "tu aigrón
-//   te espera" a quien tiene suscripción y NO ha reclamado hoy. Las
+// - Recordatorio diario (cron, PUSH_REMINDER_CRON, defecto 11:00 hora España):
+//   "tu aigrón te espera" a quien tiene suscripción y NO ha reclamado hoy. Las
 //   suscripciones caducadas (404/410) se podan automáticamente.
 // =============================================================================
 const C = require("./config");
@@ -79,9 +79,12 @@ function startPushCron(db) {
   if (!enabled() || process.env.DISABLE_CRON === "true") return null;
   let cron;
   try { cron = require("node-cron"); } catch (e) { return null; }
-  const expr = process.env.PUSH_REMINDER_CRON || "0 17 * * *";
+  // Por defecto: 11:00 hora de España. El recordatorio usa su propia zona
+  // (PUSH_REMINDER_TZ) para no depender de CRON_TZ (que usa la generación del
+  // lote, normalmente UTC): así "las 11" son las 11 del jugador, no UTC.
+  const expr = process.env.PUSH_REMINDER_CRON || "0 11 * * *";
   if (!cron.validate(expr)) return null;
-  const tz = process.env.CRON_TZ || "UTC";
+  const tz = process.env.PUSH_REMINDER_TZ || process.env.CRON_TZ || "Europe/Madrid";
   const task = cron.schedule(expr, () => sendDailyReminders(db).catch((e) => console.error("[push]", e.message)), { timezone: tz });
   console.log(`[push] recordatorio diario activo: "${expr}" (${tz})`);
   return task;

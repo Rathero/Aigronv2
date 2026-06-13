@@ -463,6 +463,7 @@ async function renderHome(){
     ${evBanner}
     ${pushLine}
     ${dailyCard}
+    ${recapHomeCard()}
     ${albumHomeCard()}
     ${uniqueHomeCard()}
     ${oracleCard()}
@@ -529,6 +530,7 @@ async function openAlbum(){
     ${reward}
     <div class="dim" style="font-size:11px;margin-bottom:8px">⭐ marco = destacada hoy (más probable en el huevo y la tienda)</div>
     <div class="alb-grid">${cells}</div>
+    <button class="btn ghost cyan mt8" data-act="openCodex">📜 CÓDICE DEL MUNDO</button>
     <button class="btn ghost mt8" data-act="close">CERRAR</button>
   </div>`);
   renderCanvases($("#overlay"));
@@ -2247,6 +2249,11 @@ const ACTIONS={
   menuSound:()=>{ const m=SFX.toggle(); const s=$("#m-sound"); if(s)s.textContent=m?'🔇 Sonido: off':'🔊 Sonido: on'; if(!m)SFX.play('claim'); },
   menuMusic:()=>{ const on=MUSIC.toggle(); const mm=$("#m-music"); if(mm)mm.textContent=on?'🎵 Música: on':'🎵 Música: off'; },
   menuStory:()=>{ openIntro(); },
+  menuCodex:()=>{ openCodex(); },
+  menuRecap:()=>{ openRecap(); },
+  openCodex:()=>openCodex(),
+  openRecap:()=>openRecap(),
+  recapNext:()=>recapNext(), recapDone:()=>recapDone(), recapShare:()=>recapShare(),
   introNext:()=>introNext(), introSkip:()=>introSkip(), introFF:()=>introFF(),
   menuLogout:()=>{$("#topmenu").classList.remove("show");logout();},
   dgStart:(a)=>dgStart(a), dgRankTab:(a)=>dgRankTab(a), dgChoose:(a)=>dgChoose(a), dgDraft:(a)=>dgDraft(a), dgSkipDraft:()=>dgSkipDraft(),
@@ -2326,6 +2333,151 @@ function openIntro(){ $("#topmenu").classList.remove("show"); showIntro(0); }
 function maybeOnboard(){
   if(!localStorage.getItem('aigrons_intro')){ localStorage.setItem('aigrons_intro','1'); showIntro(0); }
   else if(!localStorage.getItem('aigrons_tut')){ localStorage.setItem('aigrons_tut','1'); showTutorial(0); }
+}
+
+/* ===================== CÓDICE DEL MUNDO (lore + bestiario) =====================
+   La mitología del Núcleo (continúa la cinemática "Génesis") se revela según
+   descubres aigrons: cada hito desbloquea un fragmento. Da profundidad al mundo
+   y un motivo extra para completar la colección. Se abre desde el menú ≡ y el
+   álbum. Cómputo 100% en cliente desde S.collection (sin servidor). */
+const CODEX=[
+  {at:1,  t:'I · El Núcleo',        x:'Todo empezó con una luz que pensaba. El <b>Núcleo</b> soñó montañas, mares y bestias… hasta que se soñó a sí mismo roto.'},
+  {at:3,  t:'II · La Lluvia',       x:'Al estallar, sus esquirlas cayeron como lluvia sobre el mundo dormido. Donde tocaban, algo imposible despertaba.'},
+  {at:6,  t:'III · Los Aspectos',   x:'Cada esquirla guardaba un humor del Núcleo: furia, calma, hambre, ingenio. De ahí nacieron los <b>tipos</b> que hoy enfrentas.'},
+  {at:10, t:'IV · El Amanecer',     x:'Ningún aigrón vive más de un ciclo. Al alba, el cielo se quiebra y nace un lote nuevo. Por eso coleccionas: para que no se pierdan.'},
+  {at:15, t:'V · El Oráculo',       x:'Hay quien ve los fragmentos antes de caer. El <b>Oráculo</b> no miente, pero habla en acertijos: su profecía de mañana siempre se cumple.'},
+  {at:20, t:'VI · Los Vínculos',    x:'Dos esquirlas afines pueden <b>fundirse</b> en una tercera, más rara. El Núcleo intenta, una y otra vez, recomponerse a través de ti.'},
+  {at:28, t:'VII · Las Prismáticas',x:'Una de cada cien cae girando y se tiñe de todos los colores a la vez. No son más fuertes: son el recuerdo intacto del Núcleo entero.'},
+  {at:38, t:'VIII · La Mazmorra',   x:'Bajo el mundo, las esquirlas que nadie reclamó se amontonan y se vuelven hostiles. Descender es enfrentar lo que el día olvidó.'},
+  {at:50, t:'IX · El Jefe Mundial', x:'A veces una esquirla colosal se niega a morir al alba. Solo la comunidad entera, golpeando a la vez, la devuelve al sueño.'},
+  {at:65, t:'X · La Áurea',         x:'Cuentan que existe una esquirla dorada, una entre cuatrocientas, que late con la voz original del Núcleo. Quien la halla, oye el mundo soñar.'},
+  {at:90, t:'XI · El Coleccionista',x:'Y al final, una verdad incómoda: el Núcleo no se recompone con piezas, sino con alguien que las recuerde todas. Ese alguien eres tú.'},
+];
+function tplKey(t){ return t&&(t.template_id||t.id); }
+function discoveredSet(){ const s=new Set(); (S.collection||[]).forEach(i=>{ const k=tplKey(i.template)||i.template_id; if(k)s.add(k); }); return s; }
+function openCodex(){
+  $("#topmenu").classList.remove("show");
+  const ids=discoveredSet(), n=ids.size;
+  const frags=CODEX.map(f=>{
+    if(n>=f.at) return `<div class="codex-frag unlocked"><div class="cf-t">Fragmento ${esc(f.t)}</div><div class="cf-x">${f.x}</div></div>`;
+    return `<div class="codex-frag locked"><div class="cf-t">🔒 Fragmento sellado</div>
+      <div class="cf-lock">Descubre <b>${f.at}</b> aigrons para revelarlo <span class="dim">(llevas ${n})</span>.</div></div>`;
+  }).join('');
+  // Mini-bestiario: especies DISTINTAS descubiertas por rareza.
+  const byR={COMUN:0,RARA:0,EPICA:0,LEGENDARIA:0}, seen=new Set();
+  (S.collection||[]).forEach(i=>{ const t=i.template; if(!t)return; const k=tplKey(t)||i.template_id; if(!k||seen.has(k))return; seen.add(k);
+    if(byR[t.rarity]!=null)byR[t.rarity]++; });
+  const rarRow=Object.keys(byR).map(k=>`<div class="codex-stat"><span class="rar-txt ${k}">${k}</span><b>${byR[k]}</b></div>`).join('');
+  const unlocked=CODEX.filter(f=>n>=f.at).length;
+  openOverlay(`<div class="album-modal">
+    <div class="mrow" style="margin-bottom:6px"><b style="font-size:16px;color:var(--cyan)">📜 Códice del mundo</b><span class="dim">${unlocked}/${CODEX.length}</span></div>
+    <div class="dim" style="font-size:12px;margin-bottom:10px">La historia del <b>Núcleo</b> se revela según descubres aigrons. Conoces <b style="color:var(--cyan)">${n}</b> especie${n===1?'':'s'}.</div>
+    ${frags}
+    <div class="panel" style="margin-top:10px"><b style="font-size:13px">Bestiario — especies descubiertas</b>${rarRow}</div>
+    <button class="btn ghost mt8" data-act="close">CERRAR</button>
+  </div>`);
+}
+
+/* ===================== RECAP MENSUAL "WRAPPED" (compartible) =====================
+   Secuencia de tarjetas animadas con TU mes: descubrimientos, tu joya del mes,
+   combates y un resumen para compartir (PNG). Viralidad emocional cuando el álbum
+   está por rotar. Datos de /recap; se abre desde el menú ≡ y un aviso en Inicio. */
+// Aviso en INICIO los últimos días del mes (cuando el álbum está por cambiar).
+function recapHomeCard(){
+  const now=new Date(), end=new Date(now.getFullYear(),now.getMonth()+1,0,23,59,59);
+  const daysLeft=Math.max(0,Math.ceil((end-now)/86400000));
+  if(daysLeft>5) return '';
+  return `<div class="recap-cta" data-act="openRecap">
+    <span class="rc-ic">✨</span>
+    <div style="flex:1"><b>Tu resumen del mes</b><div class="dim" style="font-size:12px">El álbum cambia en ${daysLeft} día${daysLeft===1?'':'s'}. Mira (y comparte) tu mes.</div></div>
+    <span style="font-size:18px;color:var(--gold)">▸</span></div>`;
+}
+let RECAP=null, recapI=0;
+async function openRecap(){
+  $("#topmenu").classList.remove("show");
+  openOverlay(`<div class="center"><div class="spinner" style="margin:14px auto"></div><div class="dim">Preparando tu resumen…</div></div>`);
+  let d; try{ d=await api('/recap'); }catch(e){ toast('No se pudo cargar el resumen'); closeOverlay(); return; }
+  closeOverlay(); RECAP=d; recapI=0; MUSIC.start(); recapScenes(); recapRender();
+}
+let RECAP_S=[];
+function recapScenes(){
+  const d=RECAP;
+  const pct=d.albumTotal?Math.round(d.albumOwned/d.albumTotal*100):0;
+  const persona=d.topType?d.topType.type:null;
+  RECAP_S=[];
+  RECAP_S.push({g:'✨', html:`<div class="recap-big">Tu mes</div><div class="recap-label">en AIGRONS · <b style="color:var(--cyan)">${esc(d.season.label)}</b></div><div class="recap-sub">Toca para ver tu resumen.</div>`});
+  RECAP_S.push({g:'🥚', html:`<div class="recap-big">+${d.newThisMonth}</div><div class="recap-label">aigrons cazados este mes</div><div class="recap-sub">Tu colección ya reúne <b>${d.collection}</b> criaturas.</div>`});
+  RECAP_S.push({g:'📖', html:`<div class="recap-big">${d.albumOwned}/${d.albumTotal}</div><div class="recap-label">del álbum de ${esc(d.season.label)}</div>
+    <div class="recap-bars"><div class="recap-bar"><span class="rb-l">Álbum</span><span class="rb-t"><i style="width:${pct}%;background:linear-gradient(90deg,var(--cyan),var(--magenta))"></i></span><span class="rb-v">${pct}%</span></div></div>
+    <div class="recap-sub">${d.complete?'¡Completo! Eres leyenda.':`Conoces <b>${d.discovered}</b> especies en total.`}</div>`});
+  if(persona) RECAP_S.push({g:'🧬', html:`<div class="recap-sub" style="margin:0 0 6px">Tu aspecto dominante del Núcleo</div><div class="recap-big" style="color:var(--cyan)">${esc(persona)}</div><div class="recap-label">${d.topType.count} especies de este tipo</div>`});
+  if(d.top){ registerTpl(d.top);
+    RECAP_S.push({g:'💎', html:`<div class="recap-sub" style="margin:0 0 8px">Tu joya del mes</div>
+      <div class="recap-spr"><canvas data-aig="${d.top.id}" data-px="9"></canvas></div>
+      <div class="recap-big" style="font-size:24px;color:var(--gold)">${esc(d.top.name)}</div>
+      <div class="recap-label"><span class="rar-txt ${d.top.rarity}">${d.top.rarity}</span> · Nv.${d.top.level}</div>`}); }
+  RECAP_S.push({g:'⚔️', html:`<div class="recap-big">${d.wins}</div><div class="recap-label">victorias en combate</div>
+    <div class="recap-sub">Mejor racha diaria: <b style="color:var(--gold)">${d.bestStreak}</b> días · Liga <b>${esc(d.bestLeague||d.league)}</b></div>`});
+  // Tarjeta final: resumen + compartir.
+  RECAP_S.push({g:'🏁', final:true, html:`<div class="recap-big" style="font-size:26px">¡Buen mes!</div>
+    <div class="recap-bars" style="max-width:260px">
+      <div class="codex-stat"><span class="dim">Cazados este mes</span><b>+${d.newThisMonth}</b></div>
+      <div class="codex-stat"><span class="dim">Álbum</span><b>${d.albumOwned}/${d.albumTotal}</b></div>
+      <div class="codex-stat"><span class="dim">Especies conocidas</span><b>${d.discovered}</b></div>
+      <div class="codex-stat"><span class="dim">Victorias</span><b>${d.wins}</b></div>
+      <div class="codex-stat"><span class="dim">Mejor racha</span><b>${d.bestStreak}d</b></div>
+    </div>
+    <div class="recap-sub">Comparte tu mes y reta a quien quieras.</div>`});
+}
+function recapRender(){
+  let host=$("#recap");
+  if(!host){ host=document.createElement("div"); host.className="intro recap"; host.id="recap"; document.getElementById("app").appendChild(host); }
+  const s=RECAP_S[recapI], last=recapI===RECAP_S.length-1;
+  const dots=RECAP_S.map((_,k)=>`<span class="intro-dot ${k===recapI?'on':''}"></span>`).join("");
+  host.innerHTML=`
+    <button class="intro-skip" data-act="recapDone">Cerrar ✕</button>
+    <div class="intro-glyph">${s.g}</div>
+    <div style="display:flex;flex-direction:column;align-items:center;min-height:200px;justify-content:center" data-act="${last?'recapDone':'recapNext'}">${s.html}</div>
+    <div class="intro-dots">${dots}</div>
+    <div class="intro-actions">
+      ${s.final?`<button class="btn gold" data-act="recapShare" style="max-width:170px">📤 COMPARTIR</button>
+                 <button class="btn ghost" data-act="recapDone" style="max-width:120px">CERRAR</button>`
+               :`<button class="btn mag" data-act="recapNext" style="max-width:260px">SIGUIENTE ▸</button>`}
+    </div>`;
+  renderCanvases(host);
+}
+function recapNext(){ if(recapI<RECAP_S.length-1){ recapI++; recapRender(); } else recapDone(); }
+function recapDone(){ const h=$("#recap"); if(h)h.remove(); RECAP=null; }
+// Imagen para compartir: portada con tu joya del mes + cifras clave.
+async function recapShare(){
+  const d=RECAP; if(!d)return;
+  const c=document.createElement('canvas'); c.width=480; c.height=600;
+  const g=c.getContext('2d'); g.imageSmoothingEnabled=false;
+  g.fillStyle='#0a0818'; g.fillRect(0,0,480,600);
+  const bg=await loadUiArt('/art/ui/share-bg.png'); if(bg)g.drawImage(bg,0,0,480,600);
+  g.strokeStyle='#3a3270'; g.lineWidth=6; if(!bg)g.strokeRect(10,10,460,580);
+  g.textAlign='center';
+  g.fillStyle='#34f5e4'; g.font='bold 26px monospace'; g.fillText('MI MES EN AIGRONS',240,50);
+  g.fillStyle='#aaa2dc'; g.font='18px monospace'; g.fillText(d.season.label,240,78);
+  if(d.top){ const t=tpl(d.top.id)||d.top; const sc=document.createElement('canvas'); drawAigron(sc,t,7);
+    g.drawImage(sc,(480-280)/2,96,280,280);
+    g.fillStyle='#e8e4ff'; g.font='bold 24px monospace'; g.fillText(t.name||'',240,402);
+    g.fillStyle=RARITY_COLOR[t.rarity]||'#8b86b8'; g.font='bold 16px monospace'; g.fillText('Mi joya del mes · '+t.rarity,240,428); }
+  const stats=[['Cazados este mes','+'+d.newThisMonth],['Album',d.albumOwned+'/'+d.albumTotal],
+    ['Especies',String(d.discovered)],['Victorias',String(d.wins)],['Mejor racha',d.bestStreak+'d']];
+  g.font='18px monospace'; let y=470;
+  stats.forEach(([l,v])=>{ g.textAlign='left'; g.fillStyle='#aaa2dc'; g.fillText(l,70,y);
+    g.textAlign='right'; g.fillStyle='#ffd23f'; g.fillText(v,410,y); y+=26; });
+  g.textAlign='center'; g.fillStyle='#aaa2dc'; g.font='15px monospace'; g.fillText('aigrons.app',240,592);
+  c.toBlob(async(b)=>{
+    if(!b){toast('No se pudo crear la imagen');return;}
+    const file=new File([b],'mi-mes-aigrons.png',{type:'image/png'});
+    try{ if(navigator.canShare&&navigator.canShare({files:[file]})){
+      await navigator.share({files:[file],title:'Mi mes en AIGRONS',text:`Mi mes en AIGRONS (${d.season.label}): +${d.newThisMonth} aigrons, ${d.wins} victorias 🥚 #AIGRONS`}); return; }
+    }catch(e){ if(e&&e.name==='AbortError')return; }
+    const a=document.createElement('a'); a.href=URL.createObjectURL(b); a.download=file.name; a.click();
+    setTimeout(()=>URL.revokeObjectURL(a.href),5000); toast('Imagen guardada 📸');
+  });
 }
 
 /* ====================== TUTORIAL (primer login) ====================== */

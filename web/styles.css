@@ -474,3 +474,39 @@ h2.title small{font-family:var(--ui);font-size:13px;color:var(--ink-dim);font-we
 .intro-dots{display:flex;gap:6px;justify-content:center;position:absolute;bottom:calc(78px + env(safe-area-inset-bottom));left:0;right:0;z-index:1}
 .intro-dot{width:7px;height:7px;background:var(--line);border-radius:50%}
 .intro-dot.on{background:var(--cyan);box-shadow:0 0 6px var(--cyan)}
+
+/* ===================== CÓDICE DEL MUNDO (lore + bestiario) =====================
+   La historia del Núcleo se revela según descubres aigrons: cada hito desbloquea
+   un fragmento. Conecta la cinemática "Génesis" con el progreso de colección. */
+.codex-frag{border:2px solid var(--line);background:var(--panel);padding:10px 12px;margin-bottom:8px;text-align:left}
+.codex-frag.unlocked{border-left:3px solid var(--cyan)}
+.codex-frag.locked{opacity:.75;border-style:dashed}
+.codex-frag .cf-t{font-family:var(--pixel);font-size:10px;color:var(--cyan);margin-bottom:6px;line-height:1.4}
+.codex-frag.locked .cf-t{color:var(--ink-dim)}
+.codex-frag .cf-x{font-size:15px;line-height:1.55;color:var(--ink)}
+.codex-frag .cf-lock{font-size:13px;color:var(--ink-dim)}
+.codex-stat{display:flex;justify-content:space-between;font-size:14px;padding:3px 0}
+
+/* ===================== RECAP MENSUAL "WRAPPED" (compartible) =====================
+   Secuencia de tarjetas animadas con tu mes: descubrimientos, joya del mes,
+   combates y un resumen para compartir. Reutiliza el contenedor .intro. */
+.recap-big{font-family:var(--pixel);font-size:38px;line-height:1.12;color:var(--gold);
+  text-shadow:0 0 16px rgba(255,210,63,.5),3px 3px 0 #000;animation:popin .5s cubic-bezier(.2,1.5,.4,1);z-index:1}
+.recap-label{font-size:19px;color:var(--ink);margin-top:12px;max-width:300px;z-index:1}
+.recap-sub{font-size:14px;color:var(--ink-dim);margin-top:8px;max-width:300px;z-index:1}
+@keyframes popin{0%{transform:scale(.3);opacity:0}100%{transform:scale(1);opacity:1}}
+.recap-spr{margin:6px 0;z-index:1}
+.recap-spr canvas,.recap-spr .aigimg{width:150px;image-rendering:pixelated;filter:drop-shadow(0 0 18px rgba(52,245,228,.5))}
+.recap-bars{display:flex;flex-direction:column;gap:7px;width:100%;max-width:290px;margin-top:16px;z-index:1}
+.recap-bar{display:flex;align-items:center;gap:8px;font-size:13px}
+.recap-bar .rb-l{width:92px;text-align:right;color:var(--ink-dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.recap-bar .rb-t{flex:1;height:13px;background:#0a0818;border:1px solid var(--line);overflow:hidden}
+.recap-bar .rb-t i{display:block;height:100%;animation:grow .85s ease-out}
+.recap-bar .rb-v{width:26px;text-align:right;font-weight:700}
+@keyframes grow{from{width:0}}
+/* aviso de recap en INICIO cuando el mes está por terminar */
+.recap-cta{display:flex;align-items:center;gap:10px;border:2px solid var(--gold);background:var(--panel);
+  padding:10px 12px;margin-bottom:12px;cursor:pointer;box-shadow:0 0 14px rgba(255,210,63,.25)}
+.recap-cta:active{transform:scale(.99)}
+.recap-cta .rc-ic{font-size:24px}
+.recap-cta b{color:var(--gold)}
