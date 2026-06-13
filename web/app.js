@@ -788,7 +788,10 @@ function puzzleShare(turns){
 async function openBoss(){
   let b; try{ b=await api('/worldboss'); }catch(e){ toast('Jefe no disponible'); return; }
   BOSS=b;
-  const top=(b.top||[]).slice(0,5).map(x=>`<div class="rank-row ${x.me?'me':''}" style="padding:4px 6px;font-size:12px"><span class="pos">${x.pos}</span><span class="nm">${esc(x.name)}</span><span style="color:var(--magenta)">${fmtBig(x.damage)}</span></div>`).join('')||'<div class="dim" style="font-size:12px;padding:6px">Nadie le ha pegado aún. ¡Sé el primero!</div>';
+  const top=(b.top||[]).slice(0,5).map(x=>`<div class="rank-row ${x.me?'me':''}" style="padding:4px 6px;font-size:12px"><span class="pos">${x.pos}</span><span class="nm">${esc(x.name)}${x.guildTag?` <span style="color:var(--gold);font-size:10px">[${esc(x.guildTag)}]</span>`:''}</span><span style="color:var(--magenta)">${fmtBig(x.damage)}</span></div>`).join('')||'<div class="dim" style="font-size:12px;padding:6px">Nadie le ha pegado aún. ¡Sé el primero!</div>';
+  // Clasificación por CONSTELACIÓN (gremios que más daño hacen juntos).
+  const topG=(b.topGuilds||[]).slice(0,5).map(x=>`<div class="rank-row ${x.mine?'me':''}" style="padding:4px 6px;font-size:12px"><span class="pos">${x.pos}</span><span class="nm">${esc(x.name)} <span style="color:var(--gold);font-size:10px">[${esc(x.tag)}]</span> <span class="dim" style="font-size:10px">·${x.contributors}</span></span><span style="color:var(--cyan)">${fmtBig(x.damage)}</span></div>`).join('')||'<div class="dim" style="font-size:12px;padding:6px">Ninguna constelación ha pegado aún.</div>';
+  const myG=b.myGuild?`<div class="dim" style="font-size:11px;margin-top:2px">Tu constelación: <b style="color:var(--cyan)">${fmtBig(b.myGuild.damage)}</b>${b.myGuild.rank?` · #${b.myGuild.rank}`:''}</div>`:'';
   // Arte IA del jefe si el job semanal lo generó; emoji 🐉 si no (fallback).
   const bossArt=b.image?`<img src="${b.image}" alt="${esc(b.name)}" class="boss-art">`:'<div style="font-size:54px;line-height:1.1">🐉</div>';
   openOverlay(`<div class="center">
@@ -799,6 +802,7 @@ async function openBoss(){
     ${b.defeated?'<div style="color:var(--gold);font-weight:700">🏆 ¡La comunidad lo derrotó!</div>':`<button class="btn mag" data-act="bossFight">⚔️ GOLPEAR — ⚡1</button>`}
     <div class="dim mt8" style="font-size:11px">Tu daño total: <b style="color:var(--magenta)">${fmtBig(b.myDamage)}</b> (${b.myHits} golpes)</div>
     <div class="mt8" style="text-align:left"><b style="font-size:12px">🏆 Top héroes</b>${top}</div>
+    <div class="mt8" style="text-align:left"><b style="font-size:12px">🌌 Top constelaciones</b>${myG}${topG}</div>
     <button class="btn sm ghost mt8" data-act="close">CERRAR</button></div>`);
 }
 let BOSS=null;

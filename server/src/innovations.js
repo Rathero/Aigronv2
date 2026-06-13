@@ -94,16 +94,39 @@ async function getOrCreateBoss() {
 async function bossState(userId) {
   const b = await getOrCreateBoss();
   const top = await db.query(
-    `SELECT u.display_name AS name, c.damage, c.user_id
+    `SELECT u.display_name AS name, c.damage, c.user_id, g.tag AS guild_tag
        FROM world_boss_contrib c JOIN users u ON u.id=c.user_id
+       LEFT JOIN guilds g ON g.id=u.guild_id
       WHERE c.boss_id=$1 ORDER BY c.damage DESC LIMIT 10`, [b.id]);
   const mine = (await db.query("SELECT damage, hits FROM world_boss_contrib WHERE boss_id=$1 AND user_id=$2", [b.id, userId])).rows[0];
+  // Clasificación por CONSTELACIÓN: agrega el daño de los miembros (sin cambios de
+  // schema). Convierte el jefe en un objetivo de comunidad para los gremios.
+  const topGuilds = await db.query(
+    `SELECT g.id, g.name, g.tag, SUM(c.damage)::bigint AS damage, COUNT(DISTINCT c.user_id)::int AS contributors
+       FROM world_boss_contrib c JOIN users u ON u.id=c.user_id JOIN guilds g ON g.id=u.guild_id
+      WHERE c.boss_id=$1 GROUP BY g.id ORDER BY damage DESC LIMIT 10`, [b.id]);
+  const myG = (await db.query("SELECT guild_id FROM users WHERE id=$1", [userId])).rows[0];
+  let myGuild = null;
+  if (myG && myG.guild_id) {
+    const gd = await db.query(
+      `SELECT COALESCE(SUM(c.damage), 0)::bigint AS damage
+         FROM world_boss_contrib c JOIN users u ON u.id=c.user_id
+        WHERE c.boss_id=$1 AND u.guild_id=$2`, [b.id, myG.guild_id]);
+    const rk = await db.query(
+      `WITH gd AS (SELECT u.guild_id, SUM(c.damage) AS d FROM world_boss_contrib c JOIN users u ON u.id=c.user_id
+                    WHERE c.boss_id=$1 AND u.guild_id IS NOT NULL GROUP BY u.guild_id)
+       SELECT 1 + COUNT(*)::int AS pos FROM gd WHERE d > COALESCE((SELECT d FROM gd WHERE guild_id=$2), 0)`, [b.id, myG.guild_id]);
+    const dmg = Number(gd.rows[0].damage);
+    myGuild = { damage: dmg, rank: dmg > 0 ? rk.rows[0].pos : null };
+  }
   return {
     id: b.id, name: b.name, type: b.type, image: b.image_url || null,
     hpMax: Number(b.hp_max), hpLeft: Number(b.hp_left),
     pct: Math.max(0, Math.round(Number(b.hp_left) / Number(b.hp_max) * 100)),
     defeated: !!b.defeated_at,
-    top: top.rows.map((x, i) => ({ pos: i + 1, name: x.name, damage: Number(x.damage), me: x.user_id === userId })),
+    top: top.rows.map((x, i) => ({ pos: i + 1, name: x.name, damage: Number(x.damage), me: x.user_id === userId, guildTag: x.guild_tag || null })),
+    topGuilds: topGuilds.rows.map((x, i) => ({ pos: i + 1, name: x.name, tag: x.tag, damage: Number(x.damage), contributors: x.contributors, mine: !!(myG && myG.guild_id === x.id) })),
+    myGuild,
     myDamage: mine ? Number(mine.damage) : 0, myHits: mine ? mine.hits : 0,
   };
 }

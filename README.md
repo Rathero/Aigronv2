@@ -420,7 +420,9 @@ test de paridad en `npm test`.
   monedas, `GUILD_COST`), unirse (aforo `GUILD_MAX_MEMBERS`), salir (cede liderazgo o
   disuelve). **Misión semanal** que suma las victorias PvP de toda la constelación
   (reusa `weekly_missions.wins`; recompensa por miembro al alcanzar el objetivo).
-  **Muro/chat** (texto escapado, rate-limited, últimos 100).
+  **Muro/chat** (texto escapado, rate-limited, últimos 100). **Clasificación por
+  constelación en el Jefe Mundial**: `/worldboss` agrega el daño de los miembros
+  (`topGuilds` + tu rango/daño) — solo lectura, sin cambios de schema.
 - ✅ **Trueque de duplicados** (`trades.js`): intercambio P2P de criaturas **repetidas**
   para completar el álbum (no se comercia poder pagable, §4). El swap cambia el
   propietario de las dos instancias en **una transacción** (BEGIN/COMMIT + bloqueo

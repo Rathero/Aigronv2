@@ -195,6 +195,9 @@ async function loginAs(subject) {
   ok(gpost.status === 200, "/guild/wall publica un mensaje");
   const gwall = await api(g1.token, "/guild/wall");
   ok(gwall.status === 200 && gwall.data.messages.some((m) => m.body === "hola constelación"), "/guild/wall lista el mensaje");
+  // Jefe Mundial: clasificación por constelación (g1 está en una).
+  const wb = await api(g1.token, "/worldboss");
+  if (wb.status === 200) ok(Array.isArray(wb.data.topGuilds) && "myGuild" in wb.data, "/worldboss incluye la clasificación por constelación");
 
   // --- Trueque (#2): endpoints + guardas (el swap completo requiere duplicados) ---
   const tg = await api(t1, "/trades");
