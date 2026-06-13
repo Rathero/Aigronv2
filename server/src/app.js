@@ -29,6 +29,8 @@ const achievements = require("./achievements");
 const push = require("./push");
 const features = require("./features");
 const innov = require("./innovations");
+const guilds = require("./guilds");
+const trades = require("./trades");
 const { eventFor } = require("./jobs/generateDailyBatch");
 const { tplBaseStats, tplTypes } = require("./util");
 
@@ -1303,6 +1305,45 @@ app.get("/hall-of-fame", authMiddleware, wrap(async (req, res) => {
       WHERE lw.week_start=$1 ORDER BY lw.points DESC LIMIT 10`, [wk.rows[0].w]);
   res.json({ week: C.todayStr(new Date(wk.rows[0].w)),
     rows: r.rows.map((x, i) => ({ pos: i + 1, name: x.name, league: x.league, score: x.points, me: x.user_id === req.userId })) });
+}));
+
+// ------------------------- CONSTELACIONES (gremios, #1) ----------------------
+app.get("/guild", authMiddleware, wrap(async (req, res) => { res.json(await guilds.myGuild(req.userId)); }));
+app.get("/guild/list", authMiddleware, wrap(async (req, res) => { res.json({ rows: await guilds.listGuilds(30), cost: guilds.GUILD_COST, max: guilds.GUILD_MAX_MEMBERS }); }));
+app.post("/guild/create", authMiddleware, wrap(async (req, res) => {
+  const out = await guilds.createGuild(req.userId, req.body && req.body.name, req.body && req.body.tag);
+  if (out.error) return res.status(400).json(out);
+  res.json(Object.assign(out, { user: userPublic(await getUser(req.userId)) }));
+}));
+app.post("/guild/join", authMiddleware, wrap(async (req, res) => {
+  const out = await guilds.joinGuild(req.userId, req.body && req.body.id);
+  if (out.error) return res.status(400).json(out);
+  res.json(out);
+}));
+app.post("/guild/leave", authMiddleware, wrap(async (req, res) => {
+  const out = await guilds.leaveGuild(req.userId);
+  if (out.error) return res.status(400).json(out);
+  res.json(out);
+}));
+
+// ------------------------------ TRUEQUE (#2) ---------------------------------
+app.get("/trades", authMiddleware, wrap(async (req, res) => {
+  res.json({ market: await trades.listOffers(req.userId, req.query.fulfillable === "1"), mine: await trades.myOffers(req.userId) });
+}));
+app.post("/trades/create", authMiddleware, wrap(async (req, res) => {
+  const out = await trades.createOffer(req.userId, req.body && req.body.offerInst, req.body && req.body.wantTpl);
+  if (out.error) return res.status(400).json(out);
+  res.json(out);
+}));
+app.post("/trades/cancel", authMiddleware, wrap(async (req, res) => {
+  const out = await trades.cancelOffer(req.userId, req.body && req.body.id);
+  if (out.error) return res.status(400).json(out);
+  res.json(out);
+}));
+app.post("/trades/accept", authMiddleware, wrap(async (req, res) => {
+  const out = await trades.acceptOffer(req.userId, req.body && req.body.id, req.body && req.body.payInst);
+  if (out.error) return res.status(400).json(out);
+  res.json(out);
 }));
 
 // ----------------------------------- LOGROS ----------------------------------

@@ -171,6 +171,32 @@ async function loginAs(subject) {
   const uc2 = await api(t1, "/daily/unique/claim", { method: "POST" });
   ok(uc.status === 200 ? uc2.status === 400 : uc2.status === 402, "la única no se reclama dos veces");
 
+  // --- Constelaciones (gremios #1): crear, ver, listar, unirse, salir ---
+  const g1 = await loginAs("smoke-g1-" + Date.now()); // usuario fresco (250 monedas)
+  const gc = await api(g1.token, "/guild/create", { method: "POST", body: { name: "Constelación " + Date.now(), tag: "SMK" } });
+  ok(gc.status === 200 && gc.data.id, "/guild/create funda una constelación");
+  const gv = await api(g1.token, "/guild");
+  ok(gv.data.guild && gv.data.isOwner && gv.data.guild.memberCount === 1, "/guild muestra mi constelación (soy líder)");
+  const gl = await api(g1.token, "/guild/list");
+  ok(gl.status === 200 && gl.data.rows.some((r) => r.id === gc.data.id), "/guild/list incluye la constelación creada");
+  const g2 = await loginAs("smoke-g2-" + Date.now());
+  const gj = await api(g2.token, "/guild/join", { method: "POST", body: { id: gc.data.id } });
+  ok(gj.status === 200, "otro jugador se une a la constelación");
+  const gv2 = await api(g1.token, "/guild");
+  ok(gv2.data.guild && gv2.data.guild.memberCount === 2, "la constelación pasa a 2 miembros");
+  const gdup = await api(g2.token, "/guild/join", { method: "POST", body: { id: gc.data.id } });
+  ok(gdup.status === 400, "no se puede unir estando ya en una constelación");
+  const gleave = await api(g2.token, "/guild/leave", { method: "POST" });
+  ok(gleave.status === 200, "salir de la constelación ok");
+
+  // --- Trueque (#2): endpoints + guardas (el swap completo requiere duplicados) ---
+  const tg = await api(t1, "/trades");
+  ok(tg.status === 200 && Array.isArray(tg.data.market) && Array.isArray(tg.data.mine), "/trades lista mercado y mis ofertas");
+  const tcBad = await api(t1, "/trades/create", { method: "POST", body: {} });
+  ok(tcBad.status === 400, "/trades/create sin datos -> 400");
+  const taBad = await api(t1, "/trades/accept", { method: "POST", body: { id: "00000000-0000-0000-0000-000000000000", payInst: "00000000-0000-0000-0000-000000000000" } });
+  ok(taBad.status === 400, "/trades/accept con oferta inexistente -> 400");
+
   console.log(`\nResultado: ${pass} ok, ${fail} fallos`);
   process.exit(fail ? 1 : 0);
 })().catch((e) => { console.error("Smoke abortó:", e); process.exit(1); });

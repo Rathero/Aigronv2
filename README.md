@@ -219,6 +219,7 @@ Todas requieren `Authorization: Bearer <token>` salvo `/auth/login`.
 | GET  | `/collection` | Tus aigrons (stats base y escalados por nivel) |
 | POST | `/creature/:id/level-up` | Sube nivel (gasta polvo+monedas; máx 20) |
 | POST | `/creature/:id/release` | Libera duplicado → polvo (bloquea si locked/en equipo) |
+| POST | `/creature/:id/evo-path` | Elige el **sendero** de la forma evolucionada (OFENSIVO/DEFENSIVO/VELOZ) |
 | POST | `/creature/:id/favorite` | Toggle favorito (protege de liberar) |
 | GET/PUT | `/team` | Lee / guarda el equipo de 3 (genera `snapshot`) |
 | POST | `/battle/find` | Empareja rival (snapshot PvP o bot); body opcional `{captain, stance}` (capitán+estancia, horneados); congela la oferta → `{battleId, seed, opponent, team, pvp}` |
@@ -246,6 +247,10 @@ Todas requieren `Authorization: Bearer <token>` salvo `/auth/login`.
 | GET  | `/nemesis` · POST `/nemesis/fight` | Némesis (rival IA con counter-pick; sube de tier al perder contra ti) |
 | GET  | `/oracle` | Profecía determinista del lote de MAÑANA |
 | GET  | `/arena/draft` | 6 candidatos del lote para Arena Sellada (draft en /pvp) |
+| GET  | `/guild` · `/guild/list` | Mi constelación (info+miembros+rango) · ranking de constelaciones |
+| POST | `/guild/create` · `/guild/join` · `/guild/leave` | Fundar (cuesta monedas) · unirse · salir (cede liderazgo o disuelve) |
+| GET  | `/trades` | Mercado de trueque (ofertas de otros) + mis ofertas |
+| POST | `/trades/create` · `/trades/cancel` · `/trades/accept` | Crear oferta de duplicado · cancelar · aceptar (swap atómico) |
 | GET  | `/health` | Healthcheck (usado por Docker / balanceadores) |
 
 **Mecánicas innovadoras** (todas detrás de flags `FEATURE_*`, on por defecto; ver
@@ -403,6 +408,20 @@ test de paridad en `npm test`.
 - ✅ **Arco narrativo mensual** (`seasonStory` en `engine.js`): cada temporada (mes)
   es un capítulo del Núcleo que **avanza mes a mes** (índice monotónico, determinista).
   Se muestra en el álbum y el Códice. Con tests.
+- ✅ **Evolución ramificada por sendero** (`EVO_PATHS`/`applyEvoPath`): al evolucionar,
+  el jugador elige un perfil permanente por instancia (Ofensivo/Defensivo/Veloz),
+  horneado en el servidor y revalidado; **no** rompe la evolución determinista (sigue
+  siendo función pura de id+nivel: el sendero es estado del jugador). Con tests.
+- ✅ **Constelaciones (gremios)** (`guilds.js`): grupos de jugadores con ranking de
+  constelaciones por **poder agregado** de los miembros (SUM de league_points; sin
+  hooks de escritura nuevos). Fundar (cuesta monedas, `GUILD_COST`), unirse (aforo
+  `GUILD_MAX_MEMBERS`), salir (cede liderazgo o disuelve). UI en el menú ≡.
+- ✅ **Trueque de duplicados** (`trades.js`): intercambio P2P de criaturas **repetidas**
+  para completar el álbum (no se comercia poder pagable, §4). El swap cambia el
+  propietario de las dos instancias en **una transacción** (BEGIN/COMMIT + bloqueo
+  `FOR UPDATE`); solo duplicados, nada bloqueado, y al cambiar de dueño la instancia
+  sale de cualquier equipo. Cubierto por el `smoke` de CI (gremios completos; trueque
+  endpoints+guardas — el swap con duplicados reales se valida en revisión).
 - Pendiente: ascensos/descensos por percentil y Salón de la Fama (el histórico ya existe).
 
 ### P2 — Monetización

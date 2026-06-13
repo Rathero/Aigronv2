@@ -2300,6 +2300,11 @@ const ACTIONS={
   menuStory:()=>{ openIntro(); },
   menuCodex:()=>{ openCodex(); },
   menuRecap:()=>{ openRecap(); },
+  menuGuild:()=>{ openGuild(); }, menuTrades:()=>{ openTrades(); },
+  openGuild:()=>openGuild(), guildCreate:()=>guildCreate(), guildJoin:(a)=>guildJoin(a),
+  guildLeave:()=>guildLeave(), guildLeaveYes:()=>guildLeaveYes(), guildList:()=>guildList(),
+  openTrades:()=>openTrades(), tradeCreateFlow:()=>tradeCreateFlow(), tradeOfferPick:(a)=>tradeOfferPick(a),
+  tradeWantPick:(a)=>tradeWantPick(a), tradeAccept:(a)=>tradeAccept(a), tradeCancel:(a)=>tradeCancel(a),
   openCodex:()=>openCodex(),
   openRecap:()=>openRecap(),
   recapNext:()=>recapNext(), recapDone:()=>recapDone(), recapShare:()=>recapShare(),
@@ -2531,6 +2536,136 @@ async function recapShare(){
     setTimeout(()=>URL.revokeObjectURL(a.href),5000); toast('Imagen guardada 📸');
   });
 }
+
+/* ===================== CONSTELACIONES (gremios, #1) ===================== */
+async function openGuild(){
+  $("#topmenu").classList.remove("show");
+  openOverlay(`<div class="center"><div class="spinner" style="margin:14px auto"></div><div class="dim">Cargando…</div></div>`);
+  let g; try{ g=await api('/guild'); }catch(e){ toast('No disponible'); closeOverlay(); return; }
+  if(g.guild) renderMyGuild(g); else renderGuildBrowse();
+}
+function renderMyGuild(g){
+  const G=g.guild;
+  const mem=g.members.map(m=>`<div class="rank-row ${m.me?'me':''}">
+    <span class="pos">${m.owner?'👑':''}</span><span class="nm">${esc(m.name)}</span>
+    <span class="dim" style="font-size:11px">${esc(m.league)}</span><span style="color:var(--cyan)">${m.leaguePoints}</span></div>`).join('');
+  openOverlay(`<div class="album-modal">
+    <div class="center mb8"><div style="font-family:var(--pixel);font-size:13px;color:var(--cyan)">🌌 ${esc(G.name)} <span style="color:var(--gold)">[${esc(G.tag)}]</span></div>
+      <div class="dim" style="font-size:12px;margin-top:5px">Rango global <b style="color:var(--gold)">#${G.rank||'—'}</b> · Poder <b style="color:var(--cyan)">${G.power}</b> · ${G.memberCount}/${G.max} miembros</div></div>
+    <div class="panel" style="padding:6px 8px">${mem}</div>
+    <button class="btn ghost cyan mt8" data-act="guildList">RANKING DE CONSTELACIONES</button>
+    <button class="btn ghost mt8" data-act="guildLeave">${g.isOwner?'SALIR (cedo el liderazgo)':'SALIR'}</button>
+    <button class="btn ghost mt8" data-act="close">CERRAR</button>
+  </div>`);
+}
+async function renderGuildBrowse(){
+  let d; try{ d=await api('/guild/list'); }catch(e){ d={rows:[],cost:500,max:20}; }
+  const rows=d.rows.map(x=>`<div class="rank-row">
+    <span class="pos">${x.pos}</span><span class="nm">${esc(x.name)} <span style="color:var(--gold)">[${esc(x.tag)}]</span></span>
+    <span class="dim" style="font-size:11px">${x.members}/${d.max}</span><span style="color:var(--cyan);width:46px;text-align:right">${x.power}</span>
+    <button class="btn sm" style="width:auto;padding:3px 8px" data-act="guildJoin" data-arg="${x.id}" ${x.full?'disabled':''}>UNIRME</button></div>`).join('')||'<div class="dim tc" style="padding:14px">Sé el primero en fundar una.</div>';
+  openOverlay(`<div class="album-modal">
+    <div class="center mb8"><div style="font-family:var(--pixel);font-size:12px;color:var(--cyan)">🌌 CONSTELACIONES</div>
+      <div class="dim" style="font-size:12px;margin-top:4px">Únete a una o funda la tuya (${d.cost}🪙).</div></div>
+    <div class="row mb8"><input id="g-name" class="tinput" maxlength="20" placeholder="Nombre" style="flex:1">
+      <input id="g-tag" class="tinput" maxlength="4" placeholder="TAG" style="width:70px">
+      <button class="btn sm" style="width:auto" data-act="guildCreate">FUNDAR</button></div>
+    <div class="panel" style="padding:6px 8px">${rows}</div>
+    <button class="btn ghost mt8" data-act="close">CERRAR</button>
+  </div>`);
+}
+async function guildCreate(){
+  const name=(($("#g-name")||{}).value||'').trim(), tag=(($("#g-tag")||{}).value||'').trim();
+  if(name.length<3){toast('Nombre de 3 a 20 caracteres');return;}
+  if(tag.length<2){toast('TAG de 2 a 4 letras/números');return;}
+  try{ const r=await api('/guild/create',{method:'POST',body:{name,tag}});
+    if(r.user){S.user=Object.assign(S.user,r.user);refreshChips();} SFX.play('claim'); toast('🌌 ¡Constelación fundada!'); openGuild(); }
+  catch(e){ const er=e.data&&e.data.error;
+    toast(er==='name_taken'?'Ese nombre ya existe':er==='insufficient'?'Te faltan monedas':er==='bad_tag'?'TAG 2-4 letras/números':er==='bad_name'?'Nombre 3-20 caracteres':er==='already_in_guild'?'Ya estás en una':'No se pudo'); }
+}
+async function guildJoin(id){
+  try{ await api('/guild/join',{method:'POST',body:{id}}); SFX.play('claim'); toast('¡Te uniste!'); openGuild(); }
+  catch(e){ const er=e.data&&e.data.error; toast(er==='full'?'Constelación llena':er==='already_in_guild'?'Ya estás en una':'No se pudo'); }
+}
+function guildLeave(){ openOverlay(`<div class="center">
+  <div class="mb8" style="font-size:14px">¿Salir de tu constelación?</div>
+  <button class="btn mag mb8" data-act="guildLeaveYes">SÍ, SALIR</button>
+  <button class="btn ghost" data-act="openGuild">CANCELAR</button></div>`); }
+async function guildLeaveYes(){ try{ await api('/guild/leave',{method:'POST'}); toast('Has salido'); openGuild(); }catch(e){ toast('No se pudo'); } }
+function guildList(){ renderGuildBrowse(); }
+
+/* ============================ TRUEQUE (#2) ============================ */
+function regTradeTpl(o){ return registerTpl({ id:o.tpl, name:o.name, rarity:o.rarity, art_seed:o.art_seed,
+  type:o.type, types:o.type2?[o.type,o.type2]:(o.type?[o.type]:undefined), image_url:o.image_url }); }
+async function openTrades(){
+  $("#topmenu").classList.remove("show");
+  openOverlay(`<div class="center"><div class="spinner" style="margin:14px auto"></div><div class="dim">Cargando mercado…</div></div>`);
+  let d; try{ d=await api('/trades'); }catch(e){ toast('No disponible'); closeOverlay(); return; }
+  S._trades=d; renderTrades(d);
+}
+function tradeMini(o){ regTradeTpl(o.offer); regTradeTpl(o.want);
+  return `<div class="trade-row">
+    <div class="trade-side"><div class="trade-spr">${artTag(tpl(o.offer.tpl),5)}</div><span class="alb-name">${esc(o.offer.name)}</span></div>
+    <span class="trade-arrow">⇄</span>
+    <div class="trade-side"><div class="trade-spr">${artTag(tpl(o.want.tpl),5)}</div><span class="alb-name dim">${esc(o.want.name)}</span></div></div>`; }
+function renderTrades(d){
+  const market=d.market.map(o=>`<div class="panel" style="padding:8px">${tradeMini(o)}
+    <div class="dim" style="font-size:11px;margin-top:4px">de ${esc(o.fromName)}</div>
+    ${o.canFulfill?`<button class="btn sm mt8" data-act="tradeAccept" data-arg="${o.id}">ACEPTAR · doy un ${esc(o.want.name)}</button>`
+      :`<div class="dim" style="font-size:11px;margin-top:6px">Necesitas un duplicado de <b>${esc(o.want.name)}</b></div>`}
+    </div>`).join('')||'<div class="dim tc" style="padding:12px">No hay ofertas ahora. ¡Crea la tuya!</div>';
+  const mine=d.mine.map(o=>`<div class="panel" style="padding:8px">${tradeMini(o)}
+    <button class="btn sm ghost mt8" data-act="tradeCancel" data-arg="${o.id}">CANCELAR</button></div>`).join('')||'<div class="dim tc" style="padding:8px;font-size:12px">No tienes ofertas activas.</div>';
+  openOverlay(`<div class="album-modal">
+    <div class="center mb8"><div style="font-family:var(--pixel);font-size:12px;color:var(--cyan)">🔄 TRUEQUE</div>
+      <div class="dim" style="font-size:12px;margin-top:4px">Cambia <b>duplicados</b> para completar tu álbum.</div></div>
+    <button class="btn mag mb8" data-act="tradeCreateFlow">+ CREAR OFERTA</button>
+    <b style="font-size:13px">El mercado</b>${market}
+    <div style="border-top:1px solid var(--line);margin:10px 0"></div>
+    <b style="font-size:13px">Mis ofertas</b>${mine}
+    <button class="btn ghost mt8" data-act="close">CERRAR</button>
+  </div>`);
+  renderCanvases($("#overlay"));
+}
+let tradeDraft={offerInst:null};
+function tradeCreateFlow(){
+  const byTpl={}; (S.collection||[]).forEach(i=>{ const k=i.template.id; (byTpl[k]=byTpl[k]||[]).push(i); });
+  const dups=Object.values(byTpl).filter(arr=>arr.length>=2).map(arr=>arr.find(i=>!i.locked)).filter(Boolean);
+  if(!dups.length){ toast('No tienes duplicados para ofrecer'); return; }
+  const cells=dups.map(i=>`<div class="card r-${i.template.rarity}" data-act="tradeOfferPick" data-arg="${i.instance_id}">${artTag(i.template,6)}<div class="nm">${esc(i.template.name)}</div></div>`).join('');
+  openOverlay(`<div class="album-modal"><div class="center mb8"><b>1/2 · ¿Qué duplicado ofreces?</b></div>
+    <div class="grid">${cells}</div><button class="btn ghost mt8" data-act="openTrades">CANCELAR</button></div>`);
+  renderCanvases($("#overlay"));
+}
+async function tradeOfferPick(iid){
+  tradeDraft.offerInst=iid;
+  let s=S.season; if(!s){ try{ s=await api('/season'); S.season=s; }catch(e){} }
+  const missing=(s&&s.entries||[]).filter(e=>!e.owned);
+  if(!missing.length){ toast('¡Ya tienes el álbum completo!'); return; }
+  const cells=missing.map(e=>{ registerTpl({id:e.id, rarity:e.rarity, art_seed:e.art_seed});
+    return `<div class="card r-${e.rarity}" data-act="tradeWantPick" data-arg="${e.id}"><canvas data-sil="${e.id}" data-px="6"></canvas><div class="nm dim">???</div></div>`; }).join('');
+  openOverlay(`<div class="album-modal"><div class="center mb8"><b>2/2 · ¿Qué te falta?</b>
+    <div class="dim" style="font-size:11px">Pide una criatura del álbum que aún no tienes</div></div>
+    <div class="grid">${cells}</div><button class="btn ghost mt8" data-act="tradeCreateFlow">ATRÁS</button></div>`);
+  renderCanvases($("#overlay"));
+}
+async function tradeWantPick(tplId){
+  try{ await api('/trades/create',{method:'POST',body:{offerInst:tradeDraft.offerInst, wantTpl:tplId}});
+    SFX.play('claim'); toast('✅ Oferta publicada'); openTrades(); }
+  catch(e){ const er=e.data&&e.data.error;
+    toast(er==='not_duplicate'?'Debe ser un duplicado':er==='already_offered'?'Esa instancia ya está ofrecida':er==='too_many'?'Máx 5 ofertas abiertas':er==='locked'?'Está protegida (favorito)':'No se pudo'); }
+}
+async function tradeAccept(offerId){
+  const d=S._trades; const o=d&&d.market.find(x=>x.id===offerId); if(!o){ openTrades(); return; }
+  const mine=(S.collection||[]).filter(i=>i.template.id===o.want.tpl&&!i.locked);
+  if(mine.length<2){ toast('Necesitas un duplicado de '+o.want.name); return; }
+  try{ await api('/trades/accept',{method:'POST',body:{id:offerId, payInst:mine[0].instance_id}});
+    SFX.play('claim'); buzz([40,40,80]); await refreshCollection();
+    toast('🔄 ¡Trueque hecho! Recibiste '+o.offer.name); openTrades(); }
+  catch(e){ const er=e.data&&e.data.error;
+    toast(er==='not_open'?'La oferta ya se cerró':er==='pay_not_duplicate'?'Necesitas un duplicado':er==='offer_gone'?'La oferta ya no existe':'No se pudo'); }
+}
+async function tradeCancel(id){ try{ await api('/trades/cancel',{method:'POST',body:{id}}); toast('Oferta cancelada'); openTrades(); }catch(e){ toast('No se pudo'); } }
 
 /* ====================== TUTORIAL (primer login) ====================== */
 const TUTORIAL=[

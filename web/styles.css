@@ -520,6 +520,15 @@ h2.title small{font-family:var(--ui);font-size:13px;color:var(--ink-dim);font-we
 .season-chapter .sc-h b{color:var(--ink)}
 .season-chapter .sc-x{font-size:14px;line-height:1.5;color:var(--ink-dim);font-style:italic}
 
+/* ===================== CONSTELACIONES + TRUEQUE ===================== */
+.tinput{font-family:var(--ui);font-size:15px;color:var(--ink);background:#0a0818;border:2px solid var(--line);
+  padding:8px 10px;outline:none}
+.tinput:focus{border-color:var(--cyan)}
+.trade-row{display:flex;align-items:center;justify-content:space-around;gap:6px}
+.trade-side{flex:1;text-align:center;min-width:0}
+.trade-spr canvas,.trade-spr .aigimg{width:54px;image-rendering:pixelated;display:block;margin:0 auto;background:#0a081880}
+.trade-arrow{font-size:20px;color:var(--cyan);flex:0 0 auto;text-shadow:0 0 6px rgba(52,245,228,.6)}
+
 /* aviso de recap en INICIO cuando el mes está por terminar */
 .recap-cta{display:flex;align-items:center;gap:10px;border:2px solid var(--gold);background:var(--panel);
   padding:10px 12px;margin-bottom:12px;cursor:pointer;box-shadow:0 0 14px rgba(255,210,63,.25)}

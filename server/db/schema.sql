@@ -303,3 +303,41 @@ CREATE TABLE IF NOT EXISTS push_subs (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   PRIMARY KEY (user_id, endpoint)
 );
+
+-- CONSTELACIONES (gremios, #1): grupos de jugadores. El "poder" de una
+-- constelación se agrega de los stats existentes de sus miembros (SUM de
+-- league_points), sin nuevos hooks de escritura. La pertenencia vive en
+-- users.guild_id (un jugador, una constelación).
+CREATE TABLE IF NOT EXISTS guilds (
+  id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name       TEXT NOT NULL,
+  tag        TEXT NOT NULL,                         -- 2-4 chars, mostrado junto al nombre
+  owner_id   UUID REFERENCES users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_guilds_name ON guilds (lower(name));
+ALTER TABLE users ADD COLUMN IF NOT EXISTS guild_id UUID REFERENCES guilds(id) ON DELETE SET NULL;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS guild_joined_at TIMESTAMPTZ;
+CREATE INDEX IF NOT EXISTS idx_users_guild ON users(guild_id);
+
+-- TRUEQUE (#2): ofertas de intercambio de DUPLICADOS entre jugadores. El que
+-- ofrece "reserva" una instancia suya; cualquiera con una instancia de la
+-- plantilla deseada puede aceptar. El swap es transaccional (cambia el owner de
+-- las dos instancias a la vez). Solo cosmético/colección: no se comercia poder
+-- pagable (respeta la monetización no tóxica del README §4).
+CREATE TABLE IF NOT EXISTS trade_offers (
+  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  status        TEXT NOT NULL DEFAULT 'open',       -- open | done | cancelled
+  from_user     UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  offer_inst    UUID NOT NULL REFERENCES creature_instances(instance_id) ON DELETE CASCADE,
+  offer_tpl     TEXT NOT NULL,                      -- plantilla ofrecida (para listar)
+  want_tpl      TEXT NOT NULL,                      -- plantilla deseada a cambio
+  to_user       UUID REFERENCES users(id) ON DELETE SET NULL,  -- quién la aceptó
+  taken_inst    UUID REFERENCES creature_instances(instance_id) ON DELETE SET NULL,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  closed_at     TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_trades_open ON trade_offers(status, want_tpl);
+CREATE INDEX IF NOT EXISTS idx_trades_from ON trade_offers(from_user, status);
+-- Una instancia no puede estar reservada en dos ofertas abiertas a la vez.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_trades_offer_inst ON trade_offers(offer_inst) WHERE status='open';
