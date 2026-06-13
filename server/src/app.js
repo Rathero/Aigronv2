@@ -848,6 +848,7 @@ app.post("/battle/find", authMiddleware, wrap(async (req, res) => {
   const captainUid = req.body && req.body.captain ? (A.find((u) => u.instanceId === req.body.captain) || {}).uid : null;
   const stance = req.body && STANCES_OK.includes(req.body.stance) ? req.body.stance : "NEUTRAL";
   C.applyCaptainStance(A, captainUid, stance);
+  C.applyTeamSynergy(A); // bono de composición de tipos (horneado, revalidado)
 
   const me = await getUser(req.userId);
 
@@ -883,6 +884,7 @@ app.post("/battle/find", authMiddleware, wrap(async (req, res) => {
   }
   // El rival lucha con un capitán neutral (liderazgo) para no quedar en desventaja.
   C.applyCaptainStance(B, B[0] && B[0].uid, "NEUTRAL");
+  C.applyTeamSynergy(B);
 
   // "Congela" la oferta (ambos equipos) para recalcular seguro en /resolve.
   const offer = await db.query(

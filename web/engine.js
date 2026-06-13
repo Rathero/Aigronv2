@@ -327,6 +327,33 @@
     return MESES_ES[m] + " " + y;
   }
 
+  // ARCO NARRATIVO MENSUAL: cada temporada (mes) es un CAPÍTULO del Núcleo. El
+  // relato AVANZA mes a mes (índice monotónico año*12+mes) sobre una lista
+  // ordenada; cuando se acaba, recicla. Determinista: igual para todos y rota al
+  // cambiar el álbum. Da un hilo conductor a la colección mensual (continúa la
+  // cinemática "Génesis" y el Códice).
+  const SEASON_CHAPTERS = [
+    { title: "El Despertar",     text: "Las primeras esquirlas caen sobre un mundo en silencio. Algo, muy abajo, ha vuelto a soñar." },
+    { title: "La Marea",         text: "Las esquirlas llegan a oleadas. Quien las reúne empieza a oír un latido común bajo el suelo." },
+    { title: "Los Ecos",         text: "Las criaturas no reclamadas no se borran: se hunden, y susurran. El mundo recuerda lo que el día olvida." },
+    { title: "La Fractura",      text: "Una grieta se abre en el cielo cada amanecer. Por ella se asoma, curioso, el ojo del Oráculo." },
+    { title: "El Pacto",         text: "Dos esquirlas afines aprenden a fundirse. El Núcleo prueba, a través de ti, a recomponerse pieza a pieza." },
+    { title: "La Tormenta",      text: "Aspectos enfrentados chocan en el aire. Los tipos ya no son rasgos: son bandos de una guerra antigua." },
+    { title: "El Coloso",        text: "Una esquirla se niega a morir al alba y crece, y crece. Hará falta todo el mundo para devolverla al sueño." },
+    { title: "El Reflejo",       text: "Aparece un rival que te imita y te supera. El Núcleo ha aprendido a soñarte también a ti." },
+    { title: "La Luz Dorada",    text: "Entre mil esquirlas grises late una de oro. Quien la sostiene, dicen, oye el mundo soñar entero." },
+    { title: "El Descenso",      text: "Las profundidades llaman. Abajo aguarda todo lo que nadie quiso, hambriento y sin alba." },
+    { title: "La Convergencia",  text: "Las constelaciones de esquirlas se buscan entre sí. Solas brillan; juntas, arden." },
+    { title: "El Coleccionista", text: "Y al fin, la verdad: el Núcleo no se recompone con piezas, sino con alguien capaz de recordarlas todas." },
+  ];
+  function seasonStory(sKey) {
+    const k = sKey || seasonKey();
+    const m = /^(\d{4})-(\d{2})$/.exec(k);
+    const idx = m ? (parseInt(m[1], 10) * 12 + (parseInt(m[2], 10) - 1)) : 0;
+    const i = ((idx % SEASON_CHAPTERS.length) + SEASON_CHAPTERS.length) % SEASON_CHAPTERS.length;
+    return Object.assign({ chapter: i + 1, of: SEASON_CHAPTERS.length }, SEASON_CHAPTERS[i]);
+  }
+
   // EVENTO temático del día (retención + algo que comentar). Determinista por
   // fecha, así que cliente y servidor lo derivan igual. Antes vivía en el job;
   // aquí es la fuente única (el job la re-exporta como eventFor por compat).
@@ -465,6 +492,44 @@
       u.energy = u.startEnergy;
     });
     return units;
+  }
+
+  // --------------------- SINERGIAS DE EQUIPO (set bonuses) ------------------
+  // Bono DETERMINISTA según la COMPOSICIÓN de tipos del equipo, horneado en los
+  // stats junto a capitán/estancia (el servidor revalida; el motor de combate ni
+  // se entera). Crea decisiones de construcción más allá del poder bruto:
+  //   • 1 tipo (monotipo)  -> RESONANCIA: +12% ATK y +12% DEF (afín, ofensivo)
+  //   • 2 tipos            -> VÍNCULO:    +8% HP (aguante)
+  //   • 3 tipos distintos  -> ESPECTRO:   +8% SPD y +1⚡ inicial (tempo/versátil)
+  // Es un trade-off real: monotipo pega/aguanta más pero es frágil al contrarréplica
+  // de tipos; el arcoíris cubre debilidades y juega más rápido.
+  const SYNERGIES = {
+    RESONANCIA: { label: "Resonancia", desc: "+12% ATK y DEF", atk: 1.12, def: 1.12, hp: 1, spd: 1, startEnergy: 0 },
+    VINCULO:    { label: "Vínculo",    desc: "+8% HP",          atk: 1, def: 1, hp: 1.08, spd: 1, startEnergy: 0 },
+    ESPECTRO:   { label: "Espectro",   desc: "+8% SPD y +1⚡",   atk: 1, def: 1, hp: 1, spd: 1.08, startEnergy: 1 },
+  };
+  function teamSynergyKey(units) {
+    if (!units || units.length < 2) return null; // un solo aigron no hace equipo
+    const n = new Set(units.map((u) => u.type)).size;
+    return n <= 1 ? "RESONANCIA" : n >= 3 ? "ESPECTRO" : "VINCULO";
+  }
+  function teamSynergy(units) {
+    const k = teamSynergyKey(units);
+    return k ? Object.assign({ key: k }, SYNERGIES[k]) : null;
+  }
+  // Muta `units` con el bono de sinergia. Se llama JUSTO DESPUÉS de
+  // applyCaptainStance, sobre unidades a vida completa (oferta/inicio de match).
+  function applyTeamSynergy(units) {
+    const s = teamSynergy(units);
+    if (!s) return null;
+    units.forEach((u) => {
+      if (s.atk !== 1) { u.atkP = Math.round(u.atkP * s.atk); u.atkS = Math.round(u.atkS * s.atk); }
+      if (s.def !== 1) { u.defP = Math.round(u.defP * s.def); u.defS = Math.round(u.defS * s.def); }
+      if (s.hp !== 1) { u.hpMax = Math.round(u.hpMax * s.hp); u.hp = u.hpMax; }
+      if (s.spd !== 1) u.spd = Math.round(u.spd * s.spd);
+      if (s.startEnergy) { u.startEnergy = (u.startEnergy || 0) + s.startEnergy; u.energy = u.startEnergy; }
+    });
+    return s;
   }
 
   // ATK/DEF efectivos según la CLASE del atacante: físico usa atkP/defP, especial atkS/defS.
@@ -1028,9 +1093,9 @@
     // funciones puras
     typeMult, typeEff, typesOf, levelCost, computeLeague, mulberry32, hashStr,
     genName, genLore, pickRange, scaled, todayStr, genTemplate, dailyBatch,
-    seasonKey, seasonLabel, dailyEvent, composeSeason, dailyHighlights, dailyUniqueId, dailyUnique,
+    seasonKey, seasonLabel, seasonStory, dailyEvent, composeSeason, dailyHighlights, dailyUniqueId, dailyUnique,
     // combate
-    buildUnit, unitFromStats, applyCaptainStance, STANCES, pickTarget, resolveTarget,
+    buildUnit, unitFromStats, applyCaptainStance, applyTeamSynergy, teamSynergy, STANCES, SYNERGIES, pickTarget, resolveTarget,
     dealDamage, decBuffs, tickStatus, performAction, aiIntent, turnOrder, stepTurn, intentFromDecision, resolveBattle, botTeamFromSeed,
     // roguelike / mazmorra
     applyRelics, relicRunEffects, dungeonNodeOptions, dungeonEnemyTeam, dungeonDraft, dungeonLevelAt,

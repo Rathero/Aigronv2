@@ -523,9 +523,12 @@ async function openAlbum(){
   const reward=s.complete&&!s.rewardClaimed
     ? `<button class="btn gold mb8" data-act="claimAlbum">🏆 ¡ÁLBUM COMPLETO! Reclama +${s.reward.coins}🪙 +${s.reward.gems}💎</button>`
     : (s.rewardClaimed?`<div class="dim mb8" style="font-size:12px">🏆 Recompensa del álbum ya reclamada</div>`:'');
+  const story=ENGINE.seasonStory&&ENGINE.seasonStory(s.season.key);
+  const storyBanner=story?`<div class="season-chapter"><div class="sc-h">Capítulo ${story.chapter}/${story.of} · <b>${esc(story.title)}</b></div><div class="sc-x">${esc(story.text)}</div></div>`:'';
   openOverlay(`<div class="album-modal">
     <div class="mrow" style="margin-bottom:8px"><b style="font-size:16px;color:var(--cyan)">Álbum de ${esc(s.season.label)}</b>
       <span class="dim">${s.owned}/${s.total}</span></div>
+    ${storyBanner}
     <div class="mis-bar" style="margin-bottom:10px"><i style="width:${Math.round(s.owned/s.total*100)}%"></i></div>
     ${reward}
     <div class="dim" style="font-size:11px;margin-bottom:8px">⭐ marco = destacada hoy (más probable en el huevo y la tienda)</div>
@@ -596,6 +599,16 @@ function teamPower(team){
   // Índice simple de fuerza: suma de stats escalados (HP ponderado a /10).
   return Math.round(team.reduce((a,i)=>{const s=i.template.stats;
     return a+(s?s.hp/10+s.atkP+s.atkS+s.defP+s.defS+s.spd:0);},0));
+}
+// Sinergia de un conjunto de INSTANCIAS (mapea a {type} y llama al motor).
+function teamSynergyOf(instances){
+  const units=(instances||[]).map(i=>({type:i.template&&(i.template.type||(i.template.types&&i.template.types[0]))}));
+  return ENGINE.teamSynergy(units);
+}
+// Chip visible de la sinergia activa (o pista si aún no hay equipo de 2+).
+function synergyChip(syn){
+  if(!syn) return `<span class="syn-chip none">Sinergia: equipo de 2+ aigrons</span>`;
+  return `<span class="syn-chip s-${syn.key}" title="${esc(syn.desc)}">✦ ${esc(syn.label)} <span class="syn-d">${esc(syn.desc)}</span></span>`;
 }
 function teamCombatHTML(){
   const team=S.team.map(instById).filter(Boolean);
@@ -1209,7 +1222,9 @@ function renderTeamPicker(){
   // Feedback en vivo mientras eliges: PODER total + tipos cubiertos (sinergia).
   const power=teamPower(selected);
   const types=[...new Set(selected.flatMap(i=>(i.template.types||[i.template.type])))];
-  const liveInfo=selected.length?`<div class="dim" style="font-size:11px;margin-top:3px">PODER <b style="color:var(--cyan)">${power}</b> · tipos: ${types.map(ty=>`<span class="type-pill" style="font-size:9px;padding:1px 4px">${ty}</span>`).join(' ')}</div>`:'';
+  const syn=teamSynergyOf(selected);
+  const liveInfo=selected.length?`<div class="dim" style="font-size:11px;margin-top:3px">PODER <b style="color:var(--cyan)">${power}</b> · tipos: ${types.map(ty=>`<span class="type-pill" style="font-size:9px;padding:1px 4px">${ty}</span>`).join(' ')}</div>
+    <div style="margin-top:5px">${synergyChip(syn)}</div>`:'';
   // Bug: el modal se re-renderiza entero en cada toque y el scroll de la lista
   // saltaba al principio. Se preserva y restaura el scrollTop.
   const prevScroll=($("#restgrid")||{}).scrollTop||0;
@@ -1332,7 +1347,8 @@ function startLiveBattle(m){
       decisions:[],timer:null,planTimer:null,initA:m.team,initB:m.opponent,ended:false};
   buildArena();
   const vs=$(".vs"); if(vs){vs.style.opacity=1;setTimeout(()=>{vs.style.opacity=0;},800);}
-  setBanner(`⚔️ ${m.bot?'Combate':'PvP'} vs <b>${esc(CB.oppName)}</b>`);
+  const syn=ENGINE.teamSynergy(m.team||[]);
+  setBanner(`⚔️ ${m.bot?'Combate':'PvP'} vs <b>${esc(CB.oppName)}</b>`+(syn?` · <span style="color:var(--cyan)">✦ ${esc(syn.label)}</span>`:''));
 }
 // Reconstruye el combate tras reanudar: mismos equipos + estado ACTUAL del servidor.
 function resumeLiveBattle(m){
@@ -1488,8 +1504,10 @@ function renderPrep(team){
      <div class="lv">L${i.level}</div>${artTag(i.template,6)}<div class="nm">${i.template.name}</div>
      <div class="ty" style="color:var(--gold);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">✨ ${ABILITIES[i.template.ability].name}</div></div>`).join("");
   const st=(k,l,d)=>`<div class="stance ${prep.stance===k?'on':''}" data-stance="${k}"><b>${l}</b><div class="dim" style="font-size:10px">${d}</div></div>`;
+  const syn=teamSynergyOf(team);
   openOverlay(`<div>
     <div class="center mb8"><b>Prepara el combate</b></div>
+    <div class="center mb8">${synergyChip(syn)}</div>
     <div class="dim mb8" style="font-size:12px">Capitán: +15% a sus stats y liderazgo (+6% a todo el equipo).</div>
     <div class="grid mb8" id="capgrid">${capCards}</div>
     <div class="dim mb8" style="font-size:12px">Estancia del equipo:</div>
@@ -2369,8 +2387,11 @@ function openCodex(){
     if(byR[t.rarity]!=null)byR[t.rarity]++; });
   const rarRow=Object.keys(byR).map(k=>`<div class="codex-stat"><span class="rar-txt ${k}">${k}</span><b>${byR[k]}</b></div>`).join('');
   const unlocked=CODEX.filter(f=>n>=f.at).length;
+  const story=ENGINE.seasonStory&&ENGINE.seasonStory();
+  const storyBanner=story?`<div class="season-chapter"><div class="sc-h">Este mes · Capítulo ${story.chapter} · <b>${esc(story.title)}</b></div><div class="sc-x">${esc(story.text)}</div></div>`:'';
   openOverlay(`<div class="album-modal">
     <div class="mrow" style="margin-bottom:6px"><b style="font-size:16px;color:var(--cyan)">📜 Códice del mundo</b><span class="dim">${unlocked}/${CODEX.length}</span></div>
+    ${storyBanner}
     <div class="dim" style="font-size:12px;margin-bottom:10px">La historia del <b>Núcleo</b> se revela según descubres aigrons. Conoces <b style="color:var(--cyan)">${n}</b> especie${n===1?'':'s'}.</div>
     ${frags}
     <div class="panel" style="margin-top:10px"><b style="font-size:13px">Bestiario — especies descubiertas</b>${rarRow}</div>

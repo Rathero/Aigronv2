@@ -394,6 +394,15 @@ test de paridad en `npm test`.
 - ✅ **Recordatorio push a las 11:00** (hora de España): a quien tiene push y no ha
   reclamado hoy. `PUSH_REMINDER_CRON` (defecto `0 11 * * *`) con su propia zona
   `PUSH_REMINDER_TZ` (defecto `Europe/Madrid`, independiente de `CRON_TZ`).
+- ✅ **Sinergias de equipo (set bonuses)** (`teamSynergy`/`applyTeamSynergy` en
+  `engine.js`): bono determinista por composición de tipos, horneado junto a
+  capitán/estancia y **revalidado por el servidor** (parità por construcción; el
+  cliente solo refleja los stats ya horneados). Monotipo→RESONANCIA (+12% ATK/DEF),
+  2 tipos→VÍNCULO (+8% HP), 3 tipos→ESPECTRO (+8% SPD y +1⚡). Visible en el
+  constructor de equipo, la preparación y el banner de combate. Con tests.
+- ✅ **Arco narrativo mensual** (`seasonStory` en `engine.js`): cada temporada (mes)
+  es un capítulo del Núcleo que **avanza mes a mes** (índice monotónico, determinista).
+  Se muestra en el álbum y el Códice. Con tests.
 - Pendiente: ascensos/descensos por percentil y Salón de la Fama (el histórico ya existe).
 
 ### P2 — Monetización

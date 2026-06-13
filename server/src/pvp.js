@@ -124,6 +124,7 @@ function attachPvp(server, deps) {
     }
     E.applyCaptainStance(teamA, capUid(teamA, pA.captain), STANCES_OK.includes(pA.stance) ? pA.stance : "NEUTRAL");
     E.applyCaptainStance(teamB, capUid(teamB, pB.captain), STANCES_OK.includes(pB.stance) ? pB.stance : "NEUTRAL");
+    E.applyTeamSynergy(teamA); E.applyTeamSynergy(teamB); // sinergia de composición
     const seed = Math.floor(Math.random() * 0x7fffffff) >>> 0;
     const id = "m" + (seq++);
     const pub = { A: teamA.map(publicUnit), B: teamB.map(publicUnit) };
@@ -148,11 +149,13 @@ function attachPvp(server, deps) {
     const teamA = p.arena && buildArenaUnits ? await buildArenaUnits(p.arena, "A") : await buildTeamUnits(p.userId, "A");
     if (!teamA.length) return send(p.ws, { t: "error", msg: "team" });
     E.applyCaptainStance(teamA, capUid(teamA, p.captain), STANCES_OK.includes(p.stance) ? p.stance : "NEUTRAL");
+    E.applyTeamSynergy(teamA);
     const seed = Math.floor(Math.random() * 0x7fffffff) >>> 0;
     const tpls = await todayTemplates();
     const botLevel = p.arena ? Math.round(teamA.reduce((s, x) => s + (x.level || 1), 0) / teamA.length) : p.level;
     const teamB = E.botTeamFromSeed(seed, tpls, botLevel);
     E.applyCaptainStance(teamB, teamB[0] && teamB[0].uid, "NEUTRAL");
+    E.applyTeamSynergy(teamB);
     const id = "m" + (seq++);
     const bot = { userId: null, ws: null, name: BOT_NAMES[seed % BOT_NAMES.length], bot: true };
     const pub = { A: teamA.map(publicUnit), B: teamB.map(publicUnit) };

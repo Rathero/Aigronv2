@@ -504,6 +504,22 @@ h2.title small{font-family:var(--ui);font-size:13px;color:var(--ink-dim);font-we
 .recap-bar .rb-t i{display:block;height:100%;animation:grow .85s ease-out}
 .recap-bar .rb-v{width:26px;text-align:right;font-weight:700}
 @keyframes grow{from{width:0}}
+/* ===================== SINERGIAS DE EQUIPO (set bonuses) ===================== */
+.syn-chip{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:700;padding:3px 9px;
+  border:2px solid var(--line);background:#0a0818;border-radius:12px}
+.syn-chip .syn-d{font-weight:400;color:var(--ink-dim);font-size:11px}
+.syn-chip.none{color:var(--ink-dim);font-weight:400;border-style:dashed}
+.syn-chip.s-RESONANCIA{border-color:var(--magenta);color:var(--magenta);box-shadow:0 0 8px rgba(255,77,157,.35)}
+.syn-chip.s-VINCULO{border-color:var(--green);color:var(--green);box-shadow:0 0 8px rgba(124,255,107,.3)}
+.syn-chip.s-ESPECTRO{border-color:var(--cyan);color:var(--cyan);box-shadow:0 0 8px rgba(52,245,228,.35)}
+
+/* ===================== ARCO NARRATIVO MENSUAL (capítulo) ===================== */
+.season-chapter{border:2px solid var(--epi);background:linear-gradient(180deg,rgba(192,97,255,.12),transparent);
+  padding:9px 11px;margin-bottom:10px;border-radius:6px}
+.season-chapter .sc-h{font-family:var(--pixel);font-size:10px;color:var(--epi);margin-bottom:5px;line-height:1.4}
+.season-chapter .sc-h b{color:var(--ink)}
+.season-chapter .sc-x{font-size:14px;line-height:1.5;color:var(--ink-dim);font-style:italic}
+
 /* aviso de recap en INICIO cuando el mes está por terminar */
 .recap-cta{display:flex;align-items:center;gap:10px;border:2px solid var(--gold);background:var(--panel);
   padding:10px 12px;margin-bottom:12px;cursor:pointer;box-shadow:0 0 14px rgba(255,210,63,.25)}

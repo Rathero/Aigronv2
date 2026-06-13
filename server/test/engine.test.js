@@ -611,3 +611,41 @@ test("lore: artículos concuerdan con tags femeninos (sin 'del niebla')", () => 
     assert.ok(!/\bel (niebla|tormenta|ceniza|mantis|anguila|polilla)\b/.test(t.lore), `lore roto: ${t.lore}`);
   }
 });
+
+test("sinergias de equipo: clave correcta por composición de tipos", () => {
+  const mk = (types) => types.map((ty, i) => ({ uid: "A" + i, type: ty }));
+  assert.equal(E.teamSynergy(mk(["FUEGO", "FUEGO", "FUEGO"])).key, "RESONANCIA");
+  assert.equal(E.teamSynergy(mk(["FUEGO", "FUEGO"])).key, "RESONANCIA"); // 1 tipo
+  assert.equal(E.teamSynergy(mk(["FUEGO", "AGUA"])).key, "VINCULO");     // 2 tipos
+  assert.equal(E.teamSynergy(mk(["FUEGO", "AGUA", "PLANTA"])).key, "ESPECTRO"); // 3 tipos
+  assert.equal(E.teamSynergy(mk(["FUEGO"])), null);                      // 1 unidad: sin sinergia
+  assert.equal(E.teamSynergy([]), null);
+});
+
+test("sinergias: applyTeamSynergy hornea el bono y es determinista", () => {
+  function unit(type, uid) { return { uid, type, atkP: 100, atkS: 100, defP: 100, defS: 100, hpMax: 1000, hp: 1000, spd: 50, energy: 0, startEnergy: 0 }; }
+  // Monotipo (RESONANCIA): +12% ATK y DEF, HP/SPD intactos.
+  const mono = [unit("FUEGO", "A0"), unit("FUEGO", "A1"), unit("FUEGO", "A2")];
+  const s1 = E.applyTeamSynergy(mono);
+  assert.equal(s1.key, "RESONANCIA");
+  assert.equal(mono[0].atkP, 112); assert.equal(mono[0].defP, 112);
+  assert.equal(mono[0].hpMax, 1000); assert.equal(mono[0].spd, 50);
+  // Arcoíris (ESPECTRO): +8% SPD y +1⚡ inicial, ATK intacto.
+  const rainbow = [unit("FUEGO", "A0"), unit("AGUA", "A1"), unit("PLANTA", "A2")];
+  const s2 = E.applyTeamSynergy(rainbow);
+  assert.equal(s2.key, "ESPECTRO");
+  assert.equal(rainbow[0].spd, 54); assert.equal(rainbow[0].energy, 1); assert.equal(rainbow[0].atkP, 100);
+  // Dúo (VÍNCULO): +8% HP.
+  const duo = [unit("FUEGO", "A0"), unit("AGUA", "A1")];
+  assert.equal(E.applyTeamSynergy(duo).key, "VINCULO");
+  assert.equal(duo[0].hpMax, 1080); assert.equal(duo[0].hp, 1080);
+});
+
+test("arco narrativo: seasonStory es determinista, válido y avanza mes a mes", () => {
+  const a = E.seasonStory("2026-06");
+  assert.equal(a.title, E.seasonStory("2026-06").title); // determinista
+  assert.ok(a.chapter >= 1 && a.chapter <= a.of && a.title && a.text);
+  // Meses consecutivos -> capítulos consecutivos (módulo el total).
+  const jun = E.seasonStory("2026-06").chapter, jul = E.seasonStory("2026-07").chapter;
+  assert.equal(jul, (jun % a.of) + 1);
+});
