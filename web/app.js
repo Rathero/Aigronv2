@@ -2232,7 +2232,7 @@ async function purchase(sku){
 }
 
 /* ====================== NAVEGACIÓN + INIT ====================== */
-const RENDER={home:renderHome,battle:renderBattle,dungeon:renderDungeon,collection:renderCollection,ranking:renderRanking,shop:renderShop};
+const RENDER={home:renderHome,battle:renderBattle,dungeon:renderDungeon,collection:renderCollection,ranking:renderRanking,guild:renderGuildScreen,shop:renderShop};
 function go(screen){
   if(CB&&CB.timer&&screen!=="battle"){clearInterval(CB.timer);CB=null;}
   MUSIC.setScene(screen==="battle"?"battle":"menu");
@@ -2303,6 +2303,7 @@ const ACTIONS={
   menuGuild:()=>{ openGuild(); }, menuTrades:()=>{ openTrades(); },
   openGuild:()=>openGuild(), guildCreate:()=>guildCreate(), guildJoin:(a)=>guildJoin(a),
   guildLeave:()=>guildLeave(), guildLeaveYes:()=>guildLeaveYes(), guildList:()=>guildList(),
+  guildTab:(a)=>guildTabSet(a), guildWeeklyClaim:()=>guildWeeklyClaim(), guildPost:()=>guildPost(),
   openTrades:()=>openTrades(), tradeCreateFlow:()=>tradeCreateFlow(), tradeOfferPick:(a)=>tradeOfferPick(a),
   tradeWantPick:(a)=>tradeWantPick(a), tradeAccept:(a)=>tradeAccept(a), tradeCancel:(a)=>tradeCancel(a),
   openCodex:()=>openCodex(),
@@ -2537,62 +2538,113 @@ async function recapShare(){
   });
 }
 
-/* ===================== CONSTELACIONES (gremios, #1) ===================== */
-async function openGuild(){
-  $("#topmenu").classList.remove("show");
-  openOverlay(`<div class="center"><div class="spinner" style="margin:14px auto"></div><div class="dim">Cargando…</div></div>`);
-  let g; try{ g=await api('/guild'); }catch(e){ toast('No disponible'); closeOverlay(); return; }
-  if(g.guild) renderMyGuild(g); else renderGuildBrowse();
-}
-function renderMyGuild(g){
+/* ===================== CONSTELACIONES (gremios, #1) =====================
+   Pestaña del nav (#s-guild) con sub-pestañas internas: Miembros / Misión / Muro.
+   Sin constelación, la pantalla muestra crear + explorar. */
+let guildTab='miembros', GUILD=null;
+function openGuild(){ go('guild'); }            // compat: el menú ≡ y CTAs llevan a la pestaña
+function tAgo(at){ const s=Math.max(0,(Date.now()-new Date(at).getTime())/1000);
+  if(s<60)return 'ahora'; if(s<3600)return Math.floor(s/60)+'m'; if(s<86400)return Math.floor(s/3600)+'h'; return Math.floor(s/86400)+'d'; }
+async function renderGuildScreen(){
+  const sc=$("#s-guild");
+  sc.innerHTML=`<h2 class="title">🌌 CONSTELACIÓN</h2><div class="dim tc" style="padding:20px"><div class="spinner" style="margin:0 auto 10px"></div>Cargando…</div>`;
+  let g; try{ g=await api('/guild'); }catch(e){ sc.innerHTML=`<h2 class="title">🌌 CONSTELACIÓN</h2><div class="panel dim">No disponible.</div>`; return; }
+  GUILD=g;
+  if(!g.guild){ renderGuildBrowse(); return; }
   const G=g.guild;
-  const mem=g.members.map(m=>`<div class="rank-row ${m.me?'me':''}">
-    <span class="pos">${m.owner?'👑':''}</span><span class="nm">${esc(m.name)}</span>
-    <span class="dim" style="font-size:11px">${esc(m.league)}</span><span style="color:var(--cyan)">${m.leaguePoints}</span></div>`).join('');
-  openOverlay(`<div class="album-modal">
-    <div class="center mb8"><div style="font-family:var(--pixel);font-size:13px;color:var(--cyan)">🌌 ${esc(G.name)} <span style="color:var(--gold)">[${esc(G.tag)}]</span></div>
-      <div class="dim" style="font-size:12px;margin-top:5px">Rango global <b style="color:var(--gold)">#${G.rank||'—'}</b> · Poder <b style="color:var(--cyan)">${G.power}</b> · ${G.memberCount}/${G.max} miembros</div></div>
-    <div class="panel" style="padding:6px 8px">${mem}</div>
-    <button class="btn ghost cyan mt8" data-act="guildList">RANKING DE CONSTELACIONES</button>
-    <button class="btn ghost mt8" data-act="guildLeave">${g.isOwner?'SALIR (cedo el liderazgo)':'SALIR'}</button>
-    <button class="btn ghost mt8" data-act="close">CERRAR</button>
-  </div>`);
+  const tab=(k,l)=>`<div class="t ${guildTab===k?'on':''}" data-act="guildTab" data-arg="${k}">${l}</div>`;
+  sc.innerHTML=`<h2 class="title">🌌 CONSTELACIÓN</h2>
+    <div class="panel glow-cyan"><div class="center">
+      <div style="font-family:var(--pixel);font-size:13px;color:var(--cyan)">${esc(G.name)} <span style="color:var(--gold)">[${esc(G.tag)}]</span></div>
+      <div class="dim" style="font-size:12px;margin-top:5px">Rango <b style="color:var(--gold)">#${G.rank||'—'}</b> · Poder <b style="color:var(--cyan)">${G.power}</b> · ${G.memberCount}/${G.max} miembros</div></div></div>
+    <div class="tabs">${tab('miembros','Miembros')}${tab('mision','Misión')}${tab('muro','Muro')}</div>
+    <div id="guild-body"></div>`;
+  renderGuildTab();
+}
+function guildTabSet(t){ guildTab=t;
+  $("#s-guild").querySelectorAll('.tabs .t').forEach(el=>el.classList.toggle('on', el.dataset.arg===t));
+  renderGuildTab(); }
+async function renderGuildTab(){
+  const body=$("#guild-body"), g=GUILD; if(!body||!g||!g.guild)return;
+  if(guildTab==='miembros'){
+    body.innerHTML=`<div class="panel" style="padding:6px 8px">${g.members.map(m=>`<div class="rank-row ${m.me?'me':''}">
+        <span class="pos">${m.owner?'👑':''}</span><span class="nm">${esc(m.name)}</span>
+        <span class="dim" style="font-size:11px">${esc(m.league)}</span><span style="color:var(--cyan)">${m.leaguePoints}</span></div>`).join('')}</div>
+      <button class="btn ghost cyan mt8" data-act="guildList">RANKING DE CONSTELACIONES</button>
+      <button class="btn ghost mt8" data-act="guildLeave">${g.isOwner?'SALIR (cedo el liderazgo)':'SALIR'}</button>`;
+  } else if(guildTab==='mision'){
+    body.innerHTML=`<div class="dim tc" style="padding:10px">Cargando misión…</div>`;
+    let w; try{ w=await api('/guild/weekly'); }catch(e){ body.innerHTML='<div class="panel dim">No disponible</div>'; return; }
+    const pct=Math.min(100,Math.round(w.progress/w.goal*100));
+    body.innerHTML=`<div class="panel">
+      <b style="font-size:14px">Misión semanal de la constelación</b>
+      <div class="dim" style="font-size:12px;margin:6px 0">${esc(w.label)}</div>
+      <div class="mis-bar"><i style="width:${pct}%${w.done?';background:var(--green)':''}"></i></div>
+      <div class="mrow" style="margin-top:8px"><span class="dim">${w.progress}/${w.goal} victorias · ${w.members} miembros</span>
+        ${w.done?(w.claimed?'<span style="color:var(--green)">✔ Reclamada</span>':`<button class="btn sm gold pulse" style="width:auto" data-act="guildWeeklyClaim">+${w.reward.coins}🪙 +${w.reward.dust}✨</button>`):'<span class="dim">en progreso</span>'}</div>
+      <div class="dim" style="font-size:11px;margin-top:10px">Suma las victorias PvP de <b>toda la constelación</b> esta semana. Cada miembro reclama su recompensa al alcanzar el objetivo. Se reinicia el lunes.</div></div>`;
+  } else {
+    body.innerHTML=`<div class="dim tc" style="padding:10px">Cargando muro…</div>`;
+    let d; try{ d=await api('/guild/wall'); }catch(e){ body.innerHTML='<div class="panel dim">No disponible</div>'; return; }
+    const msgs=d.messages.map(m=>`<div class="gmsg ${m.me?'me':''}"><div class="gm-h"><b>${esc(m.name)}</b> <span class="dim" style="font-size:10px">${tAgo(m.at)}</span></div><div class="gm-b">${esc(m.body)}</div></div>`).join('')||'<div class="dim tc" style="padding:10px">Sé el primero en escribir.</div>';
+    body.innerHTML=`<div class="row mb8"><input id="gw-input" class="tinput" maxlength="200" placeholder="Escribe al muro…" style="flex:1"><button class="btn sm" style="width:auto" data-act="guildPost">ENVIAR</button></div>
+      <div class="panel" style="padding:8px;max-height:52vh;overflow-y:auto">${msgs}</div>`;
+    const inp=$("#gw-input"); if(inp) inp.addEventListener('keydown',e=>{ if(e.key==='Enter')guildPost(); });
+  }
 }
 async function renderGuildBrowse(){
-  let d; try{ d=await api('/guild/list'); }catch(e){ d={rows:[],cost:500,max:20}; }
+  const sc=$("#s-guild");
+  let d; try{ d=await api('/guild/list'); }catch(e){ d={rows:[],cost:200,max:20}; }
   const rows=d.rows.map(x=>`<div class="rank-row">
     <span class="pos">${x.pos}</span><span class="nm">${esc(x.name)} <span style="color:var(--gold)">[${esc(x.tag)}]</span></span>
     <span class="dim" style="font-size:11px">${x.members}/${d.max}</span><span style="color:var(--cyan);width:46px;text-align:right">${x.power}</span>
     <button class="btn sm" style="width:auto;padding:3px 8px" data-act="guildJoin" data-arg="${x.id}" ${x.full?'disabled':''}>UNIRME</button></div>`).join('')||'<div class="dim tc" style="padding:14px">Sé el primero en fundar una.</div>';
-  openOverlay(`<div class="album-modal">
-    <div class="center mb8"><div style="font-family:var(--pixel);font-size:12px;color:var(--cyan)">🌌 CONSTELACIONES</div>
-      <div class="dim" style="font-size:12px;margin-top:4px">Únete a una o funda la tuya (${d.cost}🪙).</div></div>
-    <div class="row mb8"><input id="g-name" class="tinput" maxlength="20" placeholder="Nombre" style="flex:1">
-      <input id="g-tag" class="tinput" maxlength="4" placeholder="TAG" style="width:70px">
-      <button class="btn sm" style="width:auto" data-act="guildCreate">FUNDAR</button></div>
-    <div class="panel" style="padding:6px 8px">${rows}</div>
-    <button class="btn ghost mt8" data-act="close">CERRAR</button>
-  </div>`);
+  sc.innerHTML=`<h2 class="title">🌌 CONSTELACIÓN</h2>
+    <div class="panel"><div class="center mb8"><b>Forma o únete a una constelación</b>
+      <div class="dim" style="font-size:12px;margin-top:4px">Competid en el ranking, completad misiones semanales juntos y charlad en el muro.</div></div>
+      <div class="row"><input id="g-name" class="tinput" maxlength="20" placeholder="Nombre" style="flex:1">
+        <input id="g-tag" class="tinput" maxlength="4" placeholder="TAG" style="width:68px">
+        <button class="btn sm" style="width:auto" data-act="guildCreate">FUNDAR ${d.cost}🪙</button></div></div>
+    <b style="font-size:13px">Constelaciones top</b>
+    <div class="panel" style="padding:6px 8px;margin-top:6px">${rows}</div>`;
 }
 async function guildCreate(){
   const name=(($("#g-name")||{}).value||'').trim(), tag=(($("#g-tag")||{}).value||'').trim();
   if(name.length<3){toast('Nombre de 3 a 20 caracteres');return;}
   if(tag.length<2){toast('TAG de 2 a 4 letras/números');return;}
   try{ const r=await api('/guild/create',{method:'POST',body:{name,tag}});
-    if(r.user){S.user=Object.assign(S.user,r.user);refreshChips();} SFX.play('claim'); toast('🌌 ¡Constelación fundada!'); openGuild(); }
+    if(r.user){S.user=Object.assign(S.user,r.user);refreshChips();} SFX.play('claim'); toast('🌌 ¡Constelación fundada!'); guildTab='miembros'; renderGuildScreen(); }
   catch(e){ const er=e.data&&e.data.error;
     toast(er==='name_taken'?'Ese nombre ya existe':er==='insufficient'?'Te faltan monedas':er==='bad_tag'?'TAG 2-4 letras/números':er==='bad_name'?'Nombre 3-20 caracteres':er==='already_in_guild'?'Ya estás en una':'No se pudo'); }
 }
 async function guildJoin(id){
-  try{ await api('/guild/join',{method:'POST',body:{id}}); SFX.play('claim'); toast('¡Te uniste!'); openGuild(); }
+  try{ await api('/guild/join',{method:'POST',body:{id}}); SFX.play('claim'); toast('¡Te uniste!'); guildTab='miembros'; renderGuildScreen(); }
   catch(e){ const er=e.data&&e.data.error; toast(er==='full'?'Constelación llena':er==='already_in_guild'?'Ya estás en una':'No se pudo'); }
 }
 function guildLeave(){ openOverlay(`<div class="center">
   <div class="mb8" style="font-size:14px">¿Salir de tu constelación?</div>
   <button class="btn mag mb8" data-act="guildLeaveYes">SÍ, SALIR</button>
-  <button class="btn ghost" data-act="openGuild">CANCELAR</button></div>`); }
-async function guildLeaveYes(){ try{ await api('/guild/leave',{method:'POST'}); toast('Has salido'); openGuild(); }catch(e){ toast('No se pudo'); } }
-function guildList(){ renderGuildBrowse(); }
+  <button class="btn ghost" data-act="close">CANCELAR</button></div>`); }
+async function guildLeaveYes(){ try{ await api('/guild/leave',{method:'POST'}); closeOverlay(); toast('Has salido'); renderGuildScreen(); }catch(e){ toast('No se pudo'); } }
+async function guildWeeklyClaim(){
+  try{ const r=await api('/guild/weekly/claim',{method:'POST'}); if(r.user){S.user=Object.assign(S.user,r.user);refreshChips();}
+    SFX.play('claim'); if(window.POC&&window.POC.confetti)window.POC.confetti(); toast(`+${r.reward.coins}🪙 +${r.reward.dust}✨`); renderGuildTab(); }
+  catch(e){ toast('Aún no completada'); }
+}
+async function guildPost(){
+  const el=$("#gw-input"); const body=((el&&el.value)||'').trim(); if(!body)return;
+  try{ await api('/guild/wall',{method:'POST',body:{body}}); if(el)el.value=''; renderGuildTab(); }
+  catch(e){ const er=e.data&&e.data.error; toast(er==='too_fast'?'Espera un momento…':'No se pudo'); }
+}
+// Ranking de constelaciones (overlay de solo lectura).
+async function guildList(){
+  let d; try{ d=await api('/guild/list'); }catch(e){ toast('No disponible'); return; }
+  const rows=d.rows.map(x=>`<div class="rank-row"><span class="pos">${x.pos}</span>
+    <span class="nm">${esc(x.name)} <span style="color:var(--gold)">[${esc(x.tag)}]</span></span>
+    <span class="dim" style="font-size:11px">${x.members}/${d.max}</span><span style="color:var(--cyan)">${x.power}</span></div>`).join('')||'<div class="dim tc" style="padding:14px">Aún no hay constelaciones.</div>';
+  openOverlay(`<div class="album-modal"><div class="center mb8"><b style="color:var(--cyan)">🌌 RANKING DE CONSTELACIONES</b></div>
+    <div class="panel" style="padding:6px 8px">${rows}</div><button class="btn ghost mt8" data-act="close">CERRAR</button></div>`);
+}
 
 /* ============================ TRUEQUE (#2) ============================ */
 function regTradeTpl(o){ return registerTpl({ id:o.tpl, name:o.name, rarity:o.rarity, art_seed:o.art_seed,

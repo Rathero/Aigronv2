@@ -249,6 +249,8 @@ Todas requieren `Authorization: Bearer <token>` salvo `/auth/login`.
 | GET  | `/arena/draft` | 6 candidatos del lote para Arena Sellada (draft en /pvp) |
 | GET  | `/guild` · `/guild/list` | Mi constelación (info+miembros+rango) · ranking de constelaciones |
 | POST | `/guild/create` · `/guild/join` · `/guild/leave` | Fundar (cuesta monedas) · unirse · salir (cede liderazgo o disuelve) |
+| GET  | `/guild/weekly` · POST `/guild/weekly/claim` | Misión semanal de constelación (suma victorias PvP de los miembros) y reclamo |
+| GET  | `/guild/wall` · POST `/guild/wall` | Muro/chat de la constelación (últimos 30; rate-limited) |
 | GET  | `/trades` | Mercado de trueque (ofertas de otros) + mis ofertas |
 | POST | `/trades/create` · `/trades/cancel` · `/trades/accept` | Crear oferta de duplicado · cancelar · aceptar (swap atómico) |
 | GET  | `/health` | Healthcheck (usado por Docker / balanceadores) |
@@ -412,10 +414,13 @@ test de paridad en `npm test`.
   el jugador elige un perfil permanente por instancia (Ofensivo/Defensivo/Veloz),
   horneado en el servidor y revalidado; **no** rompe la evolución determinista (sigue
   siendo función pura de id+nivel: el sendero es estado del jugador). Con tests.
-- ✅ **Constelaciones (gremios)** (`guilds.js`): grupos de jugadores con ranking de
-  constelaciones por **poder agregado** de los miembros (SUM de league_points; sin
-  hooks de escritura nuevos). Fundar (cuesta monedas, `GUILD_COST`), unirse (aforo
-  `GUILD_MAX_MEMBERS`), salir (cede liderazgo o disuelve). UI en el menú ≡.
+- ✅ **Constelaciones (gremios)** (`guilds.js`): **pestaña propia del nav** con
+  sub-pestañas **Miembros / Misión / Muro**. Ranking por **poder agregado** de los
+  miembros (SUM de league_points; sin hooks de escritura nuevos). Fundar (cuesta
+  monedas, `GUILD_COST`), unirse (aforo `GUILD_MAX_MEMBERS`), salir (cede liderazgo o
+  disuelve). **Misión semanal** que suma las victorias PvP de toda la constelación
+  (reusa `weekly_missions.wins`; recompensa por miembro al alcanzar el objetivo).
+  **Muro/chat** (texto escapado, rate-limited, últimos 100).
 - ✅ **Trueque de duplicados** (`trades.js`): intercambio P2P de criaturas **repetidas**
   para completar el álbum (no se comercia poder pagable, §4). El swap cambia el
   propietario de las dos instancias en **una transacción** (BEGIN/COMMIT + bloqueo

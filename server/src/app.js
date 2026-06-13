@@ -1325,6 +1325,26 @@ app.post("/guild/leave", authMiddleware, wrap(async (req, res) => {
   if (out.error) return res.status(400).json(out);
   res.json(out);
 }));
+app.get("/guild/weekly", authMiddleware, wrap(async (req, res) => {
+  const out = await guilds.guildWeekly(req.userId);
+  if (out.error) return res.status(400).json(out);
+  res.json(out);
+}));
+app.post("/guild/weekly/claim", authMiddleware, wrap(async (req, res) => {
+  const out = await guilds.claimGuildWeekly(req.userId);
+  if (out.error) return res.status(400).json(out);
+  res.json(Object.assign(out, { user: userPublic(await getUser(req.userId)) }));
+}));
+app.get("/guild/wall", authMiddleware, wrap(async (req, res) => {
+  const out = await guilds.listMessages(req.userId);
+  if (out.error) return res.status(400).json(out);
+  res.json(out);
+}));
+app.post("/guild/wall", authMiddleware, wrap(async (req, res) => {
+  const out = await guilds.postMessage(req.userId, req.body && req.body.body);
+  if (out.error) return res.status(400).json(out);
+  res.json(out);
+}));
 
 // ------------------------------ TRUEQUE (#2) ---------------------------------
 app.get("/trades", authMiddleware, wrap(async (req, res) => {

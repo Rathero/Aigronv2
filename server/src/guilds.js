@@ -13,9 +13,15 @@
 // =============================================================================
 const db = require("./db");
 const auth = require("./auth");
+const C = require("./config");
+const { weekStart } = require("./leagues");
 
 const GUILD_COST = parseInt(process.env.GUILD_COST || "200", 10); // monedas para fundar (anti-spam)
 const GUILD_MAX_MEMBERS = 20; // aforo
+const GUILD_WEEK_REWARD = { coins: 200, dust: 40 };
+const weekKey = () => C.todayStr(weekStart());
+// Objetivo semanal que escala con el tamaño: constelaciones grandes, más reto.
+const guildWeekGoal = (members) => Math.max(20, members * 8);
 
 function cleanTag(raw) {
   return String(raw || "").toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 4);
@@ -116,4 +122,68 @@ async function listGuilds(limit) {
   return r.rows.map((x, i) => ({ pos: i + 1, id: x.id, name: x.name, tag: x.tag, members: x.members, power: x.power, full: x.members >= GUILD_MAX_MEMBERS }));
 }
 
-module.exports = { createGuild, joinGuild, leaveGuild, myGuild, listGuilds, GUILD_COST, GUILD_MAX_MEMBERS };
+// --------------------------- MISIÓN SEMANAL ---------------------------------
+// Progreso = SUMA de las victorias PvP semanales de los miembros (reusa
+// weekly_missions.wins; sin hooks nuevos). Recompensa reclamable una vez por
+// miembro y semana cuando la constelación alcanza el objetivo.
+async function guildWeekly(userId) {
+  const u = await db.query("SELECT guild_id FROM users WHERE id=$1", [userId]);
+  const gid = u.rows[0] && u.rows[0].guild_id;
+  if (!gid) return { error: "not_in_guild" };
+  const wk = weekKey();
+  const agg = await db.query(
+    `SELECT COALESCE(SUM(wm.wins), 0)::int AS wins, COUNT(DISTINCT m.id)::int AS members
+       FROM users m LEFT JOIN weekly_missions wm ON wm.user_id = m.id AND wm.week_start = $2
+      WHERE m.guild_id = $1`, [gid, wk]);
+  const members = agg.rows[0].members || 1;
+  const progress = agg.rows[0].wins;
+  const goal = guildWeekGoal(members);
+  const claimed = await db.query("SELECT 1 FROM guild_week_claims WHERE guild_id=$1 AND week_start=$2 AND user_id=$3", [gid, wk, userId]);
+  return {
+    progress, goal, members, done: progress >= goal, claimed: claimed.rowCount > 0,
+    reward: GUILD_WEEK_REWARD, label: `Ganad ${goal} combates entre toda la constelación esta semana`,
+  };
+}
+
+async function claimGuildWeekly(userId) {
+  const w = await guildWeekly(userId);
+  if (w.error) return w;
+  if (!w.done) return { error: "not_done" };
+  if (w.claimed) return { error: "already_claimed" };
+  const u = await db.query("SELECT guild_id FROM users WHERE id=$1", [userId]);
+  const gid = u.rows[0].guild_id, wk = weekKey();
+  // INSERT condicional = barrera atómica anti doble cobro.
+  const ins = await db.query(
+    "INSERT INTO guild_week_claims (guild_id, week_start, user_id) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING RETURNING user_id", [gid, wk, userId]);
+  if (!ins.rowCount) return { error: "already_claimed" };
+  await db.query("UPDATE users SET coins=coins+$1, dust=dust+$2 WHERE id=$3", [GUILD_WEEK_REWARD.coins, GUILD_WEEK_REWARD.dust, userId]);
+  return { reward: GUILD_WEEK_REWARD };
+}
+
+// ------------------------------- MURO / CHAT --------------------------------
+async function postMessage(userId, bodyRaw) {
+  const u = await db.query("SELECT guild_id, display_name FROM users WHERE id=$1", [userId]);
+  const gid = u.rows[0] && u.rows[0].guild_id;
+  if (!gid) return { error: "not_in_guild" };
+  const body = String(bodyRaw || "").replace(/\s+/g, " ").trim().slice(0, 200);
+  if (!body) return { error: "empty" };
+  // Rate limit blando: 1 mensaje cada 3s por usuario.
+  const last = await db.query("SELECT created_at FROM guild_messages WHERE user_id=$1 ORDER BY created_at DESC LIMIT 1", [userId]);
+  if (last.rowCount && Date.now() - new Date(last.rows[0].created_at).getTime() < 3000) return { error: "too_fast" };
+  await db.query("INSERT INTO guild_messages (guild_id, user_id, name, body) VALUES ($1,$2,$3,$4)", [gid, userId, u.rows[0].display_name, body]);
+  // Poda: conserva los últimos 100 del muro.
+  await db.query(
+    "DELETE FROM guild_messages WHERE guild_id=$1 AND id NOT IN (SELECT id FROM guild_messages WHERE guild_id=$1 ORDER BY created_at DESC LIMIT 100)", [gid]);
+  return { ok: true };
+}
+
+async function listMessages(userId) {
+  const u = await db.query("SELECT guild_id FROM users WHERE id=$1", [userId]);
+  const gid = u.rows[0] && u.rows[0].guild_id;
+  if (!gid) return { error: "not_in_guild" };
+  const r = await db.query("SELECT name, body, created_at, user_id FROM guild_messages WHERE guild_id=$1 ORDER BY created_at DESC LIMIT 30", [gid]);
+  return { messages: r.rows.map((x) => ({ name: x.name, body: x.body, at: x.created_at, me: x.user_id === userId })) };
+}
+
+module.exports = { createGuild, joinGuild, leaveGuild, myGuild, listGuilds,
+  guildWeekly, claimGuildWeekly, postMessage, listMessages, GUILD_COST, GUILD_MAX_MEMBERS };

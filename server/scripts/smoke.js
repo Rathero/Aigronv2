@@ -188,6 +188,13 @@ async function loginAs(subject) {
   ok(gdup.status === 400, "no se puede unir estando ya en una constelación");
   const gleave = await api(g2.token, "/guild/leave", { method: "POST" });
   ok(gleave.status === 200, "salir de la constelación ok");
+  // Misión semanal de constelación + muro/chat.
+  const gwk = await api(g1.token, "/guild/weekly");
+  ok(gwk.status === 200 && gwk.data.goal >= 20 && gwk.data.done === false, "/guild/weekly trae el objetivo semanal");
+  const gpost = await api(g1.token, "/guild/wall", { method: "POST", body: { body: "hola constelación" } });
+  ok(gpost.status === 200, "/guild/wall publica un mensaje");
+  const gwall = await api(g1.token, "/guild/wall");
+  ok(gwall.status === 200 && gwall.data.messages.some((m) => m.body === "hola constelación"), "/guild/wall lista el mensaje");
 
   // --- Trueque (#2): endpoints + guardas (el swap completo requiere duplicados) ---
   const tg = await api(t1, "/trades");

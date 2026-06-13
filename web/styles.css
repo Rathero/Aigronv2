@@ -528,6 +528,12 @@ h2.title small{font-family:var(--ui);font-size:13px;color:var(--ink-dim);font-we
 .trade-side{flex:1;text-align:center;min-width:0}
 .trade-spr canvas,.trade-spr .aigimg{width:54px;image-rendering:pixelated;display:block;margin:0 auto;background:#0a081880}
 .trade-arrow{font-size:20px;color:var(--cyan);flex:0 0 auto;text-shadow:0 0 6px rgba(52,245,228,.6)}
+/* muro / chat de la constelación */
+.gmsg{border-bottom:1px solid var(--line);padding:6px 2px}
+.gmsg:last-child{border-bottom:none}
+.gmsg.me .gm-b{color:var(--cyan)}
+.gmsg .gm-h b{font-size:12px;color:var(--gold)}
+.gmsg .gm-b{font-size:14px;line-height:1.4;word-break:break-word;margin-top:2px}
 
 /* aviso de recap en INICIO cuando el mes está por terminar */
 .recap-cta{display:flex;align-items:center;gap:10px;border:2px solid var(--gold);background:var(--panel);

@@ -320,6 +320,27 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS guild_id UUID REFERENCES guilds(id) O
 ALTER TABLE users ADD COLUMN IF NOT EXISTS guild_joined_at TIMESTAMPTZ;
 CREATE INDEX IF NOT EXISTS idx_users_guild ON users(guild_id);
 
+-- Muro / chat de la constelación (texto plano; se ESCAPA al renderizar).
+CREATE TABLE IF NOT EXISTS guild_messages (
+  id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  guild_id   UUID NOT NULL REFERENCES guilds(id) ON DELETE CASCADE,
+  user_id    UUID REFERENCES users(id) ON DELETE SET NULL,
+  name       TEXT NOT NULL,
+  body       TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_gmsg ON guild_messages(guild_id, created_at DESC);
+
+-- Reclamo de la MISIÓN SEMANAL de constelación (uno por miembro y semana). El
+-- progreso se agrega de las victorias PvP semanales de los miembros (sin hooks
+-- nuevos: reusa weekly_missions.wins).
+CREATE TABLE IF NOT EXISTS guild_week_claims (
+  guild_id   UUID NOT NULL REFERENCES guilds(id) ON DELETE CASCADE,
+  week_start DATE NOT NULL,
+  user_id    UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  PRIMARY KEY (guild_id, week_start, user_id)
+);
+
 -- TRUEQUE (#2): ofertas de intercambio de DUPLICADOS entre jugadores. El que
 -- ofrece "reserva" una instancia suya; cualquiera con una instancia de la
 -- plantilla deseada puede aceptar. El swap es transaccional (cambia el owner de
