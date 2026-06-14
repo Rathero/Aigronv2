@@ -169,29 +169,37 @@
     EGIDA: { name: "Égida", cost: 4, kind: "shield", amt: 0.2, team: true },
     DRENAJE: { name: "Drenaje", cost: 3, kind: "drain", mult: 1.6, drain: 0.5 },
     MORDISCO: { name: "Mordisco", cost: 2, kind: "drain", mult: 1.4, drain: 0.6 },
+    // --- KIT DE ESTADOS (counterplay PvP): romper-DEF, ralentizar/acelerar,
+    //     provocar, limpiar e inmunidad. Crean el triángulo buff/debuff. ---
+    QUIEBRE: { name: "Quiebre", cost: 3, kind: "defBreak", amt: 0.4, turns: 2 },
+    LASTRE: { name: "Lastre", cost: 2, kind: "slow", amt: 0.35, turns: 2 },
+    VENDAVAL: { name: "Vendaval", cost: 3, kind: "haste", amt: 0.3, turns: 2, team: true },
+    PROVOCAR: { name: "Provocar", cost: 2, kind: "taunt", amt: 0.25, turns: 2 },
+    PURIFICAR: { name: "Purificar", cost: 3, kind: "cleanse", team: true },
+    SANTUARIO: { name: "Santuario", cost: 4, kind: "immunity", turns: 2, team: true },
   };
   // 3-4 habilidades por tipo; genTemplate elige una al azar del pool.
   const ABILITY_BY_TYPE = {
-    VOLCAN: ["ERUPCION_LENTA", "LLAMARADA", "QUEMADURA", "TAJO"],
-    NIEBLA: ["NIEBLA_DENSA", "CEGUERA", "VENENO", "MARCA_FATAL"],
-    CRISTAL: ["MURO_CRISTAL", "BARRERA", "CORAZA", "RAYO"],
-    RELOJ: ["ROBO_DE_TIEMPO", "ATURDIR", "MARCA_FATAL", "CEGUERA"],
-    VACIO: ["COLAPSO_VACIO", "SACRIFICIO", "DRENAJE", "AVALANCHA"],
-    BESTIA: ["FRENESI_BESTIA", "MORDISCO", "TAJO", "SACRIFICIO"],
-    PLANTA: ["RAICES", "REGENERAR", "VENENO", "CURA_MENOR"],
-    TORMENTA: ["RAYO", "AVALANCHA", "ATURDIR", "LLAMARADA"],
-    METAL: ["MURO_CRISTAL", "BARRERA", "CORAZA", "TAJO"],
-    HUESO: ["SACRIFICIO", "VENENO", "MORDISCO", "MARCA_FATAL"],
-    SOMBRA: ["MARCA_FATAL", "VENENO", "DRENAJE", "ATURDIR"],
-    LUMEN: ["RAYO", "EGIDA", "REGENERAR", "LLAMARADA"],
-    HIELO: ["ESCARCHA", "MURO_CRISTAL", "CEGUERA", "CORAZA"],
-    MAREA: ["REGENERAR", "COLAPSO_VACIO", "ALIENTO", "DRENAJE"],
-    ARENA: ["FRENESI_BESTIA", "BARRERA", "TAJO", "QUEMADURA"],
-    TOXICO: ["VENENO", "QUEMADURA", "MARCA_FATAL", "DRENAJE"],
-    ECO: ["ROBO_DE_TIEMPO", "ATURDIR", "AVALANCHA", "RAYO"],
-    RUNA: ["ESCUDO_EQUIPO", "EGIDA", "REGENERAR", "BARRERA"],
-    PLUMA: ["ROBO_DE_TIEMPO", "RAICES", "CURA_MENOR", "RAYO"],
-    HONGO: ["VENENO", "RAICES", "DRENAJE", "REGENERAR"],
+    VOLCAN: ["ERUPCION_LENTA", "LLAMARADA", "QUEMADURA", "TAJO", "QUIEBRE"],
+    NIEBLA: ["NIEBLA_DENSA", "CEGUERA", "VENENO", "MARCA_FATAL", "LASTRE"],
+    CRISTAL: ["MURO_CRISTAL", "BARRERA", "CORAZA", "RAYO", "PROVOCAR"],
+    RELOJ: ["ROBO_DE_TIEMPO", "ATURDIR", "MARCA_FATAL", "CEGUERA", "VENDAVAL"],
+    VACIO: ["COLAPSO_VACIO", "SACRIFICIO", "DRENAJE", "AVALANCHA", "QUIEBRE"],
+    BESTIA: ["FRENESI_BESTIA", "MORDISCO", "TAJO", "SACRIFICIO", "PROVOCAR"],
+    PLANTA: ["RAICES", "REGENERAR", "VENENO", "CURA_MENOR", "PURIFICAR"],
+    TORMENTA: ["RAYO", "AVALANCHA", "ATURDIR", "LLAMARADA", "VENDAVAL"],
+    METAL: ["MURO_CRISTAL", "BARRERA", "CORAZA", "TAJO", "PROVOCAR"],
+    HUESO: ["SACRIFICIO", "VENENO", "MORDISCO", "MARCA_FATAL", "SANTUARIO"],
+    SOMBRA: ["MARCA_FATAL", "VENENO", "DRENAJE", "ATURDIR", "LASTRE"],
+    LUMEN: ["RAYO", "EGIDA", "REGENERAR", "LLAMARADA", "PURIFICAR", "SANTUARIO"],
+    HIELO: ["ESCARCHA", "MURO_CRISTAL", "CEGUERA", "CORAZA", "LASTRE"],
+    MAREA: ["REGENERAR", "COLAPSO_VACIO", "ALIENTO", "DRENAJE", "PURIFICAR"],
+    ARENA: ["FRENESI_BESTIA", "BARRERA", "TAJO", "QUEMADURA", "PROVOCAR"],
+    TOXICO: ["VENENO", "QUEMADURA", "MARCA_FATAL", "DRENAJE", "QUIEBRE"],
+    ECO: ["ROBO_DE_TIEMPO", "ATURDIR", "AVALANCHA", "RAYO", "VENDAVAL"],
+    RUNA: ["ESCUDO_EQUIPO", "EGIDA", "REGENERAR", "BARRERA", "SANTUARIO", "PURIFICAR"],
+    PLUMA: ["ROBO_DE_TIEMPO", "RAICES", "CURA_MENOR", "RAYO", "VENDAVAL"],
+    HONGO: ["VENENO", "RAICES", "DRENAJE", "REGENERAR", "PURIFICAR"],
   };
 
   // --------------------------------- Economía --------------------------------
@@ -445,7 +453,10 @@
       energy: 0, team,
       atkMul: 1, defMul: 1, atkTurns: 0, defTurns: 0,
       critDownTurns: 0, critDownAmt: 0, markTurns: 0, markAmt: 0,
-      guarding: false, poisonTurns: 0, poisonAmt: 0, stunTurns: 0, shield: 0, mods: {},
+      guarding: false, poisonTurns: 0, poisonAmt: 0, stunTurns: 0, shield: 0,
+      // Kit de estados (counterplay PvP): romper-DEF, ralentizar/acelerar, provocar, inmunidad.
+      spdMul: 1, spdTurns: 0, defBreakTurns: 0, defBreakAmt: 0, tauntTurns: 0, immuneTurns: 0,
+      mods: {},
     };
   }
   // Construye una unidad a partir de stats ya escalados (snapshot/publicUnit).
@@ -459,7 +470,9 @@
       energy: s.startEnergy || 0, team,
       atkMul: 1, defMul: 1, atkTurns: 0, defTurns: 0,
       critDownTurns: 0, critDownAmt: 0, markTurns: 0, markAmt: 0,
-      guarding: false, poisonTurns: 0, poisonAmt: 0, stunTurns: 0, shield: 0, mods: {},
+      guarding: false, poisonTurns: 0, poisonAmt: 0, stunTurns: 0, shield: 0,
+      spdMul: 1, spdTurns: 0, defBreakTurns: 0, defBreakAmt: 0, tauntTurns: 0, immuneTurns: 0,
+      mods: {},
     };
   }
 
@@ -555,7 +568,10 @@
 
   // ATK/DEF efectivos según la CLASE del atacante: físico usa atkP/defP, especial atkS/defS.
   const effAtk = (u) => (isPhysical(u.type) ? u.atkP : u.atkS) * u.atkMul;
-  const effDef = (att, tgt) => (isPhysical(att.type) ? tgt.defP : tgt.defS) * tgt.defMul;
+  // DEF efectiva: incluye ROMPER DEFENSA (debuff temporal) además del defMul de buffs.
+  const effDef = (att, tgt) => (isPhysical(att.type) ? tgt.defP : tgt.defS) * tgt.defMul * (tgt.defBreakTurns > 0 ? (1 - tgt.defBreakAmt) : 1);
+  // SPD efectiva: incluye acelerar/ralentizar (afecta orden de turno y crítico).
+  const effSpd = (u) => u.spd * (u.spdTurns > 0 ? (u.spdMul || 1) : 1);
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
   const alive = (arr) => arr.filter((u) => u.hp > 0);
   function pickTarget(foes) {
@@ -573,6 +589,13 @@
   // intercepta el golpe (protege a sus aliados); si no, el objetivo deseado (si vive)
   // o, en su defecto, el de menor HP%. Los AoE no se redirigen (golpean a todos).
   function resolveTarget(desiredUid, foes) {
+    // PROVOCAR (taunt): un enemigo que provoca FUERZA a que le apunten (por encima
+    // del objetivo deseado). Si además hay guardia entre los provocadores, intercepta.
+    const taunters = alive(foes).filter((f) => f.tauntTurns > 0);
+    if (taunters.length) {
+      const g = taunters.filter((f) => f.guarding);
+      return (g.length ? g : taunters).sort((a, b) => (a.uid < b.uid ? -1 : 1))[0];
+    }
     const guards = alive(foes).filter((f) => f.guarding);
     if (guards.length) return guards.sort((a, b) => (a.uid < b.uid ? -1 : 1))[0];
     if (desiredUid) { const t = foes.find((f) => f.uid === desiredUid && f.hp > 0); if (t) return t; }
@@ -586,7 +609,7 @@
     const defv = effDef(att, tgt) * (1 - (opt.ignoreDef || 0));
     const typeM = typeEff(att.type, typesOf(tgt)); // tipo primario del atacante vs ambos tipos del defensor
     // Reliquia: +crítico (CRISTAL_AFILADO). mods por defecto 0 => combate normal intacto.
-    const critP = clamp(0.05 + (att.spd - tgt.spd) / 1000 - (tgt.critDownTurns > 0 ? tgt.critDownAmt : 0) + (am.critBonus || 0), 0.02, 0.5);
+    const critP = clamp(0.05 + (effSpd(att) - effSpd(tgt)) / 1000 - (tgt.critDownTurns > 0 ? tgt.critDownAmt : 0) + (am.critBonus || 0), 0.02, 0.5);
     const crit = opt.crit || rng() < critP;
     const critM = crit ? 1.8 : 1;
     const markM = tgt.markTurns > 0 ? 1 + tgt.markAmt : 1;
@@ -613,6 +636,11 @@
     if (u.defTurns > 0) { u.defTurns--; if (u.defTurns === 0) u.defMul = 1; }
     if (u.critDownTurns > 0) u.critDownTurns--;
     if (u.markTurns > 0) u.markTurns--;
+    // Kit de estados (counterplay): decae igual que el resto, al inicio del turno propio.
+    if (u.spdTurns > 0) { u.spdTurns--; if (u.spdTurns === 0) u.spdMul = 1; }
+    if (u.defBreakTurns > 0) u.defBreakTurns--;
+    if (u.tauntTurns > 0) u.tauntTurns--;
+    if (u.immuneTurns > 0) u.immuneTurns--;
     if (u.guarding) u.guarding = false;
   }
   // Estados al inicio del turno de la unidad (tras decBuffs): aplica DAÑO POR TURNO
@@ -623,6 +651,14 @@
     let stunned = false;
     if (u.hp > 0 && u.stunTurns > 0) { stunned = true; u.stunTurns--; }
     return { poison, stunned };
+  }
+
+  // Aplica un DEBUFF respetando la INMUNIDAD: si el objetivo es inmune, lo bloquea
+  // y lo anota en action.immune (para que la UI muestre "inmune"). No consume rng.
+  function applyDebuff(tgt, action, fn) {
+    if (tgt.immuneTurns > 0) { (action.immune = action.immune || []).push(tgt.uid); return false; }
+    fn(tgt);
+    return true;
   }
 
   const OVERCHARGE_EXTRA = 2;   // energía extra para sobrecargar
@@ -673,8 +709,15 @@
           u.atkMul = 1 + ab.amt; u.atkTurns = 99;
           if (ab.defDown) { u.defMul = 1 - ab.defDown; u.defTurns = 99; }
           break;
-        case "critDown": { const t = resolveTarget(intent.target, foes); if (t) { t.critDownTurns = ab.turns; t.critDownAmt = ab.amt; } break; }
-        case "mark": { const t = resolveTarget(intent.target, foes); if (t) { t.markTurns = ab.turns; t.markAmt = ab.amt; } break; }
+        case "critDown": { const t = resolveTarget(intent.target, foes); if (t) applyDebuff(t, action, (x) => { x.critDownTurns = ab.turns; x.critDownAmt = ab.amt; }); break; }
+        case "mark": { const t = resolveTarget(intent.target, foes); if (t) applyDebuff(t, action, (x) => { x.markTurns = ab.turns; x.markAmt = ab.amt; }); break; }
+        // --- Kit de estados (counterplay) ---
+        case "defBreak": { const t = resolveTarget(intent.target, foes); if (t) applyDebuff(t, action, (x) => { x.defBreakTurns = ab.turns; x.defBreakAmt = ab.amt; }); break; }
+        case "slow": { const t = resolveTarget(intent.target, foes); if (t) applyDebuff(t, action, (x) => { x.spdTurns = ab.turns; x.spdMul = 1 - ab.amt; }); break; }
+        case "haste": (ab.team ? alive(mine) : [u]).forEach((x) => { x.spdTurns = ab.turns; x.spdMul = 1 + ab.amt; }); break;
+        case "taunt": u.tauntTurns = ab.turns; if (ab.amt) { u.defMul = 1 + ab.amt; u.defTurns = ab.turns; } break;
+        case "immunity": (ab.team ? alive(mine) : [u]).forEach((x) => { x.immuneTurns = Math.max(x.immuneTurns || 0, ab.turns); }); break;
+        case "cleanse": (ab.team ? alive(mine) : [u]).forEach((x) => { x.poisonTurns = 0; x.stunTurns = 0; x.markTurns = 0; x.critDownTurns = 0; x.defBreakTurns = 0; x.spdTurns = 0; x.spdMul = 1; }); break;
         case "heal": u.hp = Math.min(u.hpMax, u.hp + Math.round(u.hpMax * ab.amt * M)); break;
         case "healTeam": alive(mine).forEach((x) => (x.hp = Math.min(x.hpMax, x.hp + Math.round(x.hpMax * ab.amt * M)))); break;
         case "double": {
@@ -682,8 +725,8 @@
           const b = resolveTarget(intent.target, foes); if (b) action.hits.push(dealDamage(rng, u, b, M, {}));
           break;
         }
-        case "dot": { const t = resolveTarget(intent.target, foes); if (t) { t.poisonTurns = ab.turns; t.poisonAmt = ab.amt; action.statusTgt = t.uid; } break; }
-        case "stun": { const t = resolveTarget(intent.target, foes); if (t) { t.stunTurns = ab.turns; action.statusTgt = t.uid; } break; }
+        case "dot": { const t = resolveTarget(intent.target, foes); if (t && applyDebuff(t, action, (x) => { x.poisonTurns = ab.turns; x.poisonAmt = ab.amt; })) action.statusTgt = t.uid; break; }
+        case "stun": { const t = resolveTarget(intent.target, foes); if (t && applyDebuff(t, action, (x) => { x.stunTurns = ab.turns; })) action.statusTgt = t.uid; break; }
         case "shield": (ab.team ? alive(mine) : [u]).forEach((x) => { x.shield = (x.shield || 0) + Math.round(x.hpMax * ab.amt * M); }); break;
         case "drain": {
           const t = resolveTarget(intent.target, foes);
@@ -717,7 +760,7 @@
 
   // Orden de turno determinista: mayor SPD primero; empate -> equipo A antes que B.
   function turnOrder(teamA, teamB) {
-    return alive(teamA.concat(teamB)).sort((a, b) => b.spd - a.spd || (a.team < b.team ? -1 : 1));
+    return alive(teamA.concat(teamB)).sort((a, b) => effSpd(b) - effSpd(a) || (a.team < b.team ? -1 : 1));
   }
 
   // Construye el `intent` a partir de una decisión { action, target, overcharge }.

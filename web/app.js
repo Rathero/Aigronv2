@@ -316,9 +316,12 @@ function abilityShort(id){const a=ABILITIES[id];return {
   mark:`Marca: +${a.amt*100}% daño recibido ${a.turns}t`, heal:`Cura ${a.amt*100}% propia`,
   healTeam:`Cura ${a.amt*100}% al equipo`, double:`2 ataques`,
   dot:`Veneno: ${Math.round(a.amt*100)}% vida/turno ${a.turns}t`, stun:`Aturde ${a.turns}t`,
-  shield:`Escudo ${a.amt*100}% ${a.team?"equipo":"propio"}`, drain:`Daño ×${a.mult}, cura ${a.drain*100}%`}[a.kind];}
+  shield:`Escudo ${a.amt*100}% ${a.team?"equipo":"propio"}`, drain:`Daño ×${a.mult}, cura ${a.drain*100}%`,
+  defBreak:`Rompe DEF: −${a.amt*100}% DEF rival ${a.turns}t`, slow:`Ralentiza: −${a.amt*100}% SPD ${a.turns}t`,
+  haste:`Acelera: +${a.amt*100}% SPD ${a.team?"equipo":"propio"} ${a.turns}t`, taunt:`Provoca ${a.turns}t (te apuntan)`,
+  cleanse:`Limpia estados ${a.team?"al equipo":"propios"}`, immunity:`Inmunidad a debuffs ${a.team?"equipo":"propia"} ${a.turns}t`}[a.kind];}
 // Categoría rápida.
-function abilityKind(id){const a=ABILITIES[id];return {dmg:"Daño",aoe:"Daño en área",buffDef:"Defensa",buffAtk:"Mejora",critDown:"Debilita",mark:"Debilita",heal:"Cura",healTeam:"Cura equipo",double:"Daño",dot:"Veneno",stun:"Control",shield:"Escudo",drain:"Drenar"}[a.kind];}
+function abilityKind(id){const a=ABILITIES[id];return {dmg:"Daño",aoe:"Daño en área",buffDef:"Defensa",buffAtk:"Mejora",critDown:"Debilita",mark:"Debilita",heal:"Cura",healTeam:"Cura equipo",double:"Daño",dot:"Veneno",stun:"Control",shield:"Escudo",drain:"Drenar",defBreak:"Romper DEF",slow:"Control",haste:"Apoyo",taunt:"Tanque",cleanse:"Apoyo",immunity:"Apoyo"}[a.kind];}
 // Versión CLARA y explicada (para el detalle del aigrón).
 function abilityEffect(id){const a=ABILITIES[id];return {
   dmg:`Golpe fuerte a un enemigo: hace ${a.mult}× tu ataque`+(a.ignoreDef?`, ignorando el ${a.ignoreDef*100}% de su defensa`:"")+(a.crit?", siempre crítico":"")+(a.selfHp?`. Pierdes el ${a.selfHp*100}% de tu vida`:""),
@@ -333,7 +336,13 @@ function abilityEffect(id){const a=ABILITIES[id];return {
   dot:`Envenena a un enemigo: pierde el ${Math.round(a.amt*100)}% de su vida máxima cada turno durante ${a.turns} turnos (ignora defensa).`,
   stun:`Aturde a un enemigo: se salta su próxima acción (${a.turns} turno${a.turns>1?'s':''}).`,
   shield:`Da un escudo que absorbe daño (${a.amt*100}% de la vida máxima) ${a.team?"a todo tu equipo":"a esta criatura"} antes de tocar el HP.`,
-  drain:`Daña a un enemigo (${a.mult}× tu ataque) y te curas el ${a.drain*100}% del daño hecho.`}[a.kind];}
+  drain:`Daña a un enemigo (${a.mult}× tu ataque) y te curas el ${a.drain*100}% del daño hecho.`,
+  defBreak:`Rompe la defensa de un enemigo: −${a.amt*100}% DEF durante ${a.turns} turnos. Combínalo con golpes fuertes para reventarlo.`,
+  slow:`Ralentiza a un enemigo: −${a.amt*100}% de velocidad ${a.turns} turnos (actúa más tarde y es más fácil de criticar).`,
+  haste:`Acelera ${a.team?"a todo tu equipo":"a esta criatura"}: +${a.amt*100}% de velocidad ${a.turns} turnos (actuáis antes).`,
+  taunt:`Provoca: durante ${a.turns} turnos los enemigos se ven OBLIGADos a atacarte`+(a.amt?` (+${a.amt*100}% DEF mientras dura)`:"")+`. Protege a tu equipo.`,
+  cleanse:`Limpia TODOS los estados negativos (veneno, marca, lentitud, romper-DEF…) ${a.team?"de todo tu equipo":"de esta criatura"}.`,
+  immunity:`Concede INMUNIDAD a debuffs ${a.team?"a todo tu equipo":"a esta criatura"} durante ${a.turns} turnos: bloquea veneno, aturde, marca, etc.`}[a.kind];}
 function cardHTML(inst,extra){const t=inst.template;
   // Variante cosmética: áurea (premio gordo) o prismática. Badge + clase de brillo.
   const variant=FEATURES.prismatic?(inst.variant||ENGINE.variantOf(inst.instance_id)):null;
@@ -1635,7 +1644,9 @@ function refreshArena(){
     u.hpEl.style.width=(Math.max(0,u.hp)/u.hpMax*100)+"%";
     u.hpEl.style.background=u.hp/u.hpMax<0.3?"var(--red)":u.hp/u.hpMax<0.6?"var(--gold)":"var(--green)";
     if(u.hpNumEl){
-      const badges=(u.shield>0?" 🛡"+u.shield:"")+(u.poisonTurns>0?" ☠":"")+(u.stunTurns>0?" 💫":"");
+      const badges=(u.shield>0?" 🛡"+u.shield:"")+(u.poisonTurns>0?" ☠":"")+(u.stunTurns>0?" 💫":"")
+        +(u.defBreakTurns>0?" ⛏":"")+(u.tauntTurns>0?" 🎯":"")+(u.immuneTurns>0?" ✨":"")
+        +(u.spdTurns>0?(u.spdMul>1?" 💨":" 🐌"):"")+(u.markTurns>0?" 🔻":"");
       u.hpNumEl.innerHTML = (u.hp<=0?"☠️":(Math.max(0,Math.round(u.hp))+"/"+u.hpMax))+'<span style="font-size:9px">'+badges+'</span>';
     }
     if(u.hp<=0){ if(!u._died){ u._died=true; u.el.classList.add("dying"); sparks(u,"var(--red)",12);

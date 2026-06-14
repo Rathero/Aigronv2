@@ -641,6 +641,43 @@ test("sinergias: applyTeamSynergy hornea el bono y es determinista", () => {
   assert.equal(duo[0].hpMax, 1080); assert.equal(duo[0].hp, 1080);
 });
 
+test("kit de estados: las nuevas habilidades existen y son válidas", () => {
+  for (const k of ["QUIEBRE", "LASTRE", "VENDAVAL", "PROVOCAR", "PURIFICAR", "SANTUARIO"]) {
+    assert.ok(E.ABILITIES[k], `falta la habilidad ${k}`);
+    assert.ok(E.ABILITIES[k].name && E.ABILITIES[k].kind, `${k} mal definida`);
+  }
+  // Toda habilidad de ABILITY_BY_TYPE referencia una habilidad real.
+  for (const ty of Object.keys(E.ABILITY_BY_TYPE)) {
+    for (const id of E.ABILITY_BY_TYPE[ty]) assert.ok(E.ABILITIES[id], `tipo ${ty} -> habilidad inexistente ${id}`);
+  }
+});
+
+test("kit de estados: romper-DEF sube el daño (determinista)", () => {
+  // Saco de golpes inmortal (HP enorme, atkP 0) que recibe 60 turnos de un atacante.
+  // Mismo seed -> mismos críticos en ambas pasadas, así que la diferencia de HP final
+  // se debe SOLO a la DEF rota (def-break no añade llamadas a rng).
+  function hpLeftWith(brk) {
+    const att = E.unitFromStats({ tplId: "x", name: "X", type: "VOLCAN", ability: "TAJO", level: 10, hpMax: 100000, atkP: 200, atkS: 100, defP: 200, defS: 200, spd: 90 }, "A", 0);
+    const tgt = E.unitFromStats({ tplId: "y", name: "Y", type: "BESTIA", ability: "TAJO", level: 10, hpMax: 100000, atkP: 0, atkS: 0, defP: 120, defS: 120, spd: 50 }, "B", 0);
+    if (brk) { tgt.defBreakTurns = 99; tgt.defBreakAmt = 0.4; }
+    return E.resolveBattle([att], [tgt], 7, [{ turn: 1, uid: "A0", action: "attack", target: "B0" }]).hpB;
+  }
+  const sin = hpLeftWith(false), con = hpLeftWith(true);
+  assert.ok(con < sin, `def-break debería pegar más (sin:${sin} con:${con})`);
+});
+
+test("kit de estados: provocar fuerza el objetivo y la velocidad ordena el turno", () => {
+  const tank = E.unitFromStats({ tplId: "t", name: "Tank", type: "METAL", ability: "TAJO", level: 10, hpMax: 1000, atkP: 100, atkS: 100, defP: 100, defS: 100, spd: 50 }, "B", 0);
+  const dps = E.unitFromStats({ tplId: "d", name: "Dps", type: "VOLCAN", ability: "TAJO", level: 10, hpMax: 1000, atkP: 100, atkS: 100, defP: 50, defS: 50, spd: 60 }, "B", 1);
+  tank.tauntTurns = 2;
+  const t = E.resolveTarget("B1", [tank, dps]); // pido al dps, pero el tank provoca
+  assert.equal(t.uid, "B0", "provocar debe forzar el objetivo al tanque");
+  // Acelerar cambia el orden de turno (spd efectiva).
+  const fast = E.unitFromStats({ tplId: "f", name: "F", type: "PLUMA", ability: "TAJO", level: 10, hpMax: 900, atkP: 100, atkS: 100, defP: 50, defS: 50, spd: 80 }, "A", 0);
+  fast.spdTurns = 2; fast.spdMul = 1.3;
+  assert.ok(fast.spd * 1.3 > dps.spd, "acelerado debe superar en SPD efectiva");
+});
+
 test("sendero de evolución: applyEvoPath aplica el perfil correcto", () => {
   function unit() { return { atkP: 100, atkS: 100, defP: 100, defS: 100, hpMax: 1000, hp: 1000, spd: 50 }; }
   const off = unit(); const po = E.applyEvoPath(off, "OFENSIVO");

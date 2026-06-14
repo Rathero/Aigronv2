@@ -295,6 +295,13 @@ tienda. Enemigos escalan en **rareza y nivel** por profundidad. El servidor es a
 3. **Guardia**: una unidad protege a sus aliados un turno (intercepta golpes de objetivo
    único, −40% daño). La IA también la usa.
 4. **Sobrecarga**: con energía de sobra, una habilidad pega/cura ×1.5.
+5. **Kit de estados (counterplay)** — el triángulo buff/debuff que da profundidad al
+   PvP (`web/engine.js`): **Quiebre** (romper −DEF), **Lastre/Vendaval**
+   (ralentizar/acelerar → afecta el orden de turno y el crítico), **Provocar**
+   (taunt: fuerza que te apunten), **Purificar** (cleanse) y **Santuario**
+   (inmunidad a debuffs). Deterministas, con paridad y revalidados; repartidos por
+   tipo en `ABILITY_BY_TYPE` (tanques provocan, soportes limpian/protegen, control
+   ralentiza). La inmunidad bloquea veneno/aturde/marca/quiebre/lentitud.
 
 ---
 
