@@ -967,18 +967,35 @@ app.post("/battle/resolve", authMiddleware, wrap(async (req, res) => {
   const snapEnd = (team) => team.map((x) => ({ uid: x.uid, hp: Math.round(x.hp) }));
   const replay = { you: "A", team: frozen.team, opponent: frozen.opponent, log: result.log,
     end: { A: snapEnd(A), B: snapEnd(B) } };
-  const award = await awardBattleResult({ user: u, win, abilitiesUsed, defenderId: offer.defender_id, seed: offer.seed | 0, replay });
+  // Rating del defensor para el cálculo Elo (null si fue bot -> delta mínimo).
+  let opponentLp = null;
+  if (offer.defender_id) {
+    const dl = await db.query("SELECT league_points FROM users WHERE id=$1", [offer.defender_id]);
+    if (dl.rowCount) opponentLp = dl.rows[0].league_points;
+  }
+  const award = await awardBattleResult({ user: u, win, abilitiesUsed, defenderId: offer.defender_id, seed: offer.seed | 0, replay, opponentLp });
 
-  res.json({ win, coins: award.coins, leaguePoints: award.leaguePoints, league: award.league, energy: award.energy, log: result.log, turns: result.turns, pvp: !!offer.defender_id });
+  res.json({ win, coins: award.coins, leaguePoints: award.leaguePoints, lpDelta: award.lpDelta, league: award.league, energy: award.energy, log: result.log, turns: result.turns, pvp: !!offer.defender_id });
 }));
 
 // Aplica el resultado de un combate a un usuario: monedas, puntos de liga (±),
 // energía −1, registro en `battles`, `daily_scores` y misiones. Reutilizado por el
 // combate PvE (/battle/resolve) y por el PvP en vivo (pvp.js, ambos jugadores).
 // `user` debe venir ya con la energía sincronizada (syncEnergy).
-async function awardBattleResult({ user, win, abilitiesUsed = 0, defenderId = null, seed = 0, replay = null }) {
+// Delta de rating ESTILO ELO: ganar a uno mejor sube mucho; perder contra uno
+// peor baja mucho. Justo y auto-equilibrante (la base de un PvP serio). Si no hay
+// rival con rating (bot de respaldo) -> delta pequeño y fijo, para no contaminar
+// el ladder con partidas contra IA (integridad competitiva).
+function eloDelta(myLp, oppLp, win) {
+  if (oppLp == null) return win ? 6 : -2;                 // bot: casi no mueve MMR
+  const expected = 1 / (1 + Math.pow(10, (oppLp - myLp) / 400));
+  const K = 28;
+  const d = Math.round(K * ((win ? 1 : 0) - expected));
+  return win ? Math.max(5, Math.min(40, d)) : Math.max(-40, Math.min(-3, d));
+}
+async function awardBattleResult({ user, win, abilitiesUsed = 0, defenderId = null, seed = 0, replay = null, opponentLp = null }) {
   const coins = win ? 40 : 8;
-  const lpDelta = win ? 12 : -6;
+  const lpDelta = eloDelta(user.league_points || 0, opponentLp, win);
   // Deltas atómicos en SQL (no valores absolutos leídos antes): dos combates
   // concurrentes del mismo usuario no se pisan ni duplican recompensas.
   const upd = await db.query(
@@ -1015,7 +1032,7 @@ async function awardBattleResult({ user, win, abilitiesUsed = 0, defenderId = nu
     await bumpMission(user.id, "wins", 1);
   }
   if (abilitiesUsed > 0) await bumpMission(user.id, "abilities", abilitiesUsed);
-  return { coins, leaguePoints: newLp, league, energy: newEnergy };
+  return { coins, leaguePoints: newLp, league, energy: newEnergy, lpDelta };
 }
 
 // --------------------------------- RANKINGS ----------------------------------

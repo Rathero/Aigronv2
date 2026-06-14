@@ -1518,7 +1518,8 @@ function pvpOver(m){
   openOverlay(`<div class="center">
     <div style="font-family:var(--pixel);font-size:16px;color:${won?'var(--green)':'var(--red)'};margin:6px 0 10px">${won?'¡VICTORIA!':'DERROTA'}</div>
     <div class="dim" style="font-size:13px">${m.reason==='opponent_left'?(won?'Tu rival abandonó.':'Abandonaste.'):'Combate PvP en vivo terminado.'}</div>
-    <div style="margin:12px 0;font-size:14px">Liga <b>${m.league}</b> · ${m.leaguePoints} pts</div>
+    ${m.lpDelta!=null?`<div style="font-family:var(--pixel);font-size:15px;margin:8px 0 2px;color:${m.lpDelta>=0?'var(--green)':'var(--red)'}">${m.lpDelta>=0?'+':''}${m.lpDelta} <span style="font-size:10px;color:var(--ink-dim)">RATING</span></div>`:''}
+    <div style="margin:6px 0 12px;font-size:14px">Liga <b>${m.league}</b> · ${m.leaguePoints} pts</div>
     ${CB&&CB.duelCode&&m.reason!=='opponent_left'?`<button class="btn mag mb8" data-act="rematch" style="width:100%">🔁 REVANCHA (código ${esc(CB.duelCode)})</button>`:''}
     <button class="btn" data-act="pvpDone" style="width:100%">CONTINUAR</button></div>`);
   if(PVP){ try{PVP.ws.close();}catch(e){} PVP=null; }

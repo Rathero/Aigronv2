@@ -248,18 +248,26 @@ function attachPvp(server, deps) {
     const aliveA = match.teams.A.some((u) => u.hp > 0), aliveB = match.teams.B.some((u) => u.hp > 0);
     const winner = opts.winner || (aliveA && (!aliveB || teamHp(match.teams.A) >= teamHp(match.teams.B)) ? "A" : "B");
     const snapEnd = (team) => team.map((x) => ({ uid: x.uid, hp: Math.round(x.hp) }));
+    // Ratings ANTES de actualizar: el Elo de cada uno usa el del rival pre-combate
+    // (justo e independiente del orden en que se cobra). Bot -> null (delta mínimo).
+    const preLp = {};
+    for (const role of ["A", "B"]) {
+      const p = match.players[role];
+      preLp[role] = (!p.bot && p.userId) ? (((await getUser(p.userId)) || {}).league_points ?? null) : null;
+    }
     for (const role of ["A", "B"]) {
       const p = match.players[role];
       if (p.bot) continue; // el bot no cobra ni recibe mensajes
-      const foe = match.players[role === "A" ? "B" : "A"];
+      const foeRole = role === "A" ? "B" : "A";
+      const foe = match.players[foeRole];
       try {
         const u = await syncEnergy(await getUser(p.userId));
         if (u) {
           // Replay desde la PERSPECTIVA de cada jugador (you = su rol real).
-          const replay = match.fullLog ? { you: role, team: match.pub[role], opponent: match.pub[role === "A" ? "B" : "A"],
+          const replay = match.fullLog ? { you: role, team: match.pub[role], opponent: match.pub[foeRole],
             log: match.fullLog, end: { A: snapEnd(match.teams.A), B: snapEnd(match.teams.B) } } : null;
-          const a = await awardBattleResult({ user: u, win: winner === role, abilitiesUsed: 0, defenderId: foe.userId, seed: 0, replay });
-          send(p.ws, { t: "over", winner, youWon: winner === role, leaguePoints: a.leaguePoints, league: a.league, energy: a.energy, reason: opts.reason || "" });
+          const a = await awardBattleResult({ user: u, win: winner === role, abilitiesUsed: 0, defenderId: foe.userId, seed: 0, replay, opponentLp: preLp[foeRole] });
+          send(p.ws, { t: "over", winner, youWon: winner === role, leaguePoints: a.leaguePoints, lpDelta: a.lpDelta, league: a.league, energy: a.energy, reason: opts.reason || "" });
         }
       } catch (e) {}
       if (p.ws) { p.ws.match = null; p.ws.role = null; }

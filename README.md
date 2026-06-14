@@ -295,6 +295,12 @@ tienda. Enemigos escalan en **rareza y nivel** por profundidad. El servidor es a
 3. **Guardia**: una unidad protege a sus aliados un turno (intercepta golpes de objetivo
    único, −40% daño). La IA también la usa.
 4. **Sobrecarga**: con energía de sobra, una habilidad pega/cura ×1.5.
+6. **Ladder competitivo (Elo)** — el rating PvP (`league_points`) ya no sube/baja plano:
+   usa **delta estilo Elo** (`eloDelta` en `app.js`) según el rival (ganar a uno mejor
+   sube más; perder contra uno peor baja más). Los **bots de respaldo apenas mueven el
+   MMR** (+6/−2) para no contaminar el ladder. El cliente muestra el **delta de rating**
+   (+18/−12) al terminar. Temporadas/recompensas/leaderboard ya existen (cierre semanal
+   de ligas + salón de la fama + `/rankings/league`).
 5. **Kit de estados (counterplay)** — el triángulo buff/debuff que da profundidad al
    PvP (`web/engine.js`): **Quiebre** (romper −DEF), **Lastre/Vendaval**
    (ralentizar/acelerar → afecta el orden de turno y el crítico), **Provocar**
