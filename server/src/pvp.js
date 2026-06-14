@@ -58,6 +58,15 @@ function attachPvp(server, deps) {
     if (m.t === "leave") return leaveQueue(ws);
     if (m.t === "plan") return onPlan(ws, m);
     if (m.t === "resume") return onResume(ws, m);
+    if (m.t === "emote") return onEmote(ws, m);
+  }
+  // Emote: lo reenvía al rival (solo índices válidos del set fijo del cliente).
+  function onEmote(ws, m) {
+    const match = ws.match && matches.get(ws.match);
+    if (!match || match.over) return;
+    const i = m.i | 0; if (i < 0 || i > 7) return;
+    const foe = match.players[ws.role === "A" ? "B" : "A"];
+    if (foe && foe.ws) send(foe.ws, { t: "emote", i });
   }
 
   async function enqueue(ws, m) {
@@ -197,6 +206,9 @@ function attachPvp(server, deps) {
     const match = ws.match && matches.get(ws.match);
     if (!match || match.over || m.round !== match.round) return;
     match.pending[ws.role] = sanitize(m.decisions, ws.role);
+    // Avisa al rival de que ya bloqueaste tu jugada (feel competitivo: "rival listo").
+    const foe = match.players[ws.role === "A" ? "B" : "A"];
+    if (foe && foe.ws && !foe.bot) send(foe.ws, { t: "opponentReady", round: match.round });
     if (match.pending.A && (match.pending.B || match.players.B.bot)) resolveRound(match);
   }
 

@@ -320,6 +320,12 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS guild_id UUID REFERENCES guilds(id) O
 ALTER TABLE users ADD COLUMN IF NOT EXISTS guild_joined_at TIMESTAMPTZ;
 CREATE INDEX IF NOT EXISTS idx_users_guild ON users(guild_id);
 
+-- Recompensa por DEFENSA async (#PvP): cuando tu snapshot gana mientras estás
+-- offline (el atacante pierde), ganas un stat + monedas con tope diario.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS defense_wins      INT NOT NULL DEFAULT 0;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS def_rewards_today INT NOT NULL DEFAULT 0;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS def_rewards_date  DATE;
+
 -- Muro / chat de la constelación (texto plano; se ESCAPA al renderizar).
 CREATE TABLE IF NOT EXISTS guild_messages (
   id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),

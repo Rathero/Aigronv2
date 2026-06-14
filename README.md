@@ -308,6 +308,12 @@ tienda. Enemigos escalan en **rareza y nivel** por profundidad. El servidor es a
    (inmunidad a debuffs). Deterministas, con paridad y revalidados; repartidos por
    tipo en `ABILITY_BY_TYPE` (tanques provocan, soportes limpian/protegen, control
    ralentiza). La inmunidad bloquea veneno/aturde/marca/quiebre/lentitud.
+7. **Feel competitivo** — **emotes** en PvP en vivo (set fijo, reenviados por el
+   servidor con burbuja sobre el lado correcto), indicador **"rival listo"** cuando el
+   oponente bloquea su jugada, y **delta de rating** al terminar.
+8. **Recompensa por defensa async** — cuando tu snapshot gana mientras estás offline
+   (el atacante pierde en `/battle/resolve`), ganas un stat **defensas** (en el perfil)
+   y monedas con **tope diario** (`rewardDefender`, atómico anti-feeding).
 
 ---
 

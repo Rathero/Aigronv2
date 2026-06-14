@@ -934,6 +934,7 @@ async function openProfile(){
     <div class="row" style="flex-wrap:wrap;gap:4px;margin-bottom:10px">
       ${stat('victorias',p.totalWins)}${stat('win rate',winrate+'%')}${stat('mejor racha',p.bestStreak+'d')}
       ${stat('aigrons',p.collectionCount)}${stat('mazmorras',p.dungeonsCleared)}${stat('fusiones',p.fusionsDone)}
+      ${stat('🛡 defensas',p.defenseWins||0)}
     </div>
     <div class="mb8"><b style="font-size:13px">🏅 Logros</b>${ach.map(arow).join('')}</div>
     <div class="mb8"><b style="font-size:13px">📅 Tus semanas de liga</b>${weeks}</div>
@@ -1377,7 +1378,22 @@ function pvpOnMessage(m){
   else if(m.t==='opponentDisconnected'){ setBanner('📶 Rival desconectado — esperando su reconexión…'); }
   else if(m.t==='opponentReconnected'){ toast('Rival reconectado'); }
   else if(m.t==='opponentLeft'){ toast('Tu rival abandonó'); }
+  else if(m.t==='emote'){ showEmote(m.i,false); }
+  else if(m.t==='opponentReady'){ const e=$("#foe-ready"); if(e){e.textContent='✓ Rival listo';e.style.opacity=1;} }
   else if(m.t==='over'){ PVP.status='over'; pvpOver(m); }
+}
+// --- Emotes (toque social competitivo, estilo Clash Royale/Marvel Snap) ---
+const EMOTES=['👋','😎','😂','😮','🔥','💀','🤝','😱'];
+function pvpEmote(){
+  openOverlay(`<div class="center"><div class="dim mb8" style="font-size:12px">Envía un emote</div>
+    <div class="emote-grid">${EMOTES.map((e,i)=>`<button class="emote-pick" data-act="sendEmote" data-arg="${i}">${e}</button>`).join('')}</div></div>`);
+}
+function sendEmote(i){ i=+i; closeOverlay(); pvpSend({t:'emote',i}); showEmote(i,true); }
+function showEmote(i,mine){
+  const e=EMOTES[i]; if(e==null)return;
+  const side=document.querySelector(mine?'.player-side':'.enemy-side')||$("#s-battle");
+  const b=document.createElement('div'); b.className='emote-bubble'; b.textContent=e;
+  (side||document.body).appendChild(b); SFX.play('click'); setTimeout(()=>b.remove(),1600);
 }
 function startLiveBattle(m){
   go('battle');
@@ -1418,6 +1434,7 @@ function pvpRound(m){
   // parecía no ejecutar nada). Se difiere y se arranca al acabar la animación.
   if(CB.phase==='resolve'){ CB.pendingRound=m; return; }
   if(CB.timer){clearInterval(CB.timer);CB.timer=null;}
+  { const fr=$("#foe-ready"); if(fr){ fr.textContent=''; fr.style.opacity=0; } }
   CB.phase='plan'; CB.planTurn=m.round; CB.selecting=null;
   CB.plan={}; CB.A.forEach(u=>{ if(u.hp>0) CB.plan[u.uid]={action:'basic',target:null,overcharge:false}; });
   [...CB.A,...CB.B].forEach(x=>x.el&&x.el.classList.remove("acting"));
@@ -1607,11 +1624,13 @@ function buildArena(){
       <div class="side player-side">${CB.A.map(fHTML).join("")}</div>
     </div>
     <div class="action-banner" id="abanner">¡Empieza el combate!</div>
+    <div id="foe-ready" class="foe-ready"></div>
     <div class="turnlog" id="turnlog"></div>
     <div id="planner"></div>
     <div class="combat-ctrl">
       <button class="cbtn" id="cb-speed" data-act="cbSpeed" title="Velocidad de animación">▶▶ ${CB.speed||1}x</button>
       <button class="cbtn ${autoMode()?'on':''}" id="cb-auto" data-act="cbAuto" title="La IA decide y confirma sola">🤖 AUTO</button>
+      ${CB.live&&CB.pvp?'<button class="cbtn" data-act="pvpEmote" title="Enviar emote">😀</button>':''}
       <button class="cbtn" data-act="flee">🏳 Huir</button>
     </div>`;
   renderCanvases($("#s-battle"));
@@ -2298,6 +2317,7 @@ const ACTIONS={
   planAuto:()=>planAuto(),
   confirmPlan:()=>confirmPlan(),
   cbSpeed:()=>cbSpeed(), cbAuto:()=>cbAuto(), combatTipOk:()=>combatTipOk(),
+  pvpEmote:()=>pvpEmote(), sendEmote:(a)=>sendEmote(a),
   flee:()=>flee(),
   fleeDungeon:()=>fleeDungeon(), fleeStay:()=>fleeStay(),
   continueBattle:()=>{closeOverlay();go('home');},

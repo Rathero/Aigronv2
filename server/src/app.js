@@ -974,6 +974,8 @@ app.post("/battle/resolve", authMiddleware, wrap(async (req, res) => {
     if (dl.rowCount) opponentLp = dl.rows[0].league_points;
   }
   const award = await awardBattleResult({ user: u, win, abilitiesUsed, defenderId: offer.defender_id, seed: offer.seed | 0, replay, opponentLp });
+  // Defensa async: si el ATACANTE perdió contra un defensor real, premia al defensor.
+  if (!win && offer.defender_id) await rewardDefender(offer.defender_id);
 
   res.json({ win, coins: award.coins, leaguePoints: award.leaguePoints, lpDelta: award.lpDelta, league: award.league, energy: award.energy, log: result.log, turns: result.turns, pvp: !!offer.defender_id });
 }));
@@ -992,6 +994,21 @@ function eloDelta(myLp, oppLp, win) {
   const K = 28;
   const d = Math.round(K * ((win ? 1 : 0) - expected));
   return win ? Math.max(5, Math.min(40, d)) : Math.max(-40, Math.min(-3, d));
+}
+// Recompensa al DEFENSOR cuando su snapshot gana en async (el atacante perdió).
+// Stat lifetime + monedas con TOPE DIARIO (anti-feeding). Todo atómico: el CASE
+// usa los valores PRE-update, así que el tope se respeta sin condiciones de carrera.
+async function rewardDefender(defenderId) {
+  const DEF_COIN = 12, DEF_CAP = 10, today = C.todayStr();
+  await db.query(
+    `UPDATE users SET
+       defense_wins = defense_wins + 1,
+       coins = coins + CASE WHEN (CASE WHEN def_rewards_date = $2 THEN def_rewards_today ELSE 0 END) < $3 THEN $4 ELSE 0 END,
+       def_rewards_today = (CASE WHEN def_rewards_date = $2 THEN def_rewards_today ELSE 0 END) + 1,
+       def_rewards_date = $2
+     WHERE id = $1`,
+    [defenderId, today, DEF_CAP, DEF_COIN]
+  );
 }
 async function awardBattleResult({ user, win, abilitiesUsed = 0, defenderId = null, seed = 0, replay = null, opponentLp = null }) {
   const coins = win ? 40 : 8;
@@ -1225,6 +1242,7 @@ app.get("/profile", authMiddleware, wrap(async (req, res) => {
     bestStreak: u.best_streak, streak: u.daily_streak,
     league: u.league, leaguePoints: u.league_points, bestLeague: u.best_league,
     dungeonsCleared: u.dungeons_cleared, fusionsDone: u.fusions_done,
+    defenseWins: u.defense_wins || 0,
     collectionCount: col.rows[0].n,
     weeks: weeks.rows,
     recent: recent.rows.map((b) => ({ id: b.id, result: b.result, at: b.created_at, pvp: b.pvp, hasReplay: b.has_replay, oppName: b.opp_name })),
