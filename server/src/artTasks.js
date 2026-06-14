@@ -46,19 +46,18 @@ async function removeArtBackgrounds(opts = {}) {
       if (isJpg) {
         if (!tr.canConvertJpeg()) { out.notProcessable++; continue; }
         buf = tr.jpegToPng(buf);
-        if (!tr.hasGreenBg(buf)) { out.notProcessable++; continue; } // jpg oscuro viejo: regenerar mejor
-        saveAsPng = true;
+        saveAsPng = true; // JPG no tiene alfa: siempre re-recortamos a PNG transparente
       }
-      // Fondo VERDE croma: re-procesa con el flood-fill AUNQUE ya tenga algo de
-      // alfa (el croma por umbral antiguo dejaba el verde a medio quitar y el
-      // chequeo de "ya transparente" lo saltaba — esa era la causa del bug).
+      // Recorte UNIVERSAL: si el BORDE sigue opaco (fondo de color sin quitar —
+      // verde, morado, azul, degradado…) se reprocesa con crecimiento de región
+      // AUNQUE ya tenga algo de alfa parcial. Solo se considera "ya hecho" cuando
+      // el borde está mayoritariamente transparente.
       let res;
-      if (tr.hasGreenBg(buf)) {
-        res = tr.chromaKeyGreen(buf);
-      } else if (tr.hasTransparency(buf)) {
+      if (tr.borderOpaqueFrac(buf) < 0.35) {
         out.alreadyTransparent++; continue;
       } else {
-        res = tr.keyEdgesAdaptive(buf, tolerance); // fondo oscuro antiguo
+        res = tr.keyBackground(buf, tolerance);
+        if (res === buf) res = tr.keyEdgesAdaptive(buf, tolerance); // fallback: fondo oscuro contiguo
       }
       if (res === buf && !saveAsPng) { out.failed++; continue; } // descartado por la salvaguarda
       if (!dry) {

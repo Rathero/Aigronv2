@@ -641,6 +641,23 @@ test("sinergias: applyTeamSynergy hornea el bono y es determinista", () => {
   assert.equal(duo[0].hpMax, 1080); assert.equal(duo[0].hp, 1080);
 });
 
+test("arte: keyBackground quita CUALQUIER fondo plano y conserva la criatura", () => {
+  const tr = require("../src/ai/transparency");
+  let PNG; try { PNG = require("pngjs").PNG; } catch (e) { return; } // sin pngjs: se omite
+  const W = 64, H = 64, png = new PNG({ width: W, height: H });
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const i = (y * W + x) * 4, inC = (x >= 22 && x < 42 && y >= 22 && y < 42);
+    png.data[i] = inC ? 230 : 120; png.data[i + 1] = inC ? 60 : 40; png.data[i + 2] = inC ? 40 : 160; png.data[i + 3] = 255;
+  }
+  const buf = PNG.sync.write(png);
+  assert.ok(tr.borderOpaqueFrac(buf) > 0.9, "el borde empieza opaco (fondo de color)");
+  const out = tr.keyBackground(buf);
+  assert.notEqual(out, buf, "debe recortar el fondo");
+  assert.ok(tr.borderOpaqueFrac(out) < 0.1, "el borde queda transparente");
+  const r = PNG.sync.read(out);
+  assert.equal(r.data[((H >> 1) * W + (W >> 1)) * 4 + 3], 255, "la criatura (centro) queda intacta");
+});
+
 test("kit de estados: las nuevas habilidades existen y son válidas", () => {
   for (const k of ["QUIEBRE", "LASTRE", "VENDAVAL", "PROVOCAR", "PURIFICAR", "SANTUARIO"]) {
     assert.ok(E.ABILITIES[k], `falta la habilidad ${k}`);

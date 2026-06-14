@@ -22,9 +22,12 @@ const E = require("../../../web/engine.js");
 // fondo pasa a VERDE CROMA puro (luego se elimina en transparency.js): así los
 // aigrons flotan sobre la UI como los sprites procedurales, sin bloque cuadrado.
 const CHROMA_NOTE =
-  " The subject is isolated on a flat solid uniform pure green (#00FF00) chroma-key " +
-  "background filling the whole canvas: no gradients, no shadows, no glow on the " +
-  "background itself, and absolutely no pure-green tones inside the creature.";
+  " The subject is isolated on a COMPLETELY FLAT, SOLID, UNIFORM single-color " +
+  "background of pure green (#00FF00) filling the whole canvas — one single RGB " +
+  "value edge to edge, with NO gradient, NO shading, NO vignette, NO glow, NO " +
+  "pattern and NO drop shadow on the background. The creature must NOT touch the " +
+  "edges (leave a clear margin all around). Absolutely no pure-green tones inside " +
+  "the creature.";
 function buildImagePrompt(concept, rarity, transparent) {
   const bgPhrase = transparent ? "" : " on a dark near-black background";
   const base =
@@ -205,8 +208,11 @@ function makeGeminiProvider() {
         try {
           const tr = require("./transparency");
           if (ext === "jpg" && tr.canConvertJpeg()) { buffer = tr.jpegToPng(buffer); ext = "png"; }
-          if (ext === "png" && tr.available()) buffer = tr.chromaKeyGreen(buffer);
-        } catch (e) { console.warn(`[ai] croma falló (${opts.templateId}): ${e.message}`); }
+          // Quitado UNIVERSAL de fondo (verde, morado, azul, degradado…): el modelo
+          // no siempre respeta el croma verde, así que recortamos cualquier fondo
+          // plano por crecimiento de región desde los bordes (protege la criatura).
+          if (ext === "png" && tr.available()) buffer = tr.keyBackground(buffer);
+        } catch (e) { console.warn(`[ai] recorte de fondo falló (${opts.templateId}): ${e.message}`); }
       }
 
       // Filtro de calidad/seguridad opcional (gemini texto+visión). AI_VISION_FILTER=off lo salta.

@@ -109,6 +109,54 @@ function chromaKeyGreen(buffer) {
   return PNG.sync.write(png);
 }
 
+// ---- UNIVERSAL: quita CUALQUIER fondo plano (verde, morado, azul, degradado) --
+// Flood-fill por CRECIMIENTO DE REGIÓN desde los bordes: un vecino es fondo si su
+// color se parece (≤ tol) al del píxel actual (no a una media global), así sigue
+// degradados suaves y se detiene en el borde nítido de la criatura. Protege el
+// centro: si el centro queda transparente, asumimos que se comió la criatura y no
+// tocamos. Subsume al croma verde y a los fondos de color sólido del modelo. */
+function keyBackground(buffer, tol) {
+  if (!PNG) return buffer;
+  const png = PNG.sync.read(buffer);
+  const { width: W, height: H, data: d } = png, N = W * H;
+  const t = (tol || 38), t2 = t * t;
+  const seen = new Uint8Array(N), q = [];
+  const seed = (p) => { if (!seen[p]) { seen[p] = 1; q.push(p); } };
+  for (let x = 0; x < W; x++) { seed(x); seed((H - 1) * W + x); }
+  for (let y = 0; y < H; y++) { seed(y * W); seed(y * W + W - 1); }
+  let removed = 0;
+  while (q.length) {
+    const p = q.pop(), i = p * 4;
+    const refTransparent = d[i + 3] === 0; // hueco alfa preexistente: solo propaga
+    if (!refTransparent) { d[i + 3] = 0; removed++; }
+    const x = p % W, y = (p / W) | 0;
+    const grow = (np) => {
+      if (seen[np]) return; const j = np * 4;
+      if (d[j + 3] === 0) { seen[np] = 1; q.push(np); return; } // cruza huecos transparentes
+      if (refTransparent) return; // sin color de referencia fiable, no crecer por color
+      const dr = d[j] - d[i], dg = d[j + 1] - d[i + 1], db = d[j + 2] - d[i + 2];
+      if (dr * dr + dg * dg + db * db <= t2) { seen[np] = 1; q.push(np); }
+    };
+    if (x > 0) grow(p - 1); if (x < W - 1) grow(p + 1);
+    if (y > 0) grow(p - W); if (y < H - 1) grow(p + W);
+  }
+  const c = ((H >> 1) * W + (W >> 1)) * 4;
+  if (removed > N * 0.985 || d[c + 3] === 0) return buffer; // salvaguarda: no comerse la criatura
+  return PNG.sync.write(png);
+}
+// Fracción del BORDE que sigue OPACA (fondo de color sin quitar). >~0.4 => hay
+// que reprocesar aunque la imagen tenga algo de alfa parcial.
+function borderOpaqueFrac(buffer) {
+  if (!PNG) return 0;
+  const png = PNG.sync.read(buffer);
+  const { width: W, height: H, data: d } = png;
+  let op = 0, total = 0;
+  const test = (i) => { total++; if (d[i + 3] > 16) op++; };
+  for (let x = 0; x < W; x += 2) { test(x * 4); test(((H - 1) * W + x) * 4); }
+  for (let y = 0; y < H; y += 2) { test((y * W) * 4); test((y * W + W - 1) * 4); }
+  return total ? op / total : 0;
+}
+
 // --------- arte ANTIGUO: flood-fill desde los bordes (fondo oscuro) ----------
 function keyEdgesAdaptive(buffer, tolerance = 42) {
   if (!PNG) return buffer;
@@ -149,4 +197,4 @@ function keyEdgesAdaptive(buffer, tolerance = 42) {
   return PNG.sync.write(png);
 }
 
-module.exports = { available, hasTransparency, hasGreenBg, chromaKeyGreen, keyEdgesAdaptive, canConvertJpeg, jpegToPng };
+module.exports = { available, hasTransparency, hasGreenBg, chromaKeyGreen, keyEdgesAdaptive, keyBackground, borderOpaqueFrac, canConvertJpeg, jpegToPng };
