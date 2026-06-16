@@ -431,6 +431,7 @@ async function renderHome(){
   announceUnlocks();
   const claimed=S.daily&&S.daily.claimed;
   let dg=null; if(unlocked('dungeon')){ try{ dg=await api('/dungeon'); }catch(e){} }
+  let exp=null; try{ exp=await api('/expedition'); }catch(e){}
   // Reclamado: banda compacta con cuenta atrás (anticipación) en vez de un
   // panel grande "sin nada que hacer" ocupando el espacio premium.
   const dailyCard=claimed?
@@ -472,6 +473,7 @@ async function renderHome(){
     ${evBanner}
     ${pushLine}
     ${dailyCard}
+    ${expeditionHomeCard(exp)}
     ${recapHomeCard()}
     ${albumHomeCard()}
     ${uniqueHomeCard()}
@@ -2344,6 +2346,7 @@ const ACTIONS={
   tradeWantPick:(a)=>tradeWantPick(a), tradeAccept:(a)=>tradeAccept(a), tradeCancel:(a)=>tradeCancel(a),
   openCodex:()=>openCodex(),
   openRecap:()=>openRecap(),
+  expeditionCollect:()=>expeditionCollect(),
   recapNext:()=>recapNext(), recapDone:()=>recapDone(), recapShare:()=>recapShare(),
   introNext:()=>introNext(), introSkip:()=>introSkip(), introFF:()=>introFF(),
   menuLogout:()=>{$("#topmenu").classList.remove("show");logout();},
@@ -2476,6 +2479,40 @@ function openCodex(){
    Secuencia de tarjetas animadas con TU mes: descubrimientos, tu joya del mes,
    combates y un resumen para compartir (PNG). Viralidad emocional cuando el álbum
    está por rotar. Datos de /recap; se abre desde el menú ≡ y un aviso en Inicio. */
+/* ===================== EXPEDICIÓN idle (progreso pasivo) ===================== */
+function expeditionHomeCard(exp){
+  if(!exp||!exp.rate) return '';
+  const p=exp.pending||{coins:0,dust:0};
+  const ready=p.coins>0||p.dust>0;
+  const toFull=exp.full?'🟢 al máximo':('llena en '+fmtHMS(new Date(exp.fullAt)-Date.now()));
+  return `<div class="panel ${exp.full?'glow-cyan':''}">
+    <div class="row" style="justify-content:space-between;align-items:center">
+      <b style="font-size:14px">⛺ Expedición</b>
+      <span class="dim" style="font-size:11px">${exp.rate.coins}🪙 + ${exp.rate.dust}✨ /h · ${toFull}</span></div>
+    <div class="mis-bar" style="margin-top:8px"><i style="width:${exp.pct}%${exp.full?';background:var(--gold)':''}"></i></div>
+    <div class="row mt8" style="justify-content:space-between;align-items:center">
+      <span style="font-size:13px">Acumulado: <b style="color:var(--gold)">${p.coins}</b>🪙 <b style="color:#bfe3ff">${p.dust}</b>✨</span>
+      <button class="btn sm ${ready?'gold pulse':''}" style="width:auto;flex:0 0 auto" data-act="expeditionCollect" ${ready?'':'disabled'}>RECOGER</button></div>
+    <div class="dim" style="font-size:10px;margin-top:6px">Tu equipo explora aunque no juegues (tope ${exp.capHours}h). Cuanto más fuerte tu equipo, más rinde.</div>
+  </div>`;
+}
+async function expeditionCollect(){
+  try{
+    const r=await api('/expedition/collect',{method:'POST'});
+    if(r.user){ S.user=Object.assign(S.user,r.user); refreshChips(); }
+    if(r.nothing||(r.collected.coins<=0&&r.collected.dust<=0)){ toast('Aún no hay nada que recoger'); renderHome(); return; }
+    SFX.play('claim'); buzz([30,40,30,40,80]); if(window.POC&&window.POC.confetti)window.POC.confetti();
+    openOverlay(`<div class="center reveal" style="position:relative"><div class="rays"></div>
+      <div style="position:relative;z-index:2">
+        <div style="font-family:var(--pixel);font-size:12px;color:var(--cyan);margin-bottom:8px">⛺ MIENTRAS NO ESTABAS</div>
+        <div style="font-size:46px">🎁</div>
+        <div style="font-size:14px;margin:8px 0">Tu equipo volvió de la expedición${r.hours?` (${r.hours}h)`:''} con:</div>
+        <div style="font-size:20px;font-weight:700;margin-bottom:12px"><span style="color:var(--gold)">+${r.collected.coins}</span> 🪙 &nbsp; <span style="color:#bfe3ff">+${r.collected.dust}</span> ✨</div>
+        <button class="btn" data-act="goHome">¡GENIAL!</button>
+      </div></div>`);
+  }catch(e){ toast('No se pudo recoger'); }
+}
+
 // Aviso en INICIO los últimos días del mes (cuando el álbum está por cambiar).
 function recapHomeCard(){
   const now=new Date(), end=new Date(now.getFullYear(),now.getMonth()+1,0,23,59,59);

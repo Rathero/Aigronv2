@@ -199,6 +199,12 @@ async function loginAs(subject) {
   const wb = await api(g1.token, "/worldboss");
   if (wb.status === 200) ok(Array.isArray(wb.data.topGuilds) && "myGuild" in wb.data, "/worldboss incluye la clasificación por constelación");
 
+  // Expedición idle: estado (ritmo + tope) y recogida.
+  const ex = await api(t1, "/expedition");
+  ok(ex.status === 200 && ex.data.rate && ex.data.rate.coins > 0 && ex.data.capHours > 0, "/expedition trae ritmo y tope");
+  const exC = await api(t1, "/expedition/collect", { method: "POST" });
+  ok(exC.status === 200 && exC.data.collected, "/expedition/collect responde (acumulado recién iniciado ~0)");
+
   // --- Trueque (#2): endpoints + guardas (el swap completo requiere duplicados) ---
   const tg = await api(t1, "/trades");
   ok(tg.status === 200 && Array.isArray(tg.data.market) && Array.isArray(tg.data.mine), "/trades lista mercado y mis ofertas");

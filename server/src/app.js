@@ -31,6 +31,7 @@ const features = require("./features");
 const innov = require("./innovations");
 const guilds = require("./guilds");
 const trades = require("./trades");
+const expedition = require("./expedition");
 const { eventFor } = require("./jobs/generateDailyBatch");
 const { tplBaseStats, tplTypes } = require("./util");
 
@@ -1379,6 +1380,23 @@ app.post("/guild/wall", authMiddleware, wrap(async (req, res) => {
   const out = await guilds.postMessage(req.userId, req.body && req.body.body);
   if (out.error) return res.status(400).json(out);
   res.json(out);
+}));
+
+// ----------------------------- EXPEDICIÓN (idle) -----------------------------
+// Poder del equipo (suma de stats escalados de los 3): ritmo de la expedición.
+async function teamPowerFor(userId) {
+  const units = await buildTeamUnits(userId, "A");
+  return units.reduce((a, u) => a + (u ? u.hpMax / 10 + u.atkP + u.atkS + u.defP + u.defS + u.spd : 0), 0);
+}
+app.get("/expedition", authMiddleware, wrap(async (req, res) => {
+  const out = await expedition.getState(req.userId, await teamPowerFor(req.userId));
+  if (out.error) return res.status(400).json(out);
+  res.json(out);
+}));
+app.post("/expedition/collect", authMiddleware, wrap(async (req, res) => {
+  const out = await expedition.collect(req.userId, await teamPowerFor(req.userId));
+  if (out.error) return res.status(400).json(out);
+  res.json(Object.assign(out, { user: userPublic(await getUser(req.userId)) }));
 }));
 
 // ------------------------------ TRUEQUE (#2) ---------------------------------

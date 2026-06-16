@@ -236,6 +236,7 @@ Todas requieren `Authorization: Bearer <token>` salvo `/auth/login`.
 | GET  | `/dungeon/ranking` | Ranking diario por profundidad alcanzada |
 | GET  | `/profile` · POST `/me/name` | Perfil (stats, semanas de liga, combates recientes) y cambio de nombre |
 | GET  | `/recap` | Resumen mensual estilo "Wrapped": descubrimientos del mes, joya del mes, distribución por tipo/rareza y totales (para tarjetas compartibles) |
+| GET  | `/expedition` · POST `/expedition/collect` | Expedición idle: acumulado offline (monedas+polvo) según el poder del equipo, con tope; recogida atómica |
 | GET  | `/battle/:id/replay` | Replay grabado de un combate propio (equipos+log+estado final) |
 | GET  | `/hall-of-fame` | Top de la última semana cerrada de ligas |
 | GET  | `/achievements` · POST `/achievements/claim` | Logros (progreso desde contadores) y reclamo |
@@ -314,6 +315,14 @@ tienda. Enemigos escalan en **rareza y nivel** por profundidad. El servidor es a
 8. **Recompensa por defensa async** — cuando tu snapshot gana mientras estás offline
    (el atacante pierde en `/battle/resolve`), ganas un stat **defensas** (en el perfil)
    y monedas con **tope diario** (`rewardDefender`, atómico anti-feeding).
+
+**Expedición idle** (`server/src/expedition.js`): capa de progreso pasivo al estilo de
+los RPG idle (AFK Arena…). Tu equipo acumula **monedas + polvo** mientras NO juegas, a un
+ritmo que escala con el **poder del equipo** (15→48🪙/h) y con **tope** (`EXPEDITION_CAP_H`,
+12h) que invita a entrar ~2 veces al día. Server-authoritative y determinista (acumulado =
+`now − expedition_at` acotado), recogida **atómica** (optimistic lock) y pantalla **"mientras
+no estabas"** en INICIO. Guardarraíl: el idle da **economía**, nunca rating PvP ni ventaja
+de combate pagable.
 
 ---
 

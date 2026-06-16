@@ -325,6 +325,10 @@ CREATE INDEX IF NOT EXISTS idx_users_guild ON users(guild_id);
 ALTER TABLE users ADD COLUMN IF NOT EXISTS defense_wins      INT NOT NULL DEFAULT 0;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS def_rewards_today INT NOT NULL DEFAULT 0;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS def_rewards_date  DATE;
+-- EXPEDICIÓN idle: marca de la última recogida. El acumulado se calcula como
+-- (now - expedition_at) con tope, según el poder del equipo. DEFAULT now() ->
+-- nadie acumula retroactivamente al desplegar (todos empiezan desde el deploy).
+ALTER TABLE users ADD COLUMN IF NOT EXISTS expedition_at TIMESTAMPTZ NOT NULL DEFAULT now();
 
 -- Muro / chat de la constelación (texto plano; se ESCAPA al renderizar).
 CREATE TABLE IF NOT EXISTS guild_messages (
