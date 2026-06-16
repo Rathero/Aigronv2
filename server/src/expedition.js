@@ -51,22 +51,34 @@ async function getState(userId, power) {
   };
 }
 
-// Recoge el acumulado. Atómico: el UPDATE solo aplica si expedition_at no cambió
-// (optimistic lock) -> dos recogidas concurrentes no duplican la recompensa.
+// Recoge el acumulado. TODO el cálculo va en una sola sentencia SQL usando el
+// expedition_at almacenado (sin round-trip del timestamp a JS): así evitamos el
+// bug de precisión (timestamptz en µs vs Date en ms) que hacía fallar el lock y
+// devolver "nada que recoger". Atómico y a prueba de doble-cobro: una 2ª recogida
+// concurrente ve expedition_at=now() -> horas≈0 -> concede ~0.
 async function collect(userId, power) {
-  const row = (await db.query("SELECT expedition_at FROM users WHERE id=$1", [userId])).rows[0];
-  if (!row) return { error: "no_user" };
-  const since = Date.now() - new Date(row.expedition_at).getTime();
-  const acc = accrued(since, power);
-  if (acc.coins <= 0 && acc.dust <= 0 && acc.tokens <= 0) return { collected: { coins: 0, dust: 0, tokens: 0 }, nothing: true };
+  const r = ratePerHour(power);
   const upd = await db.query(
-    `UPDATE users SET coins = coins + $2, dust = dust + $3, album_tokens = album_tokens + $5, expedition_at = now()
-      WHERE id = $1 AND expedition_at IS NOT DISTINCT FROM $4
-      RETURNING coins, dust`,
-    [userId, acc.coins, acc.dust, row.expedition_at, acc.tokens]
+    `WITH cur AS (
+       SELECT LEAST($2::numeric, GREATEST(0, EXTRACT(EPOCH FROM (now() - expedition_at)) / 3600.0)) AS h
+         FROM users WHERE id = $1)
+     UPDATE users u SET
+       coins        = u.coins        + floor($3::numeric * (SELECT h FROM cur)),
+       dust         = u.dust         + floor($4::numeric * (SELECT h FROM cur)),
+       album_tokens = u.album_tokens + floor($5::numeric * (SELECT h FROM cur)),
+       expedition_at = now()
+     WHERE u.id = $1
+     RETURNING floor($3::numeric * (SELECT h FROM cur))::int AS gc,
+               floor($4::numeric * (SELECT h FROM cur))::int AS gd,
+               floor($5::numeric * (SELECT h FROM cur))::int AS gt,
+               (SELECT h FROM cur) AS h`,
+    [userId, CAP_HOURS, r.coins, r.dust, TOKENS_PER_HOUR]
   );
-  if (!upd.rowCount) return { collected: { coins: 0, dust: 0, tokens: 0 }, raced: true };
-  return { collected: { coins: acc.coins, dust: acc.dust, tokens: acc.tokens }, hours: Math.round(acc.hours * 10) / 10 };
+  if (!upd.rowCount) return { error: "no_user" };
+  const row = upd.rows[0];
+  const collected = { coins: row.gc, dust: row.gd, tokens: row.gt };
+  if (collected.coins <= 0 && collected.dust <= 0 && collected.tokens <= 0) return { collected, nothing: true };
+  return { collected, hours: Math.round(Number(row.h) * 10) / 10 };
 }
 
 module.exports = { getState, collect, ratePerHour, CAP_HOURS };
