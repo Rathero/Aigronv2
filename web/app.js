@@ -297,7 +297,7 @@ function tickCountdowns(){
     if(ms<=0&&S.user.energy>=1&&$("#s-home").classList.contains('active')) renderHome();
   }
 }
-setInterval(tickCountdowns,1000);
+setInterval(()=>{ tickCountdowns(); tickExpedition(); },1000);
 function toast(msg){const t=$("#toast");t.textContent=msg;t.classList.add("show");
   clearTimeout(t._t);t._t=setTimeout(()=>t.classList.remove("show"),1600);}
 function openOverlay(html){$("#modal").innerHTML=html;$("#overlay").classList.add("show");renderCanvases($("#modal"));}
@@ -486,7 +486,8 @@ async function renderHome(){
     </div>
     ${unlocked('dungeon')?dungeonHomeCard(dg):''}`;
   renderCanvases($("#s-home"));
-  tickCountdowns();
+  tickCountdowns(); tickExpedition();
+  maybeExpeditionIntro(exp);
   loadOracle();
   loadAlbumMini();
   if(FEATURES.worldboss&&unlocked('modes')) api('/worldboss').then(b=>{const e=$("#boss-mini");if(e)e.innerHTML=b.defeated?'🏆 ¡derrotado!':`HP ${b.pct}% · ${b.top.length} héroes`;}).catch(()=>{});
@@ -2346,7 +2347,7 @@ const ACTIONS={
   tradeWantPick:(a)=>tradeWantPick(a), tradeAccept:(a)=>tradeAccept(a), tradeCancel:(a)=>tradeCancel(a),
   openCodex:()=>openCodex(),
   openRecap:()=>openRecap(),
-  expeditionCollect:()=>expeditionCollect(),
+  expeditionCollect:()=>expeditionCollect(), expeditionInfo:()=>expeditionInfo(),
   recapNext:()=>recapNext(), recapDone:()=>recapDone(), recapShare:()=>recapShare(),
   introNext:()=>introNext(), introSkip:()=>introSkip(), introFF:()=>introFF(),
   menuLogout:()=>{$("#topmenu").classList.remove("show");logout();},
@@ -2482,19 +2483,62 @@ function openCodex(){
 /* ===================== EXPEDICIÓN idle (progreso pasivo) ===================== */
 function expeditionHomeCard(exp){
   if(!exp||!exp.rate) return '';
+  // Guarda el estado para que el botín "suba en vivo" cada segundo (feel idle).
+  S.exp={ rate:exp.rate, capHours:exp.capHours, atMs:new Date(exp.fullAt).getTime()-exp.capHours*3600000 };
+  const team=(S.team||[]).map(instById).filter(Boolean).slice(0,3);
+  const sprites=team.length
+    ? team.map(i=>`<div class="exp-spr">${artTag(i.template,5)}</div>`).join('')
+    : '<div class="dim" style="font-size:11px;align-self:center">Forma un equipo para explorar más rápido</div>';
   const p=exp.pending||{coins:0,dust:0};
   const ready=p.coins>0||p.dust>0;
-  const toFull=exp.full?'🟢 al máximo':('llena en '+fmtHMS(new Date(exp.fullAt)-Date.now()));
-  return `<div class="panel ${exp.full?'glow-cyan':''}">
+  return `<div class="panel exp-card ${exp.full?'exp-ready':''}">
     <div class="row" style="justify-content:space-between;align-items:center">
-      <b style="font-size:14px">⛺ Expedición</b>
-      <span class="dim" style="font-size:11px">${exp.rate.coins}🪙 + ${exp.rate.dust}✨ /h · ${toFull}</span></div>
-    <div class="mis-bar" style="margin-top:8px"><i style="width:${exp.pct}%${exp.full?';background:var(--gold)':''}"></i></div>
+      <b style="font-size:14px">⛺ Expedición <button class="exp-q" data-act="expeditionInfo" title="¿Qué es?">?</button></b>
+      <span class="dim" style="font-size:11px">${exp.rate.coins}🪙 + ${exp.rate.dust}✨ /h</span></div>
+    <div class="exp-team">${sprites}</div>
+    <div class="exp-status" id="exp-status">${exp.full?'🟢 ¡Equipo listo para volver!':'⛏ Explorando…'}</div>
+    <div class="mis-bar" style="margin-top:6px"><i id="exp-bar" style="width:${exp.pct}%${exp.full?';background:var(--gold)':''}"></i></div>
     <div class="row mt8" style="justify-content:space-between;align-items:center">
-      <span style="font-size:13px">Acumulado: <b style="color:var(--gold)">${p.coins}</b>🪙 <b style="color:#bfe3ff">${p.dust}</b>✨</span>
-      <button class="btn sm ${ready?'gold pulse':''}" style="width:auto;flex:0 0 auto" data-act="expeditionCollect" ${ready?'':'disabled'}>RECOGER</button></div>
-    <div class="dim" style="font-size:10px;margin-top:6px">Tu equipo explora aunque no juegues (tope ${exp.capHours}h). Cuanto más fuerte tu equipo, más rinde.</div>
+      <span style="font-size:14px">Botín: <b style="color:var(--gold)" id="exp-coins">${p.coins}</b>🪙 <b style="color:#bfe3ff" id="exp-dust">${p.dust}</b>✨</span>
+      <button class="btn sm ${ready?'gold pulse':''}" id="exp-collect" style="width:auto;flex:0 0 auto" data-act="expeditionCollect" ${ready?'':'disabled'}>RECOGER</button></div>
+    <div class="dim" style="font-size:10px;margin-top:6px" id="exp-full">${exp.full?'Al máximo — recoge para seguir acumulando':('Se llena en '+fmtHMS(new Date(exp.fullAt)-Date.now()))}</div>
   </div>`;
+}
+// Botín que sube EN VIVO (mismo cálculo que el servidor): da sensación idle real.
+function tickExpedition(){
+  const e=S.exp; if(!e) return; const el=$("#exp-coins"); if(!el) return;
+  const capMs=e.capHours*3600000, since=Math.max(0,Date.now()-e.atMs);
+  const hours=Math.min(e.capHours, since/3600000);
+  const coins=Math.floor(e.rate.coins*hours), dust=Math.floor(e.rate.dust*hours);
+  const full=since>=capMs, pct=Math.min(100,Math.round(since/capMs*100)), ready=coins>0||dust>0;
+  el.textContent=coins; const d=$("#exp-dust"); if(d)d.textContent=dust;
+  const bar=$("#exp-bar"); if(bar){ bar.style.width=pct+'%'; bar.style.background=full?'var(--gold)':'var(--cyan)'; }
+  const btn=$("#exp-collect"); if(btn){ btn.disabled=!ready; btn.classList.toggle('gold',ready); btn.classList.toggle('pulse',ready); }
+  const st=$("#exp-status"); if(st)st.textContent=full?'🟢 ¡Equipo listo para volver!':'⛏ Explorando…';
+  const fu=$("#exp-full"); if(fu)fu.textContent=full?'Al máximo — recoge para seguir acumulando':('Se llena en '+fmtHMS(e.atMs+capMs-Date.now()));
+  const card=document.querySelector('.exp-card'); if(card)card.classList.toggle('exp-ready',full);
+}
+// Explicación de la expedición (botón "?" y auto la primera vez).
+function expeditionInfo(){
+  localStorage.setItem('aigrons_exp_seen','1');
+  openOverlay(`<div class="center">
+    <div style="font-size:48px">⛺</div>
+    <div style="font-family:var(--pixel);font-size:12px;color:var(--cyan);margin:6px 0 10px">LA EXPEDICIÓN</div>
+    <div style="font-size:14px;line-height:1.55;text-align:left;margin-bottom:12px">
+      Tu equipo <b>explora solo, aunque cierres el juego</b>, y va juntando <b>monedas</b> 🪙 y <b>polvo</b> ✨.<br><br>
+      • Cuanto <b>más fuerte tu equipo</b> (nivel, evolución), <b>más rinde</b>.<br>
+      • Se acumula hasta un <b>tope</b> y luego se para: <b>vuelve cada pocas horas</b> a tocar <b>RECOGER</b>.<br>
+      • Es progreso pasivo: te ayuda a subir tu colección, pero <b>nunca</b> da ventaja en el PvP (eso se gana jugando).
+    </div>
+    <button class="btn" data-act="close">¡ENTENDIDO!</button></div>`);
+}
+// Intro automática UNA vez para quien ya pasó el tutorial (jugadores existentes).
+let _expIntroShown=false;
+function maybeExpeditionIntro(exp){
+  if(_expIntroShown||!exp) return;
+  if(localStorage.getItem('aigrons_exp_seen')||!localStorage.getItem('aigrons_tut')) return;
+  _expIntroShown=true;
+  setTimeout(()=>{ if(!$("#overlay").classList.contains('show')) expeditionInfo(); },800);
 }
 async function expeditionCollect(){
   try{
@@ -2800,6 +2844,7 @@ const TUTORIAL=[
   {ic:'🛡️', t:'Tu equipo', h:`En <b>Combate → EDITAR</b> elige <b>3 aigrons</b>. Los <b>tipos</b> mandan: cada uno es fuerte contra unos y débil contra otros (piedra-papel-tijera).`},
   {ic:'🎯', t:'Combate · preparación', h:`Antes de luchar eliges:<br>• <b>Capitán</b>: +15% a sus stats y +6% a todo el equipo.<br>• <b>Estancia</b>: ⚔️ Agresiva (+ATK, −DEF), 🛡️ Defensiva (+DEF, +1⚡ inicial) o ⚖️ Neutral.<br>Cada combate gasta <b>1⚡</b> (se recarga sola con el tiempo).`},
   {ic:'🕹️', t:'Combate · tu turno', h:`El 3v3 es <b>automático</b> (actúa primero quien tiene más velocidad). Tú decides cada turno:<br>• Toca una <b>habilidad</b> cuando su ⚡ esté cargada → luego toca un <b>enemigo</b> para apuntar (mira <span style="color:var(--green)">⬆</span> fuerte / <span style="color:var(--red)">⬇</span> débil por tipo).<br>• <b>🛡 Guardia</b>: esa criatura protege al equipo un turno (−40% daño recibido).<br>• <b>Sobrecarga ⚡⚡</b>: si te sobra energía, el golpe pega ×1.5.`},
+  {ic:'⛺', t:'Expedición (mientras no juegas)', h:`En <b>Inicio</b>, tu equipo <b>explora solo aunque cierres el juego</b> y va juntando <b>monedas</b> 🪙 y <b>polvo</b> ✨. Cuanto <b>más fuerte</b> tu equipo, más rinde. Se llena hasta un <b>tope</b>: <b>vuelve cada pocas horas</b> y toca <b>RECOGER</b>. ¡Es progreso gratis!`},
   {ic:'🏆', t:'¡A jugar!', h:`Gana combates para subir de <b>liga</b> y escalar el <b>ranking diario</b>. La tienda acelera tu colección pero <b>nunca</b> compra victorias. ¡Vuelve mañana por las criaturas nuevas!`},
 ];
 let tutI=0;
@@ -2820,7 +2865,7 @@ function tutRender(){
 }
 function tutNext(){ if(tutI<TUTORIAL.length-1){tutI++;tutRender();} else tutDone(); }
 function tutPrev(){ if(tutI>0){tutI--;tutRender();} }
-function tutDone(){ localStorage.setItem('aigrons_tut','1'); closeOverlay(); }
+function tutDone(){ localStorage.setItem('aigrons_tut','1'); localStorage.setItem('aigrons_exp_seen','1'); closeOverlay(); }
 function openTutorial(){ showTutorial(0); }
 
 /* ---------------- Arranque ---------------- */
