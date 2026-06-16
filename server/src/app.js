@@ -271,6 +271,7 @@ function userPublic(u) {
       : null,
     league: u.league, leaguePoints: u.league_points,
     streak: u.daily_streak,
+    albumTokens: u.album_tokens || 0, // fichas de álbum (botín idle de progresión)
     totalWins: u.total_wins || 0, // revelado progresivo de módulos en el cliente
     // Tiradas de tienda de HOY (techo diario): el cliente muestra cuántas quedan.
     rollsToday: u.rolls_date && C.todayStr(new Date(u.rolls_date)) === C.todayStr() ? u.rolls_today : 0,
@@ -602,6 +603,28 @@ app.post("/season/claim", authMiddleware, wrap(async (req, res) => {
   if (!ins.rowCount) return res.status(400).json({ error: "already_claimed" });
   await db.query("UPDATE users SET coins=coins+$1, gems=gems+$2 WHERE id=$3", [ALBUM_REWARD.coins, ALBUM_REWARD.gems, req.userId]);
   res.json({ reward: ALBUM_REWARD, user: userPublic(await getUser(req.userId)) });
+}));
+
+// Canje de FICHAS DE ÁLBUM (botín idle): garantiza una criatura del álbum que
+// aún NO tienes (prefiere las destacadas del día). Cobro de fichas atómico.
+const ALBUM_TOKEN_COST = parseInt(process.env.ALBUM_TOKEN_COST || "3", 10);
+app.post("/album/token-claim", authMiddleware, wrap(async (req, res) => {
+  const today = C.todayStr(), sKey = C.seasonKey(today);
+  const pool = await seasonTemplates(today);
+  const owned = await ownedSeasonIds(req.userId, sKey);
+  const unowned = pool.filter((t) => !owned.has(t.id));
+  if (!unowned.length) return res.status(400).json({ error: "album_complete" });
+  const pay = await db.query("UPDATE users SET album_tokens = album_tokens - $1 WHERE id=$2 AND album_tokens >= $1 RETURNING id", [ALBUM_TOKEN_COST, req.userId]);
+  if (!pay.rowCount) return res.status(402).json({ error: "insufficient", cost: ALBUM_TOKEN_COST });
+  const hiIds = new Set(C.dailyHighlights(today, pool, HIGHLIGHT_N).map((t) => t.id));
+  const hi = unowned.filter((t) => hiIds.has(t.id));
+  const cand = hi.length ? hi : unowned;
+  const t = cand[Math.floor(Math.random() * cand.length)];
+  let insr;
+  try { insr = await db.query("INSERT INTO creature_instances (user_id, template_id) VALUES ($1,$2) RETURNING instance_id", [req.userId, t.id]); }
+  catch (e) { await db.query("UPDATE users SET album_tokens = album_tokens + $1 WHERE id=$2", [ALBUM_TOKEN_COST, req.userId]).catch(() => {}); throw e; }
+  maybeAureaArt(insr.rows[0].instance_id, t.id);
+  res.json({ instance: { instance_id: insr.rows[0].instance_id, level: 1, template: t }, cost: ALBUM_TOKEN_COST, user: userPublic(await getUser(req.userId)) });
 }));
 
 // --------------------------- CRIATURA ÚNICA DEL DÍA --------------------------

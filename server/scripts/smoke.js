@@ -202,8 +202,12 @@ async function loginAs(subject) {
   // Expedición idle: estado (ritmo + tope) y recogida.
   const ex = await api(t1, "/expedition");
   ok(ex.status === 200 && ex.data.rate && ex.data.rate.coins > 0 && ex.data.capHours > 0, "/expedition trae ritmo y tope");
+  ok("tokens" in ex.data.pending && typeof ex.data.rate.tokensPerHour === "number", "/expedition incluye fichas de álbum (progresión)");
   const exC = await api(t1, "/expedition/collect", { method: "POST" });
   ok(exC.status === 200 && exC.data.collected, "/expedition/collect responde (acumulado recién iniciado ~0)");
+  // Canje de fichas: sin fichas aún -> 402 insufficient (ruta + guarda).
+  const tkBad = await api(t1, "/album/token-claim", { method: "POST" });
+  ok(tkBad.status === 402 || tkBad.status === 400, "/album/token-claim sin fichas -> rechazado");
 
   // --- Trueque (#2): endpoints + guardas (el swap completo requiere duplicados) ---
   const tg = await api(t1, "/trades");

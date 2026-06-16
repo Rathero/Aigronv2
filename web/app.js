@@ -537,12 +537,19 @@ async function openAlbum(){
     : (s.rewardClaimed?`<div class="dim mb8" style="font-size:12px">🏆 Recompensa del álbum ya reclamada</div>`:'');
   const story=ENGINE.seasonStory&&ENGINE.seasonStory(s.season.key);
   const storyBanner=story?`<div class="season-chapter"><div class="sc-h">Capítulo ${story.chapter}/${story.of} · <b>${esc(story.title)}</b></div><div class="sc-x">${esc(story.text)}</div></div>`:'';
+  // Fichas de álbum (botín idle): canjéalas por una criatura que te falta.
+  const TOK_COST=3, toks=(S.user&&S.user.albumTokens)||0;
+  const tokenRow=(!s.complete)?`<div class="panel" style="padding:8px 10px;border-color:var(--epi);display:flex;align-items:center;gap:8px;margin-bottom:10px">
+      <span style="font-size:13px;flex:1">🎟️ Fichas de álbum: <b style="color:var(--epi)">${toks}</b> <span class="dim" style="font-size:11px">(de la expedición)</span></span>
+      <button class="btn sm ${toks>=TOK_COST?'mag':''}" style="width:auto" data-act="tokenClaim" ${toks>=TOK_COST?'':'disabled'}>CANJEAR ${TOK_COST}🎟️</button>
+    </div>`:'';
   openOverlay(`<div class="album-modal">
     <div class="mrow" style="margin-bottom:8px"><b style="font-size:16px;color:var(--cyan)">Álbum de ${esc(s.season.label)}</b>
       <span class="dim">${s.owned}/${s.total}</span></div>
     ${storyBanner}
     <div class="mis-bar" style="margin-bottom:10px"><i style="width:${Math.round(s.owned/s.total*100)}%"></i></div>
     ${reward}
+    ${tokenRow}
     <div class="dim" style="font-size:11px;margin-bottom:8px">⭐ marco = destacada hoy (más probable en el huevo y la tienda)</div>
     <div class="alb-grid">${cells}</div>
     <button class="btn ghost cyan mt8" data-act="openCodex">📜 CÓDICE DEL MUNDO</button>
@@ -555,6 +562,27 @@ async function claimAlbum(){
     SFX.play('claim'); if(window.POC&&window.POC.confetti)window.POC.confetti();
     toast(`🏆 +${r.reward.coins}🪙 +${r.reward.gems}💎`); openAlbum(); }
   catch(e){ toast('No se pudo reclamar'); }
+}
+// Canje de fichas de álbum -> criatura del álbum que te falta (reveal).
+async function tokenClaim(){
+  try{
+    const r=await api('/album/token-claim',{method:'POST'});
+    if(r.user){ S.user=Object.assign(S.user||{},r.user); refreshChips(); }
+    const t=registerTpl(r.instance.template);
+    await refreshCollection();
+    SFX.play('claim'); buzz([30,40,30,40,80]); if(window.POC&&window.POC.confetti)window.POC.confetti();
+    openOverlay(`<div class="center reveal" style="position:relative"><div class="rays"></div>
+      <div style="position:relative;z-index:2">
+        <div style="font-family:var(--pixel);font-size:11px;color:var(--epi);margin-bottom:8px">🎟️ FICHA CANJEADA</div>
+        ${artTag(t,11)}
+        <div style="font-size:20px;font-weight:700;margin-top:6px">${esc(t.name)}</div>
+        <div class="mb8">${typePills(t)} <span class="rar-txt ${t.rarity}" style="font-weight:700">${t.rarity}</span></div>
+        <div class="dim" style="font-size:12px;margin-bottom:10px">¡Nueva para tu álbum!</div>
+        <button class="btn" data-act="openAlbum">SEGUIR</button>
+      </div></div>`);
+    renderCanvases($("#overlay"));
+  }catch(e){ const er=e.data&&e.data.error;
+    toast(er==='insufficient'?'Te faltan fichas (consíguelas en la expedición)':er==='album_complete'?'¡Ya tienes el álbum completo!':'No se pudo canjear'); }
 }
 async function openUnique(){
   openOverlay(`<div class="center"><div class="dim">Cargando…</div></div>`);
@@ -2290,7 +2318,7 @@ const ACTIONS={
   goHome:()=>{closeOverlay();go('home');},
   shareAig:(a)=>shareAig(a),
   openProfile:()=>openProfile(), editName:()=>editName(), claimAch:(a)=>claimAch(a),
-  openAlbum:()=>openAlbum(), claimAlbum:()=>claimAlbum(),
+  openAlbum:()=>openAlbum(), claimAlbum:()=>claimAlbum(), tokenClaim:()=>tokenClaim(),
   openUnique:()=>openUnique(), claimUnique:()=>claimUnique(),
   openPuzzle:()=>openPuzzle(), puzzlePlay:()=>puzzlePlay(), puzzleShare:(a)=>puzzleShare(a),
   openBoss:()=>openBoss(), bossFight:()=>bossFight(),
@@ -2499,19 +2527,24 @@ function expeditionHomeCard(exp){
     <div class="exp-status" id="exp-status">${exp.full?'🟢 ¡Equipo listo para volver!':'⛏ Explorando…'}</div>
     <div class="mis-bar" style="margin-top:6px"><i id="exp-bar" style="width:${exp.pct}%${exp.full?';background:var(--gold)':''}"></i></div>
     <div class="row mt8" style="justify-content:space-between;align-items:center">
-      <span style="font-size:14px">Botín: <b style="color:var(--gold)" id="exp-coins">${p.coins}</b>🪙 <b style="color:#bfe3ff" id="exp-dust">${p.dust}</b>✨</span>
+      <span style="font-size:14px">Botín: <b style="color:var(--gold)" id="exp-coins">${p.coins}</b>🪙 <b style="color:#bfe3ff" id="exp-dust">${p.dust}</b>✨ <b style="color:var(--epi)" id="exp-tok">${p.tokens||0}</b>🎟️</span>
       <button class="btn sm ${ready?'gold pulse':''}" id="exp-collect" style="width:auto;flex:0 0 auto" data-act="expeditionCollect" ${ready?'':'disabled'}>RECOGER</button></div>
     <div class="dim" style="font-size:10px;margin-top:6px" id="exp-full">${exp.full?'Al máximo — recoge para seguir acumulando':('Se llena en '+fmtHMS(new Date(exp.fullAt)-Date.now()))}</div>
   </div>`;
 }
 // Botín que sube EN VIVO (mismo cálculo que el servidor): da sensación idle real.
+function expeditionNavDot(full){ const b=document.querySelector('.nav button[data-screen="home"]'); if(b)b.classList.toggle('nav-dot',!!full); }
 function tickExpedition(){
-  const e=S.exp; if(!e) return; const el=$("#exp-coins"); if(!el) return;
+  const e=S.exp; if(!e) return;
   const capMs=e.capHours*3600000, since=Math.max(0,Date.now()-e.atMs);
+  const full=since>=capMs;
+  expeditionNavDot(full); // aviso "listo" en la pestaña Inicio (desde CUALQUIER pantalla)
+  const el=$("#exp-coins"); if(!el) return; // resto: solo si la tarjeta está visible
   const hours=Math.min(e.capHours, since/3600000);
   const coins=Math.floor(e.rate.coins*hours), dust=Math.floor(e.rate.dust*hours);
-  const full=since>=capMs, pct=Math.min(100,Math.round(since/capMs*100)), ready=coins>0||dust>0;
-  el.textContent=coins; const d=$("#exp-dust"); if(d)d.textContent=dust;
+  const tokens=Math.floor((e.rate.tokensPerHour||0)*hours);
+  const pct=Math.min(100,Math.round(since/capMs*100)), ready=coins>0||dust>0||tokens>0;
+  el.textContent=coins; const d=$("#exp-dust"); if(d)d.textContent=dust; const tk=$("#exp-tok"); if(tk)tk.textContent=tokens;
   const bar=$("#exp-bar"); if(bar){ bar.style.width=pct+'%'; bar.style.background=full?'var(--gold)':'var(--cyan)'; }
   const btn=$("#exp-collect"); if(btn){ btn.disabled=!ready; btn.classList.toggle('gold',ready); btn.classList.toggle('pulse',ready); }
   const st=$("#exp-status"); if(st)st.textContent=full?'🟢 ¡Equipo listo para volver!':'⛏ Explorando…';
@@ -2544,14 +2577,16 @@ async function expeditionCollect(){
   try{
     const r=await api('/expedition/collect',{method:'POST'});
     if(r.user){ S.user=Object.assign(S.user,r.user); refreshChips(); }
-    if(r.nothing||(r.collected.coins<=0&&r.collected.dust<=0)){ toast('Aún no hay nada que recoger'); renderHome(); return; }
+    const tok=r.collected.tokens||0;
+    if(r.nothing||(r.collected.coins<=0&&r.collected.dust<=0&&tok<=0)){ toast('Aún no hay nada que recoger'); renderHome(); return; }
     SFX.play('claim'); buzz([30,40,30,40,80]); if(window.POC&&window.POC.confetti)window.POC.confetti();
     openOverlay(`<div class="center reveal" style="position:relative"><div class="rays"></div>
       <div style="position:relative;z-index:2">
         <div style="font-family:var(--pixel);font-size:12px;color:var(--cyan);margin-bottom:8px">⛺ MIENTRAS NO ESTABAS</div>
         <div style="font-size:46px">🎁</div>
         <div style="font-size:14px;margin:8px 0">Tu equipo volvió de la expedición${r.hours?` (${r.hours}h)`:''} con:</div>
-        <div style="font-size:20px;font-weight:700;margin-bottom:12px"><span style="color:var(--gold)">+${r.collected.coins}</span> 🪙 &nbsp; <span style="color:#bfe3ff">+${r.collected.dust}</span> ✨</div>
+        <div style="font-size:20px;font-weight:700;margin-bottom:8px"><span style="color:var(--gold)">+${r.collected.coins}</span> 🪙 &nbsp; <span style="color:#bfe3ff">+${r.collected.dust}</span> ✨</div>
+        ${tok>0?`<div style="font-size:15px;color:var(--epi);font-weight:700;margin-bottom:10px">+${tok} 🎟️ ficha${tok>1?'s':''} de álbum <span class="dim" style="font-size:11px;font-weight:400">(canjéalas en el Álbum)</span></div>`:''}
         <button class="btn" data-act="goHome">¡GENIAL!</button>
       </div></div>`);
   }catch(e){ toast('No se pudo recoger'); }

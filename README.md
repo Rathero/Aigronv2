@@ -321,8 +321,16 @@ los RPG idle (AFK Arena…). Tu equipo acumula **monedas + polvo** mientras NO j
 ritmo que escala con el **poder del equipo** (15→48🪙/h) y con **tope** (`EXPEDITION_CAP_H`,
 12h) que invita a entrar ~2 veces al día. Server-authoritative y determinista (acumulado =
 `now − expedition_at` acotado), recogida **atómica** (optimistic lock) y pantalla **"mientras
-no estabas"** en INICIO. Guardarraíl: el idle da **economía**, nunca rating PvP ni ventaja
-de combate pagable.
+no estabas"** en INICIO. Guardarraíl: el idle da **economía/progresión**, nunca rating PvP ni
+ventaja de combate pagable.
+- **Botín de progresión**: además da **fichas de álbum** (~1 cada 4h, sin escalar con el
+  poder → justo para novatos) que se **canjean** (`/album/token-claim`, coste 3) por una
+  criatura del álbum **que aún no tienes** (prefiere las destacadas) → el idle ayuda a
+  completar la colección. Se ven y canjean en el Álbum.
+- **Aviso "listo"**: cuando la expedición llega al tope, un **punto dorado** aparece en la
+  pestaña **Inicio** del nav (visible desde cualquier pantalla) para traerte a recoger.
+  La tarjeta muestra el botín **subiendo en vivo**, los sprites del equipo "explorando" y un
+  botón **?** con la explicación (también slide de tutorial e intro única para existentes).
 
 ---
 

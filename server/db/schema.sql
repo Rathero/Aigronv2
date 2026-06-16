@@ -329,6 +329,9 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS def_rewards_date  DATE;
 -- (now - expedition_at) con tope, según el poder del equipo. DEFAULT now() ->
 -- nadie acumula retroactivamente al desplegar (todos empiezan desde el deploy).
 ALTER TABLE users ADD COLUMN IF NOT EXISTS expedition_at TIMESTAMPTZ NOT NULL DEFAULT now();
+-- Fichas de álbum: botín de PROGRESIÓN de la expedición. Se canjean por una
+-- criatura del álbum que aún NO tienes (ayuda a completar la colección).
+ALTER TABLE users ADD COLUMN IF NOT EXISTS album_tokens INT NOT NULL DEFAULT 0;
 
 -- Muro / chat de la constelación (texto plano; se ESCAPA al renderizar).
 CREATE TABLE IF NOT EXISTS guild_messages (

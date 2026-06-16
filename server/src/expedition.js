@@ -21,10 +21,16 @@ function ratePerHour(power) {
   const p = Math.max(0, power || 0);
   return { coins: 15 + Math.floor(p / 60), dust: 3 + Math.floor(p / 300) };
 }
+// Fichas de álbum (progresión): NO escalan con el poder (justas para novatos);
+// ~1 cada 4h -> hasta 3 por tope de 12h. Se canjean por una criatura que falta.
+const TOKENS_PER_HOUR = 1 / 4;
 function accrued(sinceMs, power) {
   const hours = Math.min(CAP_HOURS, Math.max(0, sinceMs / 3600000));
   const r = ratePerHour(power);
-  return { coins: Math.floor(r.coins * hours), dust: Math.floor(r.dust * hours), hours };
+  return {
+    coins: Math.floor(r.coins * hours), dust: Math.floor(r.dust * hours),
+    tokens: Math.floor(TOKENS_PER_HOUR * hours), hours,
+  };
 }
 
 // Estado para la UI: acumulado actual, ritmo, tope y cuándo se llena.
@@ -35,8 +41,8 @@ async function getState(userId, power) {
   const since = Date.now() - atMs;
   const acc = accrued(since, power);
   return {
-    pending: { coins: acc.coins, dust: acc.dust },
-    rate: ratePerHour(power),
+    pending: { coins: acc.coins, dust: acc.dust, tokens: acc.tokens },
+    rate: Object.assign(ratePerHour(power), { tokensPerHour: TOKENS_PER_HOUR }),
     capHours: CAP_HOURS,
     pct: Math.max(0, Math.min(100, Math.round((since / CAP_MS) * 100))),
     full: since >= CAP_MS,
@@ -52,15 +58,15 @@ async function collect(userId, power) {
   if (!row) return { error: "no_user" };
   const since = Date.now() - new Date(row.expedition_at).getTime();
   const acc = accrued(since, power);
-  if (acc.coins <= 0 && acc.dust <= 0) return { collected: { coins: 0, dust: 0 }, nothing: true };
+  if (acc.coins <= 0 && acc.dust <= 0 && acc.tokens <= 0) return { collected: { coins: 0, dust: 0, tokens: 0 }, nothing: true };
   const upd = await db.query(
-    `UPDATE users SET coins = coins + $2, dust = dust + $3, expedition_at = now()
+    `UPDATE users SET coins = coins + $2, dust = dust + $3, album_tokens = album_tokens + $5, expedition_at = now()
       WHERE id = $1 AND expedition_at IS NOT DISTINCT FROM $4
       RETURNING coins, dust`,
-    [userId, acc.coins, acc.dust, row.expedition_at]
+    [userId, acc.coins, acc.dust, row.expedition_at, acc.tokens]
   );
-  if (!upd.rowCount) return { collected: { coins: 0, dust: 0 }, raced: true };
-  return { collected: { coins: acc.coins, dust: acc.dust }, hours: Math.round(acc.hours * 10) / 10 };
+  if (!upd.rowCount) return { collected: { coins: 0, dust: 0, tokens: 0 }, raced: true };
+  return { collected: { coins: acc.coins, dust: acc.dust, tokens: acc.tokens }, hours: Math.round(acc.hours * 10) / 10 };
 }
 
 module.exports = { getState, collect, ratePerHour, CAP_HOURS };
